@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Description>Bounded CSV and JSON table readers and asynchronous provider contracts.</Description></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../ReportScene.Model/ReportScene.Model.csproj" /></ItemGroup>
+</Project>
