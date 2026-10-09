@@ -15,7 +15,7 @@ public partial class DesignerSnapshotJsonContext : System.Text.Json.Serializatio
 
 public sealed partial class ReportDesignerControl
 {
-    /// <summary>Read-only test/diagnostic data. Browser tests still deliver real pointer and keyboard input to the Uno controls.</summary>
+    /// <summary>Read-only test/diagnostic data. Browser tests deliver real pointer and keyboard input to the Uno controls.</summary>
     public DesignerSnapshot Snapshot()
     {
         bool Visible(FrameworkElement element)
@@ -35,7 +35,7 @@ public sealed partial class ReportDesignerControl
         var propertyBounds = new Dictionary<string, ElementBounds>(StringComparer.Ordinal);
         foreach (var pair in properties.Editors) if (Bounds(pair.Value) is { } bounds) propertyBounds[pair.Key] = bounds;
         var origin = Bounds(DesignView.CanvasElement);
-        var objects = DesignView.Layout.Objects.Select(entry => new ObjectSnapshot(entry.Item.Id, entry.Item.Name, entry.Item.GetType().Name, entry.Item.Bounds, entry.Item is TextItem text ? text.Text : null, Session.SelectedIds.Contains(entry.Item.Id), origin is null ? null : new(origin.X + entry.Bounds.X * DesignView.Scale, origin.Y + entry.Bounds.Y * DesignView.Scale, entry.Bounds.Width * DesignView.Scale, entry.Bounds.Height * DesignView.Scale))).ToArray();
+        var objects = DesignView.Layout.Objects.Select(entry => new ObjectSnapshot(entry.Item.Id, entry.Item.Name, entry.Item.GetType().Name, entry.Item.Bounds, entry.Item is TextItem text ? text.Text : null, Session.SelectedIds.Contains(entry.Item.Id), origin is null ? null : new(origin.X + entry.Bounds.X * DesignView.PointScale, origin.Y + entry.Bounds.Y * DesignView.PointScale, entry.Bounds.Width * DesignView.PointScale, entry.Bounds.Height * DesignView.PointScale))).ToArray();
         return new(Session.Document.Name, Session.IsDirty, previewMode, Session.Document.Pages.Count, PreviewView.Report?.Pages.Count ?? 0, PreviewView.PageIndex + 1, DocumentTree.AllItems(Session.Document).Count(), Session.SelectedIds.Count, Session.CanUndo, Session.CanRedo, Session.HistoryCount, previewMode ? PreviewView.Zoom : DesignView.Zoom, previewMode ? PreviewView.RenderCount : DesignView.RenderCount, status.Text, diagnostics.ToArray(), commandBounds, propertyBounds, objects);
     }
 }

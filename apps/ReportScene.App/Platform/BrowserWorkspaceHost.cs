@@ -40,11 +40,7 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
             timer.Tick += (_, _) =>
             {
                 timer.Stop();
-                try
-                {
-                    var results = Conformance.Run();
-                    Invoke("window.reportScene.tests=" + JsonSerializer.Serialize(results, ValidationJsonContext.Default.ListTestResult) + ";");
-                }
+                try { var results = ConformanceSuite.Run(); Invoke("window.reportScene.tests=" + JsonSerializer.Serialize(results, ValidationJsonContext.Default.ListTestResult) + ";"); }
                 catch (Exception e) { Invoke("window.reportScene.testFatal=" + J(e.ToString()) + ";"); }
             };
             timer.Start();

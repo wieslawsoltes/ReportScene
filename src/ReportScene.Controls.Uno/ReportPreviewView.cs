@@ -33,28 +33,28 @@ public sealed class ReportPreviewView : UserControl
     public void FitWidth() { if (report is not null && scroll.ViewportWidth > 0) Zoom = (scroll.ViewportWidth - 40) / report.Pages[pageIndex].Width / (96d / 72); }
     public void Refresh()
     {
-        surface.Page = report?.Pages.ElementAtOrDefault(pageIndex); surface.Scale = Zoom * 96 / 72;
-        if (surface.Page is { } page) { surface.Width = page.Width * surface.Scale; surface.Height = page.Height * surface.Scale; }
+        surface.Page = report?.Pages.ElementAtOrDefault(pageIndex); surface.PointScale = Zoom * 96 / 72;
+        if (surface.Page is { } page) { surface.Width = page.Width * surface.PointScale; surface.Height = page.Height * surface.PointScale; }
         surface.Invalidate(); ViewChanged?.Invoke();
     }
     public void Highlight(SearchHit? hit)
     {
         if (hit is not null) PageIndex = hit.Page - 1;
         surface.Highlight = hit?.Bounds; surface.Invalidate();
-        if (hit is not null) scroll.ChangeView(null, Math.Max(0, hit.Bounds.Y * surface.Scale - 100), null);
+        if (hit is not null) scroll.ChangeView(null, Math.Max(0, hit.Bounds.Y * surface.PointScale - 100), null);
     }
     private sealed class PreviewCanvas(ReportRenderer renderer) : SKCanvasElement
     {
         public PreparedPage? Page { get; set; }
         public RectD? Highlight { get; set; }
-        public double Scale { get; set; }
+        public double PointScale { get; set; }
         public long RenderCount { get; private set; }
         public event Action<Exception>? Failed;
         private string? lastError;
         protected override void RenderOverride(SKCanvas canvas, Size area)
         {
             if (Page is null) return;
-            canvas.Save(); canvas.Scale((float)Scale); RenderCount++;
+            canvas.Save(); canvas.Scale((float)PointScale); RenderCount++;
             try
             {
                 var clip = canvas.LocalClipBounds;

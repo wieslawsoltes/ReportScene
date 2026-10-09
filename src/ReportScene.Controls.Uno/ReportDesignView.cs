@@ -22,7 +22,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public ReportRenderer Renderer { get; }
     public bool ShowGrid { get => surface.ShowGrid; set { surface.ShowGrid = value; surface.Invalidate(); } }
     public double Zoom { get => zoom; set { zoom = Math.Clamp(value, .15, 4); Refresh(); } }
-    public double Scale => Zoom * 96 / 72;
+    public double PointScale => Zoom * 96 / 72;
     public DesignLayout Layout => surface.Layout;
     public long RenderCount => surface.RenderCount;
     public FrameworkElement CanvasElement => surface;
@@ -38,7 +38,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
         ControlTheme.Identify(this, "report-design-view", "Report design surface");
         surface.PointerPressed += Pressed; surface.PointerMoved += Moved; surface.PointerReleased += Released;
         surface.PointerCanceled += (_, _) => Cancel(); surface.PointerCaptureLost += (_, _) => { if (dragging || marquee) Cancel(); };
-        surface.DoubleTapped += (_, e) => { var p = e.GetPosition(surface); var hit = surface.Layout.HitTest(p.X / Scale, p.Y / Scale); if (hit is not null) EditRequested?.Invoke(hit.Item); e.Handled = true; };
+        surface.DoubleTapped += (_, e) => { var p = e.GetPosition(surface); var hit = surface.Layout.HitTest(p.X / PointScale, p.Y / PointScale); if (hit is not null) EditRequested?.Invoke(hit.Item); e.Handled = true; };
         surface.PointerWheelChanged += (_, e) => { if ((e.KeyModifiers & VirtualKeyModifiers.Control) != 0) { Zoom *= e.GetCurrentPoint(surface).Properties.MouseWheelDelta > 0 ? 1.1 : 1 / 1.1; e.Handled = true; } };
         surface.RenderFailed += e => Failed?.Invoke(e);
         KeyDown += OnKeyDown;
@@ -49,26 +49,26 @@ public sealed class ReportDesignView : UserControl, IDisposable
     private void SelectionChanged(object? sender, EventArgs e) { surface.Invalidate(); ViewChanged?.Invoke(); }
     public void Refresh()
     {
-        surface.Layout = DesignLayout.Create(Session.Page); surface.Scale = Scale;
-        surface.Width = surface.Layout.Width * Scale; surface.Height = surface.Layout.Height * Scale;
+        surface.Layout = DesignLayout.Create(Session.Page); surface.PointScale = PointScale;
+        surface.Width = surface.Layout.Width * PointScale; surface.Height = surface.Layout.Height * PointScale;
         surface.Invalidate(); ViewChanged?.Invoke();
     }
     public void FitWidth() { if (scroll.ViewportWidth > 0) Zoom = Math.Max(.15, (scroll.ViewportWidth - 20) / surface.Layout.Width / (96d / 72)); }
     public void ScrollToSelection()
     {
         var item = surface.Layout.Objects.FirstOrDefault(i => Session.SelectedIds.Contains(i.Item.Id));
-        if (item is not null) scroll.ChangeView(Math.Max(0, item.Bounds.X * Scale - 80), Math.Max(0, item.Bounds.Y * Scale - 80), null);
+        if (item is not null) scroll.ChangeView(Math.Max(0, item.Bounds.X * PointScale - 80), Math.Max(0, item.Bounds.Y * PointScale - 80), null);
     }
     private void Pressed(object sender, PointerRoutedEventArgs e)
     {
         var pointer = e.GetCurrentPoint(surface);
-        if (!pointer.Properties.IsLeftButtonPressed && pointer.PointerDevice.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse) return;
+        if (!pointer.Properties.IsLeftButtonPressed && pointer.PointerDevice.PointerDeviceType == Windows.Devices.Input.PointerDeviceType.Mouse) return;
         Focus(FocusState.Pointer);
-        start = new(pointer.Position.X / Scale, pointer.Position.Y / Scale);
+        start = new(pointer.Position.X / PointScale, pointer.Position.Y / PointScale);
         additive = (e.KeyModifiers & VirtualKeyModifiers.Control) != 0;
         var hit = surface.Layout.HitTest(start.X, start.Y);
         var selected = surface.Layout.Objects.LastOrDefault(o => Session.SelectedIds.Contains(o.Item.Id) && !o.Item.Locked);
-        resizing = selected is not null && Math.Abs(start.X - selected.Bounds.Right) < 7 / Scale && Math.Abs(start.Y - selected.Bounds.Bottom) < 7 / Scale;
+        resizing = selected is not null && Math.Abs(start.X - selected.Bounds.Right) < 7 / PointScale && Math.Abs(start.Y - selected.Bounds.Bottom) < 7 / PointScale;
         if (resizing) { dragging = true; Session.BeginDrag(); }
         else if (hit is not null)
         {
@@ -86,7 +86,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     private void Moved(object sender, PointerRoutedEventArgs e)
     {
         if (!dragging && !marquee) return;
-        var p = e.GetCurrentPoint(surface).Position; double x = p.X / Scale, y = p.Y / Scale;
+        var p = e.GetCurrentPoint(surface).Position; double x = p.X / PointScale, y = p.Y / PointScale;
         if (dragging) Session.PreviewDrag(x - start.X, y - start.Y, resizing);
         else { surface.Marquee = new(Math.Min(start.X, x), Math.Min(start.Y, y), Math.Abs(x - start.X), Math.Abs(y - start.Y)); surface.Invalidate(); }
         e.Handled = true;
@@ -117,12 +117,12 @@ public sealed class ReportDesignView : UserControl, IDisposable
         }
         catch (Exception ex) { Failed?.Invoke(ex); }
     }
-    public void Dispose() { Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectionChanged; }
+    public new void Dispose() { Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectionChanged; base.Dispose(); }
 
     private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer) : SKCanvasElement
     {
         public DesignLayout Layout { get; set; } = DesignLayout.Create(session.Page);
-        public double Scale { get; set; } = 1;
+        public double PointScale { get; set; } = 1;
         public bool ShowGrid { get; set; } = true;
         public RectD? Marquee { get; set; }
         public long RenderCount { get; private set; }
@@ -130,7 +130,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
         private string? lastError;
         protected override void RenderOverride(SKCanvas canvas, Size area)
         {
-            canvas.Save(); canvas.Scale((float)Scale); RenderCount++;
+            canvas.Save(); canvas.Scale((float)PointScale); RenderCount++;
             using var paint = new SKPaint { IsAntialias = false };
             try
             {
@@ -145,7 +145,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
                     if (session.BandId == band.Band.Id) { paint.Color = ReportRenderer.Color("#C2D7EB"); canvas.DrawRect((float)band.LabelBounds.X, (float)band.LabelBounds.Y, 4, (float)band.LabelBounds.Height, paint); }
                     renderer.DrawText(canvas, band.Band.Kind.ToString(), new(7, band.LabelBounds.Y + 3, 100, 16), new() { FontSize = 8, Bold = true, Padding = 0, Foreground = "#354454" });
                     if (band.LabelBounds.Height > 31) renderer.DrawText(canvas, band.Band.Name, new(7, band.LabelBounds.Y + 18, 100, 14), new() { FontSize = 7, Padding = 0, Foreground = "#667380" });
-                    paint.Color = ReportRenderer.Color("#8CA1B4"); paint.StrokeWidth = (float)(1 / Scale); canvas.DrawLine(0, (float)band.Bounds.Bottom, (float)paper.Right, (float)band.Bounds.Bottom, paint);
+                    paint.Color = ReportRenderer.Color("#8CA1B4"); paint.StrokeWidth = (float)(1 / PointScale); canvas.DrawLine(0, (float)band.Bounds.Bottom, (float)paper.Right, (float)band.Bounds.Bottom, paint);
                     if (ShowGrid)
                     {
                         paint.Color = ReportRenderer.Color("#CBD0D5");
@@ -165,13 +165,13 @@ public sealed class ReportDesignView : UserControl, IDisposable
                         paint.Color = ReportRenderer.Color("#FFF0ED"); canvas.DrawRect(ReportRenderer.Rect(entry.Bounds), paint);
                         renderer.DrawText(canvas, error.Message, entry.Bounds, new() { FontSize = 8, Foreground = "#A3372E" });
                     }
-                    paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = (float)(1 / Scale); paint.Color = ReportRenderer.Color("#A4B3C1");
+                    paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = (float)(1 / PointScale); paint.Color = ReportRenderer.Color("#A4B3C1");
                     using (var dash = SKPathEffect.CreateDash([2, 2], 0)) { paint.PathEffect = dash; canvas.DrawRect(ReportRenderer.Rect(entry.Bounds), paint); paint.PathEffect = null; }
                     paint.Style = SKPaintStyle.Fill;
                     if (session.SelectedIds.Contains(entry.Item.Id))
                     {
-                        paint.Color = ReportRenderer.Color("#2874B8"); paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = (float)(1.5 / Scale); canvas.DrawRect(ReportRenderer.Rect(entry.Bounds), paint); paint.Style = SKPaintStyle.Fill;
-                        double size = 5 / Scale;
+                        paint.Color = ReportRenderer.Color("#2874B8"); paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = (float)(1.5 / PointScale); canvas.DrawRect(ReportRenderer.Rect(entry.Bounds), paint); paint.Style = SKPaintStyle.Fill;
+                        double size = 5 / PointScale;
                         foreach (var (x, y) in new[] { (entry.Bounds.X, entry.Bounds.Y), (entry.Bounds.Right, entry.Bounds.Y), (entry.Bounds.X, entry.Bounds.Bottom), (entry.Bounds.Right, entry.Bounds.Bottom) })
                             canvas.DrawRect((float)(x - size / 2), (float)(y - size / 2), (float)size, (float)size, paint);
                     }
