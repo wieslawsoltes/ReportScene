@@ -1,0 +1,7 @@
+<Project Sdk="Uno.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><UnoFeatures>Skia;</UnoFeatures><Description>Reusable GPU report design surface, preview surface, property sheet and vector icon controls for Uno Platform.</Description></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ReportScene.Designer/ReportScene.Designer.csproj" />
+    <ProjectReference Include="../ReportScene.Rendering.Skia/ReportScene.Rendering.Skia.csproj" />
+  </ItemGroup>
+</Project>

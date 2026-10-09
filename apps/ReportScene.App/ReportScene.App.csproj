@@ -1,0 +1,22 @@
+<Project Sdk="Uno.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-browserwasm;net10.0-desktop</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <UnoSingleProject>true</UnoSingleProject>
+    <UnoFeatures>SkiaRenderer;Skia;</UnoFeatures>
+    <ApplicationTitle>ReportScene</ApplicationTitle>
+    <ApplicationId>org.reportscene.designer</ApplicationId>
+    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <IsPackable>false</IsPackable>
+    <WasmShellMonoRuntimeExecutionMode>Interpreter</WasmShellMonoRuntimeExecutionMode>
+    <WasmShellEnableJiterpreter>true</WasmShellEnableJiterpreter>
+    <WasmShellWebAppBasePath Condition="'$(WasmShellWebAppBasePath)' == ''">./</WasmShellWebAppBasePath>
+    <WasmShellGeneratePWAAssets>false</WasmShellGeneratePWAAssets>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/ReportScene.Designer.Uno/ReportScene.Designer.Uno.csproj" />
+    <ProjectReference Include="../../src/ReportScene.Validation/ReportScene.Validation.csproj" />
+    <EmbeddedResource Include="Platform/BrowserBridge.js" LogicalName="ReportScene.BrowserBridge.js" />
+  </ItemGroup>
+</Project>

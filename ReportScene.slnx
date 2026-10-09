@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ReportScene.Model/ReportScene.Model.csproj" />
+    <Project Path="src/ReportScene.Expressions/ReportScene.Expressions.csproj" />
+    <Project Path="src/ReportScene.Data/ReportScene.Data.csproj" />
+    <Project Path="src/ReportScene.Engine/ReportScene.Engine.csproj" />
+    <Project Path="src/ReportScene.Serialization/ReportScene.Serialization.csproj" />
+    <Project Path="src/ReportScene.Designer/ReportScene.Designer.csproj" />
+    <Project Path="src/ReportScene.Rendering.Skia/ReportScene.Rendering.Skia.csproj" />
+    <Project Path="src/ReportScene.Export/ReportScene.Export.csproj" />
+    <Project Path="src/ReportScene.Controls.Uno/ReportScene.Controls.Uno.csproj" />
+    <Project Path="src/ReportScene.Designer.Uno/ReportScene.Designer.Uno.csproj" />
+    <Project Path="src/ReportScene.Samples/ReportScene.Samples.csproj" />
+    <Project Path="src/ReportScene.Validation/ReportScene.Validation.csproj" />
+  </Folder>
+  <Folder Name="/apps/"><Project Path="apps/ReportScene.App/ReportScene.App.csproj" /></Folder>
+  <Folder Name="/tests/"><Project Path="tests/ReportScene.Tests/ReportScene.Tests.csproj" /></Folder>
+</Solution>

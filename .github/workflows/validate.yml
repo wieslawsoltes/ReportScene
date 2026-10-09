@@ -12,20 +12,102 @@ concurrency:
 jobs:
   core:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
       - name: Build and run conformance suite
-        run: dotnet run --project tests/ReportScene.Tests -c Release
-      - name: Build reusable packages
+        run: |
+          mkdir -p artifacts
+          dotnet run --project tests/ReportScene.Tests -c Release 2>&1 | tee artifacts/conformance.log
+      - name: Build reusable core packages
         run: |
           for project in src/ReportScene.Model src/ReportScene.Expressions src/ReportScene.Data src/ReportScene.Engine src/ReportScene.Serialization src/ReportScene.Designer src/ReportScene.Rendering.Skia src/ReportScene.Export src/ReportScene.Samples; do
             dotnet pack "$project" -c Release -o artifacts/packages
           done
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: core-packages
+          name: core-validation
+          path: artifacts
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build desktop application and reusable Uno controls
+        run: dotnet build apps/ReportScene.App -c Release -f net10.0-desktop -p:TargetFrameworks=net10.0-desktop
+      - name: Pack Uno libraries
+        run: |
+          dotnet pack src/ReportScene.Controls.Uno -c Release -o artifacts/packages
+          dotnet pack src/ReportScene.Designer.Uno -c Release -o artifacts/packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uno-packages
           path: artifacts/packages
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install WebAssembly workload
+        run: dotnet workload install wasm-tools
+      - name: Publish actual Uno WebAssembly application
+        run: |
+          dotnet publish apps/ReportScene.App -c Release -f net10.0-browserwasm -p:TargetFrameworks=net10.0-browserwasm -p:WasmShellWebAppBasePath=/ReportScene/ -o artifacts/wasm
+          python3 scripts/stage-browser.py artifacts/wasm artifacts/site artifacts/testsite/ReportScene
+      - name: Install browser test dependencies
+        run: |
+          npm install --prefix tests/browser
+          cd tests/browser
+          npx playwright install --with-deps chromium
+      - name: Run real browser interaction and .NET conformance tests
+        run: |
+          python3 -m http.server 8000 --directory artifacts/testsite > artifacts/http.log 2>&1 &
+          cd tests/browser
+          npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-validation
+          path: |
+            tests/browser/test-results
+            tests/browser/playwright-report
+            artifacts/http.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-app
+          path: artifacts/site
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: artifacts/site
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [core, desktop, browser]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Deploy tested application
+        id: deployment
+        uses: actions/deploy-pages@v4

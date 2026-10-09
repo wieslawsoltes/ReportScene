@@ -1,0 +1,9 @@
+<Project Sdk="Uno.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><UnoFeatures>Skia;</UnoFeatures><Description>Embeddable Uno report designer workspace, ribbon, data and report trees, property editing and preview/export UI.</Description></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ReportScene.Controls.Uno/ReportScene.Controls.Uno.csproj" />
+    <ProjectReference Include="../ReportScene.Engine/ReportScene.Engine.csproj" />
+    <ProjectReference Include="../ReportScene.Export/ReportScene.Export.csproj" />
+    <ProjectReference Include="../ReportScene.Samples/ReportScene.Samples.csproj" />
+  </ItemGroup>
+</Project>

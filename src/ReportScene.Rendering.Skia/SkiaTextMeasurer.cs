@@ -7,10 +7,18 @@ namespace ReportScene.Rendering.Skia;
 /// <summary>Own one instance per rendering/preparation thread; dispose it with the containing view or export operation.</summary>
 public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
 {
-    private sealed record Face(SKTypeface Typeface, SKShaper Shaper);
+    private sealed record Face(SKTypeface Typeface, SKShaper Shaper, bool Fallback);
     private readonly Dictionary<(string Family, bool Bold, bool Italic), Face> faces = new();
     private readonly Dictionary<(string Text, string Family, bool Bold, bool Italic, double Size), double> widths = new();
+    private static byte[]? fallbackFont;
     private bool disposed;
+    /// <summary>Hosts without a system font manager can supply a licensed font from their own application assets before creating report views.</summary>
+    public static void SetFallbackFont(byte[] fontData)
+    {
+        if (fontData.Length is 0 or > 16_000_000) throw new ArgumentException("The fallback font must be between 1 byte and 16 MB.");
+        using var data = SKData.CreateCopy(fontData); using var face = SKTypeface.FromData(data) ?? throw new FormatException("The supplied fallback font is invalid.");
+        fallbackFont = fontData.ToArray();
+    }
     private Face GetFace(ItemStyle style)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -18,11 +26,20 @@ public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
         if (faces.TryGetValue(key, out var cached)) return cached;
         if (faces.Count >= 128) { foreach (var face in faces.Values) { face.Shaper.Dispose(); face.Typeface.Dispose(); } faces.Clear(); widths.Clear(); }
         var fontStyle = new SKFontStyle(style.Bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal, SKFontStyleWidth.Normal, style.Italic ? SKFontStyleSlant.Italic : SKFontStyleSlant.Upright);
-        var typeface = SKTypeface.FromFamilyName(style.FontFamily, fontStyle) ?? SKTypeface.FromFamilyName(null, fontStyle) ?? throw new InvalidOperationException("No system font is available. Register a font before preparing reports.");
-        var result = new Face(typeface, new SKShaper(typeface));
+        SKTypeface? typeface = null; bool fallback = false;
+        if (!OperatingSystem.IsBrowser()) typeface = SKTypeface.FromFamilyName(style.FontFamily, fontStyle);
+        if (typeface is null && fallbackFont is { } bytes)
+        { using var data = SKData.CreateCopy(bytes); typeface = SKTypeface.FromData(data); fallback = true; }
+        typeface ??= SKTypeface.FromFamilyName(null, fontStyle);
+        if (typeface is null) throw new InvalidOperationException("No font is available. Register a fallback font before preparing reports.");
+        var result = new Face(typeface, new SKShaper(typeface), fallback);
         faces.Add(key, result); return result;
     }
-    public SKFont CreateFont(ItemStyle style) => new(GetFace(style).Typeface, (float)style.FontSize) { Edging = SKFontEdging.Antialias, Subpixel = true };
+    public SKFont CreateFont(ItemStyle style)
+    {
+        var face = GetFace(style);
+        return new(face.Typeface, (float)style.FontSize) { Edging = SKFontEdging.Antialias, Subpixel = true, Embolden = face.Fallback && style.Bold, SkewX = face.Fallback && style.Italic ? -.2f : 0 };
+    }
     public double MeasureWidth(string text, ItemStyle style)
     {
         if (text.Length == 0) return 0;
