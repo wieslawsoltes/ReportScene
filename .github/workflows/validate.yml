@@ -22,7 +22,7 @@ jobs:
         run: dotnet run --project tests/ReportScene.Tests -c Release
       - name: Build reusable packages
         run: |
-          for project in src/ReportScene.Model src/ReportScene.Expressions src/ReportScene.Data; do
+          for project in src/ReportScene.Model src/ReportScene.Expressions src/ReportScene.Data src/ReportScene.Engine src/ReportScene.Serialization src/ReportScene.Designer src/ReportScene.Rendering.Skia src/ReportScene.Export src/ReportScene.Samples; do
             dotnet pack "$project" -c Release -o artifacts/packages
           done
       - uses: actions/upload-artifact@v4

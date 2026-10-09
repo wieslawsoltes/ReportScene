@@ -7,5 +7,6 @@
     <ProjectReference Include="../ReportScene.Serialization/ReportScene.Serialization.csproj" />
     <ProjectReference Include="../ReportScene.Designer/ReportScene.Designer.csproj" />
     <ProjectReference Include="../ReportScene.Samples/ReportScene.Samples.csproj" />
+    <ProjectReference Include="../ReportScene.Export/ReportScene.Export.csproj" />
   </ItemGroup>
 </Project>
