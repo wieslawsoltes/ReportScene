@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Description>Deterministic band pagination, grouping, master/detail and prepared-page generation.</Description></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../ReportScene.Expressions/ReportScene.Expressions.csproj" /></ItemGroup>
+</Project>

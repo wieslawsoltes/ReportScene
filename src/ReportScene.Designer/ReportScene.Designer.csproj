@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Description>UI-independent selection, hit testing, transactional editing, clipboard and undo/redo.</Description></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../ReportScene.Serialization/ReportScene.Serialization.csproj" /></ItemGroup>
+</Project>

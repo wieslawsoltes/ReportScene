@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Description>Deterministic invoice, grouped sales, master/detail, labels and chart/table report examples.</Description></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../ReportScene.Model/ReportScene.Model.csproj" /></ItemGroup>
+</Project>

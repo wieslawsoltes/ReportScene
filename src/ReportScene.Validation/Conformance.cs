@@ -42,7 +42,7 @@ public static partial class Conformance
         Test("round to even", () => Equal(2m, e.Evaluate("Round(2.5)", c).AsNumber()));
         Test("VB-style operators", () => Equal(true, e.Evaluate("Not false And 3 <> 4", c).AsBoolean()));
         Test("text expressions", () => Equal("Total: 25.00", e.Interpolate("Total: [Price * Qty]", c, "F2")));
-        Test("nested field interpolation", () => Equal("25", e.Interpolate("[[Sales.Price] * [Sales.Qty]]", c)));
+        Test("nested field interpolation preserves decimal scale", () => Equal("25.00", e.Interpolate("[[Sales.Price] * [Sales.Qty]]", c)));
         Test("escaped expression delimiter", () => Equal("[literal]", e.Interpolate("\\[literal\\]", c)));
         Test("unknown fields rejected", () => Throws<ExpressionException>(() => e.Evaluate("Missing", c)));
         Test("arbitrary runtime calls rejected", () => Throws<ExpressionException>(() => e.Evaluate("System.IO.File.ReadAllText('secret')", c)));

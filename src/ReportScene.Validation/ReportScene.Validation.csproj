@@ -3,5 +3,9 @@
   <ItemGroup>
     <ProjectReference Include="../ReportScene.Expressions/ReportScene.Expressions.csproj" />
     <ProjectReference Include="../ReportScene.Data/ReportScene.Data.csproj" />
+    <ProjectReference Include="../ReportScene.Engine/ReportScene.Engine.csproj" />
+    <ProjectReference Include="../ReportScene.Serialization/ReportScene.Serialization.csproj" />
+    <ProjectReference Include="../ReportScene.Designer/ReportScene.Designer.csproj" />
+    <ProjectReference Include="../ReportScene.Samples/ReportScene.Samples.csproj" />
   </ItemGroup>
 </Project>
