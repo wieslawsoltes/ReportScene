@@ -17,28 +17,28 @@ public sealed partial class ReportDesignerControl
             var band = Session.SelectedBand;
             if (band is null) { objectName.Text = "Report properties"; properties.ReadOnly("Name", Session.Document.Name); properties.ReadOnly("Pages", Session.Document.Pages.Count.ToString()); properties.ReadOnly("Units", "Points (1/72 inch)"); return; }
             objectName.Text = band.Name + " · " + band.Kind;
-            void Edit(Func<Band, Band> change) { var current = Session.SelectedBand ?? throw new InvalidOperationException("No band selected."); Session.UpdateBand(change(current)); }
+            void EditBand(Func<Band, Band> change) { var current = Session.SelectedBand ?? throw new InvalidOperationException("No band selected."); Session.UpdateBand(change(current)); }
             properties.Category("Band");
-            properties.Text("Name", band.Name, text => Edit(b => b with { Name = RequireName(text) }), "band-name");
+            properties.Text("Name", band.Name, text => EditBand(b => b with { Name = RequireName(text) }), "band-name");
             properties.ReadOnly("Kind", band.Kind.ToString(), "band-kind");
-            properties.Number("Height", band.Height, n => Edit(b => b with { Height = Positive(n, "Height", true) }), "band-height");
+            properties.Number("Height", band.Height, n => EditBand(b => b with { Height = Positive(n, "Height", true) }), "band-height");
             if (band.Kind == BandKind.Data)
             {
                 properties.Category("Data");
-                properties.Choice("Data source", new[] { "" }.Concat(Session.Document.Data.Select(t => t.Name)), band.DataSource ?? "", name => Edit(b => b with { DataSource = EmptyNull(name) }), "band-source");
-                properties.Text("Filter", band.Filter ?? "", text => Edit(b => b with { Filter = EmptyNull(text) }), "band-filter");
-                properties.Text("Sort", string.Join("; ", band.Sort.Select(s => s.Expression + (s.Descending ? " DESC" : " ASC"))), text => Edit(b => b with { Sort = ParseSort(text) }), "band-sort");
-                properties.Text("Parent key", band.ParentKey ?? "", text => Edit(b => b with { ParentKey = EmptyNull(text) }), "band-parent-key");
-                properties.Text("Child key", band.ChildKey ?? "", text => Edit(b => b with { ChildKey = EmptyNull(text) }), "band-child-key");
+                properties.Choice("Data source", new[] { "" }.Concat(Session.Document.Data.Select(t => t.Name)), band.DataSource ?? "", name => EditBand(b => b with { DataSource = EmptyNull(name) }), "band-source");
+                properties.Text("Filter", band.Filter ?? "", text => EditBand(b => b with { Filter = EmptyNull(text) }), "band-filter");
+                properties.Text("Sort", string.Join("; ", band.Sort.Select(s => s.Expression + (s.Descending ? " DESC" : " ASC"))), text => EditBand(b => b with { Sort = ParseSort(text) }), "band-sort");
+                properties.Text("Parent key", band.ParentKey ?? "", text => EditBand(b => b with { ParentKey = EmptyNull(text) }), "band-parent-key");
+                properties.Text("Child key", band.ChildKey ?? "", text => EditBand(b => b with { ChildKey = EmptyNull(text) }), "band-child-key");
                 properties.ReadOnly("Groups", band.Groups.Count.ToString());
             }
             properties.Category("Behavior");
-            properties.Boolean("Can split", band.CanSplit, value => Edit(b => b with { CanSplit = value }), "band-can-split");
-            properties.Boolean("Keep with next", band.KeepWithNext, value => Edit(b => b with { KeepWithNext = value }), "band-keep-next");
-            properties.Boolean("New page", band.StartNewPage, value => Edit(b => b with { StartNewPage = value }), "band-new-page");
-            properties.Boolean("Repeat header", band.RepeatHeader, value => Edit(b => b with { RepeatHeader = value }), "band-repeat-header");
-            properties.Text("Visible when", band.VisibleExpression ?? "", value => Edit(b => b with { VisibleExpression = EmptyNull(value) }), "band-visible");
-            properties.Text("Alternate fill", band.AlternateFill ?? "", value => Edit(b => b with { AlternateFill = value.Length == 0 ? null : ValidColor(value) }), "band-alternate-fill");
+            properties.Boolean("Can split", band.CanSplit, value => EditBand(b => b with { CanSplit = value }), "band-can-split");
+            properties.Boolean("Keep with next", band.KeepWithNext, value => EditBand(b => b with { KeepWithNext = value }), "band-keep-next");
+            properties.Boolean("New page", band.StartNewPage, value => EditBand(b => b with { StartNewPage = value }), "band-new-page");
+            properties.Boolean("Repeat header", band.RepeatHeader, value => EditBand(b => b with { RepeatHeader = value }), "band-repeat-header");
+            properties.Text("Visible when", band.VisibleExpression ?? "", value => EditBand(b => b with { VisibleExpression = EmptyNull(value) }), "band-visible");
+            properties.Text("Alternate fill", band.AlternateFill ?? "", value => EditBand(b => b with { AlternateFill = value.Length == 0 ? null : ValidColor(value) }), "band-alternate-fill");
             return;
         }
         var first = items[0];

@@ -139,14 +139,14 @@ public sealed partial class ReportDesignerControl
         }
         if (item is BarcodeItem code)
         {
-            var text = new TextBox { Header = "Text or expression", Text = code.Text };
+            var barcodeText = new TextBox { Header = "Text or expression", Text = code.Text };
             var kind = new ComboBox { Header = "Symbology", ItemsSource = Enum.GetNames<BarcodeKind>(), SelectedItem = code.Symbology.ToString(), HorizontalAlignment = HorizontalAlignment.Stretch };
             var caption = new CheckBox { Content = "Show human-readable text", IsChecked = code.ShowText };
-            await DialogAsync("Barcode", Vertical(text, kind, caption), () =>
+            await DialogAsync("Barcode", Vertical(barcodeText, kind, caption), () =>
             {
                 var symbology = Enum.Parse<BarcodeKind>((string)kind.SelectedItem);
-                if (!text.Text.Contains('[')) _ = renderer.EncodeBarcode(symbology, text.Text);
-                Session.UpdateSelection("Edit barcode", i => i is BarcodeItem b ? b with { Text = text.Text, Symbology = symbology, ShowText = caption.IsChecked == true } : i);
+                if (!barcodeText.Text.Contains('[')) _ = renderer.EncodeBarcode(symbology, barcodeText.Text);
+                Session.UpdateSelection("Edit barcode", i => i is BarcodeItem b ? b with { Text = barcodeText.Text, Symbology = symbology, ShowText = caption.IsChecked == true } : i);
             }); return;
         }
         if (item is ChartItem)
