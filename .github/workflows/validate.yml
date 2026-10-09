@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 concurrency:
   group: validate-${{ github.ref }}
   cancel-in-progress: true
@@ -41,7 +44,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Build desktop application and reusable Uno controls
-        run: dotnet build apps/ReportScene.App -c Release -f net10.0-desktop -p:TargetFrameworks=net10.0-desktop
+        run: dotnet build apps/ReportScene.App -c Release -f net10.0-desktop -p:ReportSceneTargetFramework=net10.0-desktop
       - name: Pack Uno libraries
         run: |
           dotnet pack src/ReportScene.Controls.Uno -c Release -o artifacts/packages
@@ -65,7 +68,7 @@ jobs:
         run: dotnet workload install wasm-tools
       - name: Publish actual Uno WebAssembly application
         run: |
-          dotnet publish apps/ReportScene.App -c Release -f net10.0-browserwasm -p:TargetFrameworks=net10.0-browserwasm -p:WasmShellWebAppBasePath=/ReportScene/ -o artifacts/wasm
+          dotnet publish apps/ReportScene.App -c Release -f net10.0-browserwasm -p:ReportSceneTargetFramework=net10.0-browserwasm -p:WasmShellWebAppBasePath=/ReportScene/ -o artifacts/wasm
           python3 scripts/stage-browser.py artifacts/wasm artifacts/site artifacts/testsite/ReportScene
       - name: Install browser test dependencies
         run: |
