@@ -12,6 +12,8 @@ namespace ReportScene.Serialization;
 [JsonSerializable(typeof(Band))]
 [JsonSerializable(typeof(GroupDefinition))]
 [JsonSerializable(typeof(ItemStyle))]
+[JsonSerializable(typeof(MatrixDimension))]
+[JsonSerializable(typeof(MatrixMeasure))]
 [JsonSerializable(typeof(List<ReportItem>))]
 [JsonSerializable(typeof(List<Diagnostic>))]
 [JsonSerializable(typeof(DataTable))]
@@ -72,10 +74,8 @@ public static class ReportJson
         => Merge(node, JsonSerializer.SerializeToNode(value, info)!.AsObject());
     private static void Merge(JsonObject node, JsonObject defaults)
     {
-        // Source-generated deserialization of init-only members can overwrite property
-        // initializers with default(T) for missing JSON properties (dotnet/runtime#84484).
-        // Populate the versioned wire schema explicitly, retaining immutable model records
-        // and reflection-free WebAssembly serialization. Explicit null is not omission.
+        // Populate omitted init-only values explicitly for reflection-free source-generated
+        // WebAssembly deserialization. An explicit null is not an omitted property.
         foreach (var pair in defaults)
         {
             if (!node.ContainsKey(pair.Key)) node.Add(pair.Key, pair.Value?.DeepClone());
@@ -104,12 +104,19 @@ public static class ReportJson
         ReportItem defaults = type switch
         {
             "text" => new TextItem(), "shape" => new ShapeItem(), "image" => new ImageItem(), "checkbox" => new CheckBoxItem(),
-            "barcode" => new BarcodeItem(), "chart" => new ChartItem(), "table" => new TableItem(),
+            "barcode" => new BarcodeItem(), "chart" => new ChartItem(), "table" => new TableItem(), "matrix" => new MatrixItem(),
             _ => throw new FormatException($"Unknown report object type '{type}'.")
         };
         var defaultNode = JsonSerializer.SerializeToNode(new List<ReportItem> { defaults }, Context.ListReportItem)![0]!.AsObject();
         Merge(item, defaultNode);
         DefaultsObject(item, "bounds", defaultNode["bounds"]!.AsObject());
         NormalizeStyle(Object(item["style"], "object style"));
+        if (type == "matrix")
+        {
+            foreach (var node in Array(item, "rowDimensions").Concat(Array(item, "columnDimensions")))
+                Defaults(Object(node, "matrix dimension"), new MatrixDimension(), Context.MatrixDimension);
+            foreach (var node in Array(item, "measures"))
+                Defaults(Object(node, "matrix measure"), new MatrixMeasure(), Context.MatrixMeasure);
+        }
     }
 }

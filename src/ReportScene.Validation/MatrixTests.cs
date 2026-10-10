@@ -11,10 +11,10 @@ public static class MatrixTests
         { try { action(); return new("matrix: " + name, true); } catch (Exception e) { return new("matrix: " + name, false, e.ToString()); } }
         void Equal<T>(T expected, T actual) => Conformance.Equal(expected, actual);
         DataRow Row(Value r, Value c, Value v) => new() { ["R"] = r, ["C"] = c, ["V"] = v };
-        MatrixItem Definition(params MatrixMeasure[] measures) => new()
+        MatrixItem Definition(MatrixMeasure? first = null, MatrixMeasure? second = null) => new()
         {
             RowDimensions = [new() { Expression = "R" }], ColumnDimensions = [new() { Expression = "C" }],
-            Measures = measures.Length == 0 ? [new() { Expression = "V" }] : measures.ToList()
+            Measures = first is null ? [new() { Expression = "V" }] : second is null ? [first] : [first, second]
         };
         var engine = new MatrixEngine();
         var rows = new[] { Row("A", "X", 10), Row("A", "X", 30), Row("B", "X", 100), Row("B", "Y", Value.Null) };
@@ -46,6 +46,7 @@ public static class MatrixTests
         yield return Test("empty source without totals has no invented groups", () => Equal(0, engine.Build(Definition() with { ShowRowGrandTotal = false }, []).Rows.Count));
         yield return Test("filter and calculated values use caller evaluator", () => { var r = engine.Build(Definition() with { Filter = "accept" }, rows, (row, expression) => expression == "accept" ? row["R"].AsString() == "A" : expression == "V" ? row["V"].AsNumber() * 2 : row[expression]); Equal(2, r.AcceptedRows); Equal(80m, r.GrandTotal(0).AsNumber()); });
         yield return Test("dimensions and measures evaluate once per accepted row", () => { int calls = 0; engine.Build(Definition(), rows, (row, field) => { calls++; return row[field]; }); Equal(12, calls); });
+        yield return Test("source row numbers survive duplicate row references", () => { var row = Row("A", "X", 0); var r = engine.BuildIndexed(Definition(), [row, row], (r, number, field) => field == "V" ? number : r[field]); Equal(3m, r.GrandTotal(0).AsNumber()); });
         yield return Test("percentage row denominator ignores hidden totals", () => { var d = Definition(new() { Expression = "V", Display = MatrixDisplay.PercentOfRow }) with { ShowColumnGrandTotal = false }; var r = engine.Build(d, [Row("A", "X", 1), Row("A", "Y", 3)]); Equal(.25m, r.GetValue(0, 0, 0).AsNumber()); Equal(.75m, r.GetValue(0, 1, 0).AsNumber()); Equal(2, r.Columns.Count); });
         yield return Test("percentage column and grand denominators", () => { var r = engine.Build(Definition(new() { Expression = "V", Display = MatrixDisplay.PercentOfColumn }, new() { Expression = "V", Display = MatrixDisplay.PercentOfGrandTotal }), [Row("A", "X", 1), Row("B", "X", 3), Row("B", "Y", 6)]); Equal(.25m, r.GetValue(0, 0, 0).AsNumber()); Equal(.1m, r.GetValue(0, 0, 1).AsNumber()); });
         yield return Test("zero percentage denominator is null", () => Equal(true, engine.Build(Definition(new() { Expression = "V", Display = MatrixDisplay.PercentOfGrandTotal }), [Row("A", "X", 0)]).GetValue(0, 0, 0).IsNull));

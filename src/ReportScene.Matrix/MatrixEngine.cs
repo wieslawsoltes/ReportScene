@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using ReportScene.Model;
 
 namespace ReportScene.Matrix;
@@ -74,6 +73,11 @@ public sealed class MatrixEngine
 {
     public MatrixResult Build(MatrixItem definition, IReadOnlyList<DataRow> rows,
         Func<DataRow, string, Value>? evaluate = null, MatrixLimits? limits = null, CancellationToken cancellationToken = default)
+        => BuildIndexed(definition, rows, evaluate is null ? null : (row, _, expression) => evaluate(row, expression), limits, cancellationToken);
+
+    /// <summary>The evaluator receives the one-based source row number, before applying the filter.</summary>
+    public MatrixResult BuildIndexed(MatrixItem definition, IReadOnlyList<DataRow> rows,
+        Func<DataRow, int, string, Value>? evaluate = null, MatrixLimits? limits = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(definition); ArgumentNullException.ThrowIfNull(rows);
         var errors = MatrixDefinitionValidator.Validate(definition);
@@ -84,7 +88,7 @@ public sealed class MatrixEngine
             throw new ArgumentOutOfRangeException(nameof(limits));
         cancellationToken.ThrowIfCancellationRequested();
         if (rows.Count > limits.MaximumRows) throw new MatrixException("Matrix source exceeds the row limit.");
-        evaluate ??= static (row, field) => row.TryGetValue(field, out var value) ? value : throw new MatrixException($"Unknown matrix field '{field}'.");
+        evaluate ??= static (row, _, field) => row.TryGetValue(field, out var value) ? value : throw new MatrixException($"Unknown matrix field '{field}'.");
         var dimensionsR = definition.RowDimensions.ToArray();
         var dimensionsC = definition.ColumnDimensions.ToArray();
         var measures = definition.Measures.ToArray();
@@ -97,14 +101,15 @@ public sealed class MatrixEngine
         { if (++distinct > limits.MaximumDistinctValues) throw new MatrixException("Matrix distinct-value storage limit exceeded."); }
         try
         {
-            foreach (var row in rows)
+            for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var row = rows[rowIndex]; int number = rowIndex + 1;
                 if (row is null) throw new MatrixException("A matrix source row cannot be null.");
-                if (!string.IsNullOrWhiteSpace(definition.Filter) && !evaluate(row, definition.Filter).AsBoolean()) continue;
-                var keysR = dimensionsR.Select(d => evaluate(row, d.Expression)).ToArray();
-                var keysC = dimensionsC.Select(d => evaluate(row, d.Expression)).ToArray();
-                var values = measures.Select(m => m.Aggregate == MatrixAggregate.CountRows ? Value.Null : evaluate(row, m.Expression)).ToArray();
+                if (!string.IsNullOrWhiteSpace(definition.Filter) && !evaluate(row, number, definition.Filter).AsBoolean()) continue;
+                var keysR = dimensionsR.Select(d => evaluate(row, number, d.Expression)).ToArray();
+                var keysC = dimensionsC.Select(d => evaluate(row, number, d.Expression)).ToArray();
+                var values = measures.Select(m => m.Aggregate == MatrixAggregate.CountRows ? Value.Null : evaluate(row, number, m.Expression)).ToArray();
                 var pathR = axisR.Add(keysR); var pathC = axisC.Add(keysC);
                 foreach (var r in pathR) foreach (var c in pathC)
                 {
@@ -159,8 +164,8 @@ public sealed class MatrixEngine
             {
                 cancellation.ThrowIfCancellationRequested();
                 if (node.Values.Length == dimensions.Length) { result.Add(new(node.Id, node.Values, MatrixAxisKind.Leaf)); return; }
-                int direction = dimensions[node.Values.Length].Descending ? -1 : 1;
-                foreach (var child in node.Children.OrderBy(p => p.Key, Comparer<Value>.Create((a, b) => direction * Compare(a, b)))) Visit(child.Value);
+                bool descending = dimensions[node.Values.Length].Descending;
+                foreach (var child in node.Children.OrderBy(p => p.Key, Comparer<Value>.Create((a, b) => descending ? Compare(b, a) : Compare(a, b)))) Visit(child.Value);
                 if (node.Values.Length > 0 && dimensions[node.Values.Length - 1].Subtotal)
                     result.Add(new(node.Id, node.Values, MatrixAxisKind.Subtotal));
             }
@@ -175,7 +180,6 @@ public sealed class MatrixEngine
             public Dictionary<Value, Node> Children { get; } = new();
         }
     }
-
     private sealed class Accumulator(MatrixAggregate kind)
     {
         private decimal sum;
