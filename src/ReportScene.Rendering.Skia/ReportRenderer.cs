@@ -50,7 +50,9 @@ public sealed class ReportRenderer : IDisposable
                 case BarcodeItem barcode: DrawBarcode(canvas, barcode, item.Text, bounds); break;
                 case ChartItem chart: DrawChart(canvas, chart, bounds, item.Points ?? [], designer); break;
                 case TableItem table when designer: DrawTableDesign(canvas, table, bounds); break;
+                case MatrixItem matrix when designer: MatrixDesignRenderer.Draw(canvas, matrix, bounds, this); break;
                 case TableItem: throw new ReportRenderException(source.Id, "Tables must be expanded into prepared cells by the reporting engine.");
+                case MatrixItem: throw new ReportRenderException(source.Id, "Matrices must be expanded into prepared cells by the reporting engine.");
                 default: throw new ReportRenderException(source.Id, $"No renderer is registered for {source.GetType().Name}.");
             }
         }

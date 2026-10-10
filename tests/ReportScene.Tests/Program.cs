@@ -1,4 +1,3 @@
-using System.Text;
 using ReportScene.Validation;
 using ReportScene.Samples;
 using ReportScene.Engine;
@@ -13,9 +12,9 @@ if (results.Any(r => !r.Passed)) return 1;
 
 var directory = Path.Combine("artifacts", "samples");
 Directory.CreateDirectory(directory);
-foreach (var name in SampleReports.Names)
+foreach (var name in SampleReports.Names.Concat(["Matrix sales"]))
 {
-    var document = SampleReports.Create(name);
+    var document = name == "Matrix sales" ? MatrixSampleReports.Sales() : SampleReports.Create(name);
     using var renderer = new ReportRenderer();
     var report = new ReportPreparer(renderer.Metrics).Prepare(document);
     var stem = name.ToLowerInvariant().Replace(' ', '-');
@@ -26,6 +25,8 @@ foreach (var name in SampleReports.Names)
         File.WriteAllBytes(Path.Combine(directory, stem + (file.Name.EndsWith(".zip", StringComparison.Ordinal) ? ".svg.zip" : format == ExportFormat.Pdf ? ".pdf" : ".svg")), file.Content);
     }
     File.WriteAllBytes(Path.Combine(directory, stem + ".png"), ReportExporter.Png(renderer, report.Pages[0], new(Dpi: 96)));
+    if (name == "Matrix sales") for (int page = 1; page < report.Pages.Count; page++)
+        File.WriteAllBytes(Path.Combine(directory, stem + "-page-" + (page + 1) + ".png"), ReportExporter.Png(renderer, report.Pages[page], new(Dpi: 96)));
 }
 Console.WriteLine($"Wrote real report, PDF, SVG and PNG validation artifacts to {directory}.");
 return 0;

@@ -3,6 +3,7 @@
     <Project Path="src/ReportScene.Model/ReportScene.Model.csproj" />
     <Project Path="src/ReportScene.Expressions/ReportScene.Expressions.csproj" />
     <Project Path="src/ReportScene.Data/ReportScene.Data.csproj" />
+    <Project Path="src/ReportScene.Matrix/ReportScene.Matrix.csproj" />
     <Project Path="src/ReportScene.Engine/ReportScene.Engine.csproj" />
     <Project Path="src/ReportScene.Serialization/ReportScene.Serialization.csproj" />
     <Project Path="src/ReportScene.Designer/ReportScene.Designer.csproj" />

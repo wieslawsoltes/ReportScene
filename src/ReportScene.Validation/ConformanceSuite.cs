@@ -4,5 +4,6 @@ namespace ReportScene.Validation;
 public static class ConformanceSuite
 {
     public static List<TestResult> Run() => Conformance.Run().Concat(ImportDefaultTests.Run())
-        .Concat(AggregateRegressionTests.Run()).Concat(MatrixTests.Run()).Concat(MatrixReportingTests.Run()).ToList();
+        .Concat(AggregateRegressionTests.Run()).Concat(MatrixTests.Run()).Concat(MatrixReportingTests.Run())
+        .Concat(MatrixRenderingTests.Run()).ToList();
 }

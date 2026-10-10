@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: '.',
-  testMatch: 'reportscene.spec.mjs',
+  testMatch: '*.spec.mjs',
   timeout: 240_000,
   expect: { timeout: 20_000 },
   fullyParallel: false,

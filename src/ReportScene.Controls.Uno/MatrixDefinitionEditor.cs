@@ -5,10 +5,7 @@ using ReportScene.Model;
 
 namespace ReportScene.Controls.Uno;
 
-/// <summary>
-/// Reusable transactional cross-tab editor. It never mutates the input definition or data tables;
-/// the host applies GetDefinition() as one undoable command after validating it.
-/// </summary>
+/// <summary>Reusable transactional cross-tab editor. GetDefinition returns a new definition; edits never mutate the caller's report.</summary>
 public sealed class MatrixDefinitionEditor : UserControl
 {
     private readonly MatrixItem original;
@@ -46,13 +43,14 @@ public sealed class MatrixDefinitionEditor : UserControl
         var navigation = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
         foreach (string name in new[] { "Rows", "Columns", "Measures", "Options" })
             navigation.Children.Add(Button("tab-" + name.ToLowerInvariant(), name, () => ShowTab(name)));
+        navigation.Children.Add(Button("swap", "Swap axes", SwapAxes));
         root.Children.Add(navigation);
         AddTab("Rows", AxisTab(false)); AddTab("Columns", AxisTab(true));
         var measureTab = new StackPanel { Spacing = 8 };
         measureTab.Children.Add(ControlTheme.Label("Each measure has its own aggregate, format and percentage mode. Totals aggregate source values.", 11));
         measureTab.Children.Add(Button("measures-add", "Add measure", () =>
         {
-            if (measures.Count < 32) AddMeasure(new() { Expression = SelectedField(), Title = SelectedField() });
+            if (measures.Count < 32) AddMeasure(new() { Expression = SelectedExpression(), Title = SelectedField() });
         }));
         measureTab.Children.Add(measurePanel); AddTab("Measures", measureTab);
         rowHeaderWidth.Text = definition.RowHeaderWidth.ToString("0.###", CultureInfo.InvariantCulture);
@@ -107,6 +105,16 @@ public sealed class MatrixDefinitionEditor : UserControl
         field.ItemsSource = table?.Columns.ToArray() ?? []; field.SelectedIndex = table?.Columns.Count > 0 ? 0 : -1;
     }
     private string SelectedField() => field.SelectedItem as string ?? "Value";
+    private string SelectedExpression() => "[" + (source.SelectedItem as string ?? original.DataSource) + "." + SelectedField() + "]";
+    private void SwapAxes()
+    {
+        var rows = rowAxis.Select(ReadAxis).ToArray(); var columns = columnAxis.Select(ReadAxis).ToArray();
+        rowAxis.Clear(); columnAxis.Clear();
+        foreach (var dimension in columns) AddAxis(false, dimension);
+        foreach (var dimension in rows) AddAxis(true, dimension);
+        (rowTotal.IsChecked, columnTotal.IsChecked) = (columnTotal.IsChecked, rowTotal.IsChecked);
+        RefreshAxis(false); RefreshAxis(true);
+    }
     private UIElement AxisTab(bool columns)
     {
         string key = columns ? "columns" : "rows";
@@ -115,7 +123,7 @@ public sealed class MatrixDefinitionEditor : UserControl
         panel.Children.Add(Button(key + "-add", "Add " + (columns ? "column" : "row") + " level", () =>
         {
             var list = columns ? columnAxis : rowAxis;
-            if (list.Count < 8) AddAxis(columns, new() { Expression = SelectedField(), Title = SelectedField() });
+            if (list.Count < 8) AddAxis(columns, new() { Expression = SelectedExpression(), Title = SelectedField() });
         }));
         panel.Children.Add(columns ? columnPanel : rowPanel); return panel;
     }

@@ -1,17 +1,12 @@
-using System.Globalization;
-using System.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using ReportScene.Controls.Uno;
-using ReportScene.Data;
 using ReportScene.Engine;
-using ReportScene.Export;
 using ReportScene.Model;
 using ReportScene.Rendering.Skia;
 using ReportScene.Samples;
 using ReportScene.Serialization;
-using Windows.Foundation;
 using Windows.System;
 
 namespace ReportScene.Designer.Uno;
@@ -50,12 +45,13 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     public PreparedReport? Prepared => prepared;
     public IReadOnlyList<Diagnostic> Diagnostics => diagnostics;
     public event Action? StateChanged;
+
     public ReportDesignerControl(IReportWorkspaceHost host, ReportDocument? document = null)
     {
         this.host = host;
         Session = new(document ?? SampleReports.Invoice());
         DesignView = new(Session, renderer); PreviewView = new(renderer) { Visibility = Visibility.Collapsed };
-        DesignView.EditRequested += item => Run(() => EditObjectAsync(item));
+        DesignView.EditRequested += item => Run(() => EditAnyObjectAsync(item));
         DesignView.Failed += ShowError; PreviewView.Failed += ShowError; properties.Failed += ShowError;
         DesignView.ViewChanged += NotifyState; PreviewView.ViewChanged += NotifyState;
         HorizontalContentAlignment = HorizontalAlignment.Stretch; VerticalContentAlignment = VerticalAlignment.Stretch;
@@ -71,142 +67,24 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         Content = root;
         Session.Changed += SessionChanged; Session.SelectionChanged += SelectedChanged;
         tree.ItemInvoked += (_, args) => { if (args.InvokedItem is TreeViewNode node && treeActions.TryGetValue(node, out var action)) Run(action); };
-        recoveryTimer.Tick += async (_, _) => { recoveryTimer.Stop(); if (savingRecovery) return; savingRecovery = true; try { await host.SaveRecoveryAsync(ReportJson.Serialize(Session.Document)); } catch (Exception e) { SetStatus("Recovery save failed: " + e.Message); } finally { savingRecovery = false; } };
+        recoveryTimer.Tick += async (_, _) =>
+        {
+            recoveryTimer.Stop(); if (savingRecovery) return; savingRecovery = true;
+            try { await host.SaveRecoveryAsync(ReportJson.Serialize(Session.Document)); }
+            catch (Exception e) { SetStatus("Recovery save failed: " + e.Message); }
+            finally { savingRecovery = false; }
+        };
         KeyDown += HandleShortcuts;
-        BuildRibbon(); RefreshStructure(true); RefreshProperties(); UpdateStatus();
+        BuildRibbon(); RefreshStructure(true); RefreshObjectProperties(); UpdateStatus();
     }
     private void AddRoot(UIElement element, int row) { Grid.SetRow(element, row); root.Children.Add(element); }
     private Button Command(string id, string label, string icon, Action action, bool large = false, bool text = true)
     { var button = ControlTheme.Button(id, label, icon, () => Run(action), large, text); commands[id] = button; return button; }
     private Button AsyncCommand(string id, string label, string icon, Func<Task> action, bool large = false, bool text = true)
         => Command(id, label, icon, () => Run(action), large, text);
-    private void BuildTitleBar()
-    {
-        var bar = new Grid { Background = ControlTheme.Brush("#E4E8EC"), Padding = new(5, 0, 8, 0) };
-        bar.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); bar.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) }); bar.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-        var quick = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0 };
-        quick.Children.Add(AsyncCommand("quick-save", "Save report", "save", SaveAsync, text: false)); quick.Children.Add(Command("quick-undo", "Undo", "undo", Session.Undo, text: false)); quick.Children.Add(Command("quick-redo", "Redo", "redo", Session.Redo, text: false));
-        bar.Children.Add(quick); title.HorizontalAlignment = HorizontalAlignment.Center; Grid.SetColumn(title, 1); bar.Children.Add(title);
-        var brand = ControlTheme.Label("ReportScene", 11, true); Grid.SetColumn(brand, 2); bar.Children.Add(brand); AddRoot(bar, 0);
-    }
-    private void BuildTabBar()
-    {
-        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 1, Background = ControlTheme.Brush("#E4E8EC") };
-        var file = Command("file-menu", "File", "", () => { }); file.Foreground = ControlTheme.Brush("#FFFFFF"); file.Background = ControlTheme.Brush("#276BA2"); file.Width = 62;
-        var menu = new MenuFlyout();
-        Menu(menu, "New blank report", () => Run(NewAsync)); Menu(menu, "Open report…", () => Run(OpenAsync)); Menu(menu, "Save report", () => Run(SaveAsync)); Menu(menu, "Save FRX subset…", () => Run(SaveFrxAsync));
-        menu.Items.Add(new MenuFlyoutSeparator());
-        var samples = new MenuFlyoutSubItem { Text = "Open sample" };
-        foreach (var name in SampleReports.Names) { var item = new MenuFlyoutItem { Text = name }; item.Click += (_, _) => Run(() => LoadSampleAsync(name)); samples.Items.Add(item); }
-        menu.Items.Add(samples); menu.Items.Add(new MenuFlyoutSeparator()); Menu(menu, "Print report…", () => Run(PrintAsync)); Menu(menu, "Compatibility and diagnostics", () => Run(ShowCompatibilityAsync));
-        file.Flyout = menu; tabs.Children.Add(file);
-        foreach (var name in new[] { "Home", "Report", "Layout", "View" }) tabs.Children.Add(Command("tab-" + name.ToLowerInvariant(), name, "", () => { activeRibbon = name; if (previewMode) SetPreview(false); BuildRibbon(); }));
-        tabs.Children.Add(Command("tab-preview", "Preview", "", PreparePreview)); AddRoot(tabs, 1);
-    }
     private static void Menu(MenuFlyout menu, string label, Action action) { var item = new MenuFlyoutItem { Text = label }; item.Click += (_, _) => action(); menu.Items.Add(item); }
-    private void BuildWorkspace()
-    {
-        workspace.ColumnDefinitions.Add(new() { Width = new(39) }); workspace.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) }); workspace.ColumnDefinitions.Add(new() { Width = new(302) });
-        var tools = new StackPanel { Spacing = 1, Padding = new(3, 4, 3, 4), Background = ControlTheme.Brush("#E5E8EB") };
-        tools.Children.Add(Command("tool-select", "Select objects", "pointer", () => { DesignView.Focus(FocusState.Programmatic); }, text: false));
-        foreach (var (kind, label, icon) in new[] { ("text", "Text", "text"), ("line", "Line", "line"), ("rectangle", "Rectangle", "rectangle"), ("ellipse", "Ellipse", "ellipse"), ("image", "Picture", "image"), ("checkbox", "Check box", "checkbox"), ("barcode", "Barcode", "barcode"), ("chart", "Chart", "chart"), ("table", "Table", "table") })
-            tools.Children.Add(Command("insert-" + kind, "Insert " + label, icon, () => Insert(kind), text: false));
-        tools.Children.Add(Command("insert-band", "Insert band", "band", () => Run(AddBandAsync), text: false)); workspace.Children.Add(tools);
-        var center = new Grid(); center.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) }); center.RowDefinitions.Add(new() { Height = new(28) });
-        center.Children.Add(DesignView); center.Children.Add(PreviewView);
-        var tabs = new ScrollViewer { Content = pageTabs, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Background = ControlTheme.Brush("#E3E6E9") }; Grid.SetRow(tabs, 1); center.Children.Add(tabs);
-        Grid.SetColumn(center, 1); workspace.Children.Add(center);
-        var right = new Grid(); right.RowDefinitions.Add(new() { Height = new(30) }); right.RowDefinitions.Add(new() { Height = new(210) }); right.RowDefinitions.Add(new() { Height = new(30) }); right.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
-        treeTabs.Children.Add(Command("tree-data", "Data", "data", () => { activeTree = "Data"; RebuildTree(); })); treeTabs.Children.Add(Command("tree-report", "Report tree", "report", () => { activeTree = "Report"; RebuildTree(); })); right.Children.Add(ControlTheme.Panel(treeTabs, "#E7EAED"));
-        Grid.SetRow(tree, 1); right.Children.Add(tree);
-        var propertyHeader = ControlTheme.Panel(objectName, "#E7EAED", new(8, 4, 4, 4)); Grid.SetRow(propertyHeader, 2); right.Children.Add(propertyHeader);
-        var propertyScroll = new ScrollViewer { Content = properties, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Background = ControlTheme.Brush("#FFFFFF") }; Grid.SetRow(propertyScroll, 3); right.Children.Add(propertyScroll);
-        sidebar.Child = right; sidebar.BorderThickness = new(1, 0, 0, 0); sidebar.BorderBrush = ControlTheme.Brush("#BFC7CF"); Grid.SetColumn(sidebar, 2); workspace.Children.Add(sidebar);
-        DesignView.RightTapped += (_, e) =>
-        {
-            var menu = new MenuFlyout(); Menu(menu, "Edit object…", () => { if (Session.Selection.FirstOrDefault() is { } item) Run(() => EditObjectAsync(item)); }); Menu(menu, "Cut", () => Run(CutAsync)); Menu(menu, "Copy", () => Run(CopyAsync)); Menu(menu, "Paste", () => Run(PasteAsync)); Menu(menu, "Delete", Session.DeleteSelection); menu.Items.Add(new MenuFlyoutSeparator()); Menu(menu, "Bring to front", () => Session.Reorder(true)); Menu(menu, "Send to back", () => Session.Reorder(false)); menu.ShowAt(DesignView, e.GetPosition(DesignView)); e.Handled = true;
-        };
-    }
-    private void Group(string title, params UIElement[] children)
-    {
-        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 3, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
-        foreach (var child in children) content.Children.Add(child);
-        var group = new Grid { Padding = new(5, 2, 5, 0), BorderThickness = new(0, 0, 1, 0), BorderBrush = ControlTheme.Brush("#D1D5D9"), MinWidth = 55 };
-        group.RowDefinitions.Add(new() { Height = new(67) }); group.RowDefinitions.Add(new() { Height = new(17) }); group.Children.Add(content);
-        var label = ControlTheme.Label(title, 10); label.Foreground = ControlTheme.Brush("#636E78"); label.HorizontalAlignment = HorizontalAlignment.Center; Grid.SetRow(label, 1); group.Children.Add(label); ribbon.Children.Add(group);
-    }
     private static StackPanel Vertical(params UIElement[] children) { var stack = new StackPanel { Spacing = 1 }; foreach (var child in children) stack.Children.Add(child); return stack; }
     private static StackPanel Horizontal(params UIElement[] children) { var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 }; foreach (var child in children) stack.Children.Add(child); return stack; }
-    private void BuildRibbon()
-    {
-        ribbon.Children.Clear();
-        if (previewMode) { BuildPreviewRibbon(); UpdateStatus(); return; }
-        switch (activeRibbon)
-        {
-            case "Home":
-                Group("Clipboard", AsyncCommand("paste", "Paste", "paste", PasteAsync, true), Vertical(AsyncCommand("cut", "Cut", "cut", CutAsync), AsyncCommand("copy", "Copy", "copy", CopyAsync)));
-                var font = new ComboBox { Width = 154, Height = 28, MinHeight = 0, FontSize = 11, Padding = new(6, 2, 25, 2), ItemsSource = new[] { "Arial", "Calibri", "Times New Roman", "Courier New", "Open Sans" }, SelectedIndex = 0 };
-                font.SelectionChanged += (_, _) => { if (font.SelectedItem is string family) Run(() => Session.UpdateSelection("Font family", i => i with { Style = i.Style with { FontFamily = family } })); };
-                var size = new ComboBox { Width = 66, Height = 28, MinHeight = 0, FontSize = 11, Padding = new(5, 2, 20, 2), ItemsSource = new[] { "8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "36", "48" }, SelectedIndex = 2 };
-                size.SelectionChanged += (_, _) => { if (size.SelectedItem is string text && double.TryParse(text, out var n)) Run(() => Session.UpdateSelection("Font size", i => i with { Style = i.Style with { FontSize = n } })); };
-                commands["font-family"] = ControlTheme.Identify(font, "font-family", "Font family"); commands["font-size"] = ControlTheme.Identify(size, "font-size", "Font size");
-                Group("Text", Vertical(Horizontal(font, size), Horizontal(Command("bold", "Bold", "", () => ToggleStyle("bold")), Command("italic", "Italic", "", () => ToggleStyle("italic")), Command("underline", "Underline", "", () => ToggleStyle("underline")))));
-                Group("Alignment", Vertical(Horizontal(Command("text-left", "Left", "left", () => TextAlignment(TextAlign.Left), text: false), Command("text-center", "Center", "center", () => TextAlignment(TextAlign.Center), text: false), Command("text-right", "Right", "right", () => TextAlignment(TextAlign.Right), text: false)), Command("vertical-center", "Middle", "center", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Center } }))));
-                Group("Border & fill", Vertical(AsyncCommand("fill-color", "Fill color", "shape", () => ColorAsync(false)), AsyncCommand("text-color", "Text color", "text", () => ColorAsync(true))), Command("border", "Border", "rectangle", () => Session.UpdateSelection("Toggle border", i => i with { Style = i.Style with { BorderWidth = i.Style.BorderWidth > 0 ? 0 : 1 } }), true));
-                Group("Styles", Vertical(Command("style-heading", "Heading", "text", () => ApplyStyle(new() { FontSize = 16, Bold = true, Foreground = "#244F75" })), Command("style-body", "Body", "text", () => ApplyStyle(new() { FontSize = 10 }))));
-                Group("Report", Command("preview", "Preview", "preview", PreparePreview, true), AsyncCommand("save", "Save", "save", SaveAsync, true));
-                break;
-            case "Report":
-                Group("Prepare", Command("preview-report", "Preview", "preview", PreparePreview, true), Command("validate-report", "Validate", "checkbox", Validate, true));
-                Group("Data", AsyncCommand("import-data", "Import data", "data", ImportDataAsync, true), Vertical(AsyncCommand("parameters", "Parameters…", "settings", ParametersAsync), AsyncCommand("data-editor", "Data editor…", "table", EditDataAsync)));
-                Group("Report pages", AsyncCommand("page-setup", "Page setup", "settings", PageSetupAsync, true), Vertical(Command("new-page", "New page", "new", Session.AddPage), AsyncCommand("add-band", "Add band…", "band", AddBandAsync)));
-                Group("Bands", Vertical(AsyncCommand("group-wizard", "Group data…", "band", GroupAsync), Command("delete-band", "Delete band", "delete", Session.DeleteBand)));
-                Group("Document", AsyncCommand("native-editor", "Edit JSON", "report", EditNativeAsync, true), AsyncCommand("open", "Open", "open", OpenAsync, true));
-                break;
-            case "Layout":
-                Group("Align objects", Vertical(Command("align-left", "Align left", "left", () => Session.Align(AlignmentCommand.Left)), Command("align-right", "Align right", "right", () => Session.Align(AlignmentCommand.Right))), Vertical(Command("align-top", "Align top", "left", () => Session.Align(AlignmentCommand.Top)), Command("align-bottom", "Align bottom", "right", () => Session.Align(AlignmentCommand.Bottom))), Vertical(Command("align-center", "Center", "center", () => Session.Align(AlignmentCommand.Center)), Command("align-middle", "Middle", "center", () => Session.Align(AlignmentCommand.Middle))));
-                Group("Size & spacing", Vertical(Command("same-width", "Same width", "rectangle", () => Session.Align(AlignmentCommand.SameWidth)), Command("same-height", "Same height", "rectangle", () => Session.Align(AlignmentCommand.SameHeight))), Vertical(Command("space-horizontal", "Horizontal spacing", "table", () => Session.Align(AlignmentCommand.DistributeHorizontal)), Command("space-vertical", "Vertical spacing", "table", () => Session.Align(AlignmentCommand.DistributeVertical))));
-                Group("Order", Command("bring-front", "Bring to front", "front", () => Session.Reorder(true), true), Command("send-back", "Send to back", "back", () => Session.Reorder(false), true));
-                Group("Selection", Vertical(Command("select-all", "Select all", "pointer", Session.SelectAll), Command("delete", "Delete", "delete", Session.DeleteSelection)));
-                break;
-            case "View":
-                var grid = new CheckBox { Content = "Show grid", IsChecked = DesignView.ShowGrid, FontSize = 11, MinHeight = 28 }; grid.Checked += (_, _) => DesignView.ShowGrid = true; grid.Unchecked += (_, _) => DesignView.ShowGrid = false;
-                var snap = new CheckBox { Content = "Snap to grid", IsChecked = Session.SnapToGrid, FontSize = 11, MinHeight = 28 }; snap.Checked += (_, _) => Session.SnapToGrid = true; snap.Unchecked += (_, _) => Session.SnapToGrid = false;
-                Group("Grid", Vertical(grid, snap)); Group("Zoom", ZoomChoice(false), Command("fit-width", "Fit width", "zoom", DesignView.FitWidth, true));
-                Group("Panels", Vertical(Command("toggle-sidebar", "Data and properties", "table", () => { bool visible = sidebar.Visibility == Visibility.Visible; sidebar.Visibility = visible ? Visibility.Collapsed : Visibility.Visible; workspace.ColumnDefinitions[2].Width = new(visible ? 0 : 302); }), Command("toggle-messages", "Messages", "report", ToggleMessages)));
-                Group("Samples", SamplesChoice()); Group("Help", AsyncCommand("compatibility", "Compatibility", "report", ShowCompatibilityAsync, true));
-                break;
-        }
-        UpdateStatus();
-    }
-    private UIElement ZoomChoice(bool preview)
-    {
-        var choice = new ComboBox { Width = 91, MinHeight = 28, Height = 28, Padding = new(6, 2, 25, 2), FontSize = 11 };
-        foreach (var n in new[] { 25, 50, 75, 85, 100, 125, 150, 200, 300, 400 }) choice.Items.Add(n + "%");
-        choice.SelectedItem = Math.Round((preview ? PreviewView.Zoom : DesignView.Zoom) * 100).ToString(CultureInfo.InvariantCulture) + "%";
-        choice.SelectionChanged += (_, _) => { if (choice.SelectedItem is string text && double.TryParse(text.TrimEnd('%'), out var n)) { if (preview) PreviewView.Zoom = n / 100; else DesignView.Zoom = n / 100; UpdateStatus(); } };
-        commands[preview ? "preview-zoom" : "design-zoom"] = choice; return choice;
-    }
-    private UIElement SamplesChoice()
-    {
-        var choice = new ComboBox { Width = 182, MinHeight = 28, Height = 28, Padding = new(6, 2, 25, 2), FontSize = 11, PlaceholderText = "Open sample…" };
-        foreach (var name in SampleReports.Names) choice.Items.Add(name);
-        choice.SelectionChanged += (_, _) => { if (choice.SelectedItem is string name) Run(() => LoadSampleAsync(name)); }; commands["samples"] = choice; return choice;
-    }
-    private void BuildPreviewRibbon()
-    {
-        Group("Designer", Command("back-to-design", "Design", "report", () => { SetPreview(false); BuildRibbon(); }, true));
-        var page = new TextBox { Text = (PreviewView.PageIndex + 1).ToString(), Width = 40, MinHeight = 26, Height = 26, Padding = new(5, 2, 3, 2), FontSize = 11 };
-        page.KeyDown += (_, e) => { if (e.Key == VirtualKey.Enter && int.TryParse(page.Text, out var n)) { PreviewView.PageIndex = n - 1; UpdateStatus(); e.Handled = true; } }; commands["preview-page"] = page;
-        Group("Pages", Vertical(Horizontal(Command("previous-page", "Previous page", "previous", () => { PreviewView.PageIndex--; page.Text = (PreviewView.PageIndex + 1).ToString(); UpdateStatus(); }, text: false), page, Command("next-page", "Next page", "next", () => { PreviewView.PageIndex++; page.Text = (PreviewView.PageIndex + 1).ToString(); UpdateStatus(); }, text: false)), ControlTheme.Label("of " + (prepared?.Pages.Count ?? 0) + " pages", 10)));
-        Group("Zoom", ZoomChoice(true), Command("preview-fit-width", "Fit width", "zoom", PreviewView.FitWidth, true));
-        var search = new TextBox { PlaceholderText = "Find in report", Text = searchTerm, Width = 167, MinHeight = 28, Height = 28, FontSize = 11, Padding = new(6, 2, 4, 2) };
-        search.KeyDown += (_, e) => { if (e.Key == VirtualKey.Enter) { Find(search.Text); e.Handled = true; } }; commands["preview-search"] = ControlTheme.Identify(search, "preview-search", "Find in report");
-        Group("Find", Vertical(search, Command("find-next", "Find next", "preview", () => Find(search.Text))));
-        var export = AsyncCommand("export-pdf", "PDF", "export", () => ExportAsync(ExportFormat.Pdf), true);
-        var formats = Command("export-formats", "More formats", "export", () => { }, true); var menu = new MenuFlyout(); foreach (var format in Enum.GetValues<ExportFormat>()) Menu(menu, format.ToString(), () => Run(() => ExportAsync(format))); formats.Flyout = menu;
-        Group("Export", export, formats, AsyncCommand("print", "Print", "print", PrintAsync, true));
-    }
     private void SetPreview(bool enabled)
     {
         previewMode = enabled; DesignView.Visibility = enabled ? Visibility.Collapsed : Visibility.Visible; PreviewView.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed; UpdateStatus(); NotifyState();
@@ -253,6 +131,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
             "barcode" => new BarcodeItem { Name = "Barcode", Bounds = new(8, top, 160, 50) },
             "chart" => new ChartItem { Name = "Chart", DataSource = source, CategoryColumn = table?.Columns.FirstOrDefault() ?? "Name", ValueExpression = table?.Columns.LastOrDefault() ?? "Value", Bounds = new(8, top, 320, 210) },
             "table" => new TableItem { Name = "Table", DataSource = source, Columns = table?.Columns.Take(5).Select(c => new TableColumn(c, "[" + c + "]")).ToList() ?? [new("Column", "Value")], Bounds = new(8, top, 360, 110) },
+            "matrix" => CreateMatrix(source, table, top),
             _ => throw new ArgumentException("Unknown object type.")
         };
         Session.Add(item); DesignView.ScrollToSelection(); DesignView.Focus(FocusState.Programmatic);
@@ -264,7 +143,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private void SelectedChanged(object? sender, EventArgs args)
     {
         if (refreshingProperties) return; refreshingProperties = true;
-        DispatcherQueue.TryEnqueue(() => { refreshingProperties = false; if (!disposed) { RefreshProperties(); UpdateStatus(); NotifyState(); } });
+        DispatcherQueue.TryEnqueue(() => { refreshingProperties = false; if (!disposed) { RefreshObjectProperties(); UpdateStatus(); NotifyState(); } });
     }
     private void RefreshStructure(bool force = false)
     {
@@ -310,8 +189,9 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private void UpdateStatus()
     {
         title.Text = Session.Document.Name + (Session.IsDirty ? " *" : "") + " — Report Designer";
-        foreach (var id in new[] { "quick-undo" }) if (commands.TryGetValue(id, out var undo) && undo is Control u) u.IsEnabled = Session.CanUndo;
-        foreach (var id in new[] { "quick-redo" }) if (commands.TryGetValue(id, out var redo) && redo is Control r) r.IsEnabled = Session.CanRedo;
+        if (commands.TryGetValue("quick-undo", out var undo) && undo is Control u) u.IsEnabled = Session.CanUndo;
+        if (commands.TryGetValue("quick-redo", out var redo) && redo is Control r) r.IsEnabled = Session.CanRedo;
+        if (commands.TryGetValue("matrix-edit", out var matrix) && matrix is Control m) m.IsEnabled = Session.Selection.OfType<MatrixItem>().Any(i => !i.Locked);
         var count = Session.SelectedIds.Count;
         status.Text = previewMode ? $"Preview · page {PreviewView.PageIndex + 1} of {PreviewView.Report?.Pages.Count ?? 0} · {PreviewView.Zoom:P0} · Uno / Skia" : $"{Session.Page.Name} · {(count == 0 ? Session.SelectedBand?.Name ?? "No selection" : count + " object(s) selected")} · {DesignView.Zoom:P0} · points (1/72 in) · Uno / Skia";
     }
@@ -352,7 +232,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         var json = await host.LoadRecoveryAsync(); if (string.IsNullOrWhiteSpace(json)) return;
         try { Session.Load(ReportJson.Deserialize(json)); SetStatus("Restored the most recent local workspace."); } catch (Exception e) { SetStatus("Recovery could not be loaded: " + e.Message); }
     }
-    public void Dispose()
+    public new void Dispose()
     {
         if (disposed) return; disposed = true; recoveryTimer.Stop(); Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectedChanged; DesignView.Dispose(); renderer.Dispose();
     }
