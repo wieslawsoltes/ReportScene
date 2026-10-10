@@ -30,15 +30,11 @@ public sealed class ExpressionEngine
             int start = ++i, depth = 1; char quote = '\0';
             for (; i < text.Length && depth > 0; i++)
             {
-                char c = text[i];
-                if (quote != '\0')
-                {
-                    if (c == '\\') i++;
-                    else if (c == quote) quote = '\0';
-                }
-                else if (c is '\'' or '"') quote = c;
-                else if (c == '[') depth++;
-                else if (c == ']') depth--;
+                char ch = text[i];
+                if (quote != '\0') { if (ch == '\\') i++; else if (ch == quote) quote = '\0'; }
+                else if (ch is '\'' or '"') quote = ch;
+                else if (ch == '[') depth++;
+                else if (ch == ']') depth--;
             }
             if (depth != 0) throw new ExpressionException("Unclosed text expression.");
             result.Append(Evaluate(text[start..(i - 1)], context).AsString(format, culture));
@@ -46,7 +42,28 @@ public sealed class ExpressionEngine
         }
         return result.ToString();
     }
-
+    private static bool IsAggregate(string name) => name.ToLowerInvariant() is "sum" or "avg" or "count" or "min" or "max";
+    private static IEnumerable<string> Fields(Node node)
+    {
+        switch (node)
+        {
+            case Field field: yield return field.Name; break;
+            case Unary unary: foreach (var name in Fields(unary.Right)) yield return name; break;
+            case Binary binary:
+                foreach (var name in Fields(binary.Left)) yield return name;
+                foreach (var name in Fields(binary.Right)) yield return name;
+                break;
+            case Conditional conditional:
+                foreach (var name in Fields(conditional.Condition)) yield return name;
+                foreach (var name in Fields(conditional.True)) yield return name;
+                foreach (var name in Fields(conditional.False)) yield return name;
+                break;
+            case Call call:
+                if (IsAggregate(call.Name)) throw new ExpressionException("Nested aggregates require a separately materialized data column.");
+                foreach (var argument in call.Args) foreach (var name in Fields(argument)) yield return name;
+                break;
+        }
+    }
     private abstract record Node { public abstract Value Eval(EvaluationContext c); }
     private sealed record Literal(Value Value) : Node { public override Value Eval(EvaluationContext c) => Value; }
     private sealed record Field(string Name) : Node { public override Value Eval(EvaluationContext c) => c.Resolve(Name); }
@@ -85,22 +102,32 @@ public sealed class ExpressionEngine
             var name = Name.ToLowerInvariant();
             void Arity(int min, int max) { if (Args.Length < min || Args.Length > max) throw new ExpressionException($"{Name} expects {min}..{max} arguments."); }
             if (name is "iif" or "if") { Arity(3, 3); return Args[0].Eval(c).AsBoolean() ? Args[1].Eval(c) : Args[2].Eval(c); }
-            if (name is "coalesce") { Arity(1, 32); foreach (var a in Args) { var v = a.Eval(c); if (!v.IsNull) return v; } return Value.Null; }
-            if (name is "sum" or "avg" or "count" or "min" or "max")
+            if (name == "coalesce") { Arity(1, 32); foreach (var a in Args) { var v = a.Eval(c); if (!v.IsNull) return v; } return Value.Null; }
+            if (IsAggregate(name))
             {
                 Arity(name == "count" ? 0 : 1, 1);
                 var rows = c.Rows; string table = c.TableName;
-                if (Args.FirstOrDefault() is Field f && f.Name.Contains('.'))
+                if (Args.Length > 0)
                 {
-                    var requested = f.Name[..f.Name.IndexOf('.')];
-                    if (!requested.Equals(table, StringComparison.OrdinalIgnoreCase))
-                    { if (!c.Tables.TryGetValue(requested, out var t)) throw new ExpressionException($"Unknown table '{requested}'."); rows = t.Rows; table = t.Name; }
+                    // Inspect the complete argument AST, not just a direct Field node:
+                    // report-level Sum(Items.Quantity * Items.Price) has a Binary root.
+                    var sources = Fields(Args[0]).Where(f => f.Contains('.')).Select(f => f[..f.IndexOf('.')])
+                        .Where(s => !s.Equals("Parameters", StringComparison.OrdinalIgnoreCase) && !s.Equals("Parent", StringComparison.OrdinalIgnoreCase))
+                        .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                    foreach (var source in sources)
+                        if (!c.Tables.ContainsKey(source) && !source.Equals(table, StringComparison.OrdinalIgnoreCase)) throw new ExpressionException($"Unknown table '{source}'.");
+                    if (sources.Length > 0 && !sources.Contains(table, StringComparer.OrdinalIgnoreCase))
+                    {
+                        if (sources.Length != 1) throw new ExpressionException("An aggregate outside an active data band must reference one data source; join or materialize cross-table expressions first.");
+                        if (!c.Tables.TryGetValue(sources[0], out var data)) throw new ExpressionException($"Unknown table '{sources[0]}'.");
+                        rows = data.Rows; table = data.Name;
+                    }
                 }
                 if (name == "count" && Args.Length == 0) return rows.Count;
                 Value current = Value.Null; decimal sum = 0; int count = 0;
                 foreach (var row in rows)
                 {
-                    var value = Args[0].Eval(c with { Row = row, TableName = table });
+                    var value = Args[0].Eval(c with { Row = row, TableName = table, Rows = rows });
                     if (value.IsNull) continue;
                     if (name is "sum" or "avg") sum += value.AsNumber();
                     if (current.IsNull || (name == "min" && Value.Compare(value, current) < 0) || (name == "max" && Value.Compare(value, current) > 0)) current = value;
@@ -143,7 +170,6 @@ public sealed class ExpressionEngine
             }
         }
     }
-
     private enum TokenKind { End, Number, String, Name, Operator, Left, Right, Comma, Question, Colon }
     private readonly record struct Token(TokenKind Kind, string Text, int Position);
     private sealed class Parser
@@ -201,16 +227,16 @@ public sealed class ExpressionEngine
             while (position < source.Length && char.IsWhiteSpace(source[position])) position++;
             int start = position;
             if (position == source.Length) return new(TokenKind.End, "", position);
-            char c = source[position++];
-            if (c is '\'' or '"')
+            char ch = source[position++];
+            if (ch is '\'' or '"')
             {
                 var text = new StringBuilder(); bool closed = false;
                 while (position < source.Length)
                 {
                     char v = source[position++];
-                    if (v == c)
+                    if (v == ch)
                     {
-                        if (position < source.Length && source[position] == c) { text.Append(c); position++; continue; }
+                        if (position < source.Length && source[position] == ch) { text.Append(ch); position++; continue; }
                         closed = true; break;
                     }
                     if (v == '\\' && position < source.Length)
@@ -220,22 +246,22 @@ public sealed class ExpressionEngine
                 if (!closed) throw new ExpressionException($"Unclosed string at character {start + 1}.");
                 return new(TokenKind.String, text.ToString(), start);
             }
-            if (c == '[')
+            if (ch == '[')
             {
                 int end = source.IndexOf(']', position);
                 if (end < 0) throw new ExpressionException("Unclosed field reference.");
                 string name = source[position..end].Trim(); position = end + 1;
-                if (name.Length == 0 || name.Any(ch => !(char.IsLetterOrDigit(ch) || ch is '_' or '.' or '#' or ' '))) throw new ExpressionException("Invalid field reference.");
+                if (name.Length == 0 || name.Any(c => !(char.IsLetterOrDigit(c) || c is '_' or '.' or '#' or ' '))) throw new ExpressionException("Invalid field reference.");
                 return new(TokenKind.Name, name, start);
             }
-            if (char.IsDigit(c) || c == '.' && position < source.Length && char.IsDigit(source[position]))
+            if (char.IsDigit(ch) || ch == '.' && position < source.Length && char.IsDigit(source[position]))
             {
                 while (position < source.Length && (char.IsDigit(source[position]) || source[position] == '.')) position++;
                 if (position < source.Length && source[position] is 'e' or 'E')
                 { position++; if (position < source.Length && source[position] is '+' or '-') position++; while (position < source.Length && char.IsDigit(source[position])) position++; }
                 return new(TokenKind.Number, source[start..position], start);
             }
-            if (char.IsLetter(c) || c == '_')
+            if (char.IsLetter(ch) || ch == '_')
             {
                 while (position < source.Length && (char.IsLetterOrDigit(source[position]) || source[position] is '_' or '.' or '#')) position++;
                 string word = source[start..position];
@@ -248,13 +274,13 @@ public sealed class ExpressionEngine
                 if (pair is "==" or "!=" or "<=" or ">=" or "<>" or "&&" or "||" or "??")
                 { position++; return new(TokenKind.Operator, pair == "<>" ? "!=" : pair, start); }
             }
-            return c switch
+            return ch switch
             {
                 '(' => new(TokenKind.Left, "(", start), ')' => new(TokenKind.Right, ")", start), ',' => new(TokenKind.Comma, ",", start),
                 '?' => new(TokenKind.Question, "?", start), ':' => new(TokenKind.Colon, ":", start),
-                '+' or '-' or '*' or '/' or '%' or '<' or '>' or '!' => new(TokenKind.Operator, c.ToString(), start),
+                '+' or '-' or '*' or '/' or '%' or '<' or '>' or '!' => new(TokenKind.Operator, ch.ToString(), start),
                 '=' => new(TokenKind.Operator, "==", start),
-                _ => throw new ExpressionException($"Invalid character '{c}' at {start + 1}.")
+                _ => throw new ExpressionException($"Invalid character '{ch}' at {start + 1}.")
             };
         }
     }
