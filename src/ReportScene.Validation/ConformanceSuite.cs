@@ -3,5 +3,6 @@ namespace ReportScene.Validation;
 /// <summary>The single validation entry point used by both console and WebAssembly hosts.</summary>
 public static class ConformanceSuite
 {
-    public static List<TestResult> Run() => Conformance.Run().Concat(ImportDefaultTests.Run()).Concat(AggregateRegressionTests.Run()).ToList();
+    public static List<TestResult> Run() => Conformance.Run().Concat(ImportDefaultTests.Run())
+        .Concat(AggregateRegressionTests.Run()).Concat(MatrixTests.Run()).ToList();
 }
