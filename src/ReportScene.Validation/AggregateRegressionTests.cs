@@ -29,7 +29,18 @@ public static class AggregateRegressionTests
             var prepared = new ReportPreparer().Prepare(document);
             var actual = prepared.Pages.SelectMany(p => p.Items).Single(i => i.Source.Name == "GrandTotal" && i.Source is TextItem).Text;
             Conformance.Equal(expected.ToString("C2", CultureInfo.GetCultureInfo("en-US")), actual);
-            Conformance.Equal(1787.5m, expected);
+            // Independent line totals: 75 + 175 + 300 + 112.5 + 250 + 412.5 + 150 + 325.
+            Conformance.Equal(1800m, expected);
+        });
+        yield return Test("qualified data fields do not collide with system variables", () =>
+        {
+            var row = new DataRow { ["Row"] = "North", ["Page"] = "Cover", ["ColumnNumber"] = "Quarter" };
+            var c = context with { Row = row, TableName = "Sales", Rows = [row], RowNumber = 7, PageNumber = 2, ColumnNumber = 3 };
+            Conformance.Equal("North", engine.Evaluate("[Sales.Row]", c).AsString());
+            Conformance.Equal("Cover", engine.Evaluate("Sales.Page", c).AsString());
+            Conformance.Equal("Quarter", engine.Evaluate("Sales.ColumnNumber", c).AsString());
+            Conformance.Equal(7m, engine.Evaluate("RowNumber", c).AsNumber());
+            Conformance.Equal(2m, engine.Evaluate("PageN", c).AsNumber());
         });
     }
 }

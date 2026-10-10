@@ -17,8 +17,8 @@ public static class MatrixReportingTests
         var matrix = new MatrixItem
         {
             Name = "Grid", DataSource = "Sales", Bounds = new(0, 0, 300, 80), RowHeaderWidth = 100, CellWidth = 80,
-            RowDimensions = [new() { Expression = "Row", Title = "Row" }], ColumnDimensions = [new() { Expression = "Column" }],
-            Measures = [new() { Expression = "Value", Title = "Amount" }], ShowRowGrandTotal = false, ShowColumnGrandTotal = false,
+            RowDimensions = [new() { Expression = "Sales.Row", Title = "Row" }], ColumnDimensions = [new() { Expression = "Sales.Column" }],
+            Measures = [new() { Expression = "Sales.Value", Title = "Amount" }], ShowRowGrandTotal = false, ShowColumnGrandTotal = false,
             Style = new() { FontSize = 9, Padding = 2 }
         };
         return new()
@@ -41,9 +41,9 @@ public static class MatrixReportingTests
         { try { action(); return new("matrix reporting: " + name, true); } catch (Exception e) { return new("matrix reporting: " + name, false, e.ToString()); } }
         void Equal<T>(T expected, T actual) => Conformance.Equal(expected, actual);
         var preparer = new ReportPreparer();
-        yield return Test("native polymorphic round-trip", () => { var d = ReportJson.Clone(Fixture()); Equal(13 * 5, d.Data[0].Rows.Count); Equal(80d, Matrix(d).CellWidth); Equal("Row", Matrix(d).RowDimensions[0].Expression); Equal(false, Matrix(d).ShowRowGrandTotal); });
+        yield return Test("native polymorphic round-trip", () => { var d = ReportJson.Clone(Fixture()); Equal(13 * 5, d.Data[0].Rows.Count); Equal(80d, Matrix(d).CellWidth); Equal("Sales.Row", Matrix(d).RowDimensions[0].Expression); Equal(false, Matrix(d).ShowRowGrandTotal); });
         yield return Test("clipboard preserves definitions", () => { var m = Matrix(Fixture()); var copy = (MatrixItem)ReportJson.DeserializeItems(ReportJson.SerializeItems([m])).Single(); Equal(m.Id, copy.Id); Equal("Amount", copy.Measures[0].Title); });
-        yield return Test("omitted matrix and nested defaults restored", () => { var m = (MatrixItem)ReportJson.DeserializeItems("[{\"$type\":\"matrix\",\"rowDimensions\":[{\"expression\":\"Row\"}],\"measures\":[{\"expression\":\"Value\"}]}]").Single(); Equal(90d, m.CellWidth); Equal(24d, m.RowHeight); Equal(true, m.RepeatHeaders); Equal(MatrixAggregate.Sum, m.Measures[0].Aggregate); Equal("", m.RowDimensions[0].Title); });
+        yield return Test("omitted matrix and nested defaults restored", () => { var m = (MatrixItem)ReportJson.DeserializeItems("[{\"$type\":\"matrix\",\"rowDimensions\":[{\"expression\":\"Sales.Row\"}],\"measures\":[{\"expression\":\"Sales.Value\"}]}]").Single(); Equal(90d, m.CellWidth); Equal(24d, m.RowHeight); Equal(true, m.RepeatHeaders); Equal(MatrixAggregate.Sum, m.Measures[0].Aggregate); Equal("", m.RowDimensions[0].Title); });
         yield return Test("explicit null dimension rejected", () => Conformance.Throws<FormatException>(() => ReportJson.DeserializeItems("[{\"$type\":\"matrix\",\"rowDimensions\":[null]}]")));
         yield return Test("unknown matrix property rejected", () => Conformance.Throws<FormatException>(() => ReportJson.DeserializeItems("[{\"$type\":\"matrix\",\"inventedOption\":true}]")));
         yield return Test("horizontal and vertical tiling page count", () => Equal(9, preparer.Prepare(Fixture()).Pages.Count));
@@ -60,16 +60,16 @@ public static class MatrixReportingTests
         yield return Test("item limit checked during matrix expansion", () => Conformance.Throws<ReportPreparationException>(() => preparer.Prepare(Fixture(), options: new(MaximumItems: 20))));
         yield return Test("empty source produces a valid empty report", () => { var p = preparer.Prepare(Fixture(0, 1)); Equal(1, p.Pages.Count); Equal(0, Values(p).Count); Equal(true, p.Pages[0].Items.Any(i => i.Text == "No data")); });
         yield return Test("source report remains unchanged", () => { var d = Fixture(); string before = ReportJson.Serialize(d); preparer.Prepare(d); Equal(before, ReportJson.Serialize(d)); });
-        yield return Test("matrix filter and parameter expressions", () => { var d = Fixture(3, 2); d.Parameters.Add(new("Factor", 2)); Change(d, m => m with { Filter = "Row == 'R01'", Measures = [new() { Expression = "Value * Parameters.Factor" }] }); Equal("202,204", string.Join(",", Values(preparer.Prepare(d)).Select(i => decimal.Parse(i.Text, CultureInfo.InvariantCulture)).Order())); });
-        yield return Test("multiple measures survive tiling", () => { var d = Fixture(2, 3); Change(d, m => m with { Measures = [new() { Expression = "Value", Title = "Sum" }, new() { Expression = "Value", Title = "Count", Aggregate = MatrixAggregate.Count }] }); var values = Values(preparer.Prepare(d)); Equal(12, values.Count); Equal(6, values.Count(v => v.Text == "1") - 1); });
-        yield return Test("percentage culture and formatting", () => { var d = Fixture(1, 2) with { Culture = "pl-PL" }; Change(d, m => m with { Measures = [new() { Expression = "Value", Display = MatrixDisplay.PercentOfRow }] }); var expected = (1m / 3).ToString("P2", CultureInfo.GetCultureInfo("pl-PL")); Equal(true, Values(preparer.Prepare(d)).Any(v => v.Text == expected)); });
+        yield return Test("matrix filter and parameter expressions", () => { var d = Fixture(3, 2); d.Parameters.Add(new("Factor", 2)); Change(d, m => m with { Filter = "Sales.Row == 'R01'", Measures = [new() { Expression = "Sales.Value * Parameters.Factor" }] }); Equal("202,204", string.Join(",", Values(preparer.Prepare(d)).Select(i => decimal.Parse(i.Text, CultureInfo.InvariantCulture)).Order())); });
+        yield return Test("multiple measures survive tiling", () => { var d = Fixture(2, 3); Change(d, m => m with { Measures = [new() { Expression = "Sales.Value", Title = "Sum" }, new() { Expression = "Sales.Value", Title = "Count", Aggregate = MatrixAggregate.Count }] }); var values = Values(preparer.Prepare(d)); Equal(12, values.Count); Equal(6, values.Count(v => v.Text == "1") - 1); });
+        yield return Test("percentage culture and formatting", () => { var d = Fixture(1, 2) with { Culture = "pl-PL" }; Change(d, m => m with { Measures = [new() { Expression = "Sales.Value", Display = MatrixDisplay.PercentOfRow }] }); var expected = (1m / 3).ToString("P2", CultureInfo.GetCultureInfo("pl-PL")); Equal(true, Values(preparer.Prepare(d)).Any(v => v.Text == expected)); });
         yield return Test("shared PDF exporter accepts expanded matrix", () => { var f = new ReportExporter().Export(preparer.Prepare(Fixture(2, 2)), ExportFormat.Pdf); Equal("%PDF", Encoding.ASCII.GetString(f.Content, 0, 4)); });
         yield return Test("shared SVG exporter accepts expanded matrix", () => { var f = new ReportExporter().Export(preparer.Prepare(Fixture(2, 2)), ExportFormat.Svg); Equal(true, Encoding.UTF8.GetString(f.Content).Contains("<svg")); });
         yield return Test("matrix in group header sees the group scope", () =>
         {
             var d = Fixture(2, 1); var m = Matrix(d) with { RowDimensions = [], ColumnDimensions = [] };
             d.Pages[0].Bands.Clear();
-            d.Pages[0].Bands.Add(new() { Kind = BandKind.Data, DataSource = "Sales", Height = 0, Groups = [new() { Expression = "Row", Header = new() { Kind = BandKind.GroupHeader, Height = 0, Items = [m] }, Footer = new() { Kind = BandKind.GroupFooter, Height = 0 } }] });
+            d.Pages[0].Bands.Add(new() { Kind = BandKind.Data, DataSource = "Sales", Height = 0, Groups = [new() { Expression = "Sales.Row", Header = new() { Kind = BandKind.GroupHeader, Height = 0, Items = [m] }, Footer = new() { Kind = BandKind.GroupFooter, Height = 0 } }] });
             Equal("1,101", string.Join(",", Values(preparer.Prepare(d)).Select(v => v.Text)));
         });
         yield return Test("master detail matrix applies report relation", () =>
