@@ -4,7 +4,9 @@ using ReportScene.Model;
 
 namespace ReportScene.Engine;
 
-public sealed record PreparationOptions(int MaximumPages = 10_000, int MaximumItems = 1_000_000, int MaximumBandInstances = 1_000_000, int MaximumPasses = 5, DateTime? ReportDate = null);
+public sealed record PreparationOptions(int MaximumPages = 10_000, int MaximumItems = 1_000_000,
+    int MaximumBandInstances = 1_000_000, int MaximumPasses = 5, DateTime? ReportDate = null,
+    int MaximumSubreportDepth = 16, int MaximumSubreportInvocations = 10_000);
 public sealed class ReportPreparationException(IReadOnlyList<Diagnostic> diagnostics) : Exception(string.Join("\n", diagnostics.Select(d => d.Message)))
 { public IReadOnlyList<Diagnostic> Diagnostics { get; } = diagnostics; }
 
@@ -16,7 +18,8 @@ public sealed class ReportPreparer(ITextMeasurer? textMeasurer = null, Expressio
     public PreparedReport Prepare(ReportDocument document, IReadOnlyDictionary<string, Value>? parameters = null, PreparationOptions? options = null, CancellationToken cancellationToken = default)
     {
         options ??= new();
-        if (options.MaximumPages < 1 || options.MaximumItems < 1 || options.MaximumBandInstances < 1 || options.MaximumPasses < 1) throw new ArgumentOutOfRangeException(nameof(options));
+        if (options.MaximumPages < 1 || options.MaximumItems < 1 || options.MaximumBandInstances < 1 || options.MaximumPasses < 1 || options.MaximumSubreportDepth is < 1 or > 32 || options.MaximumSubreportInvocations < 1) throw new ArgumentOutOfRangeException(nameof(options));
+        cancellationToken.ThrowIfCancellationRequested();
         var validation = DocumentValidator.Validate(document);
         if (validation.Any(d => d.Severity == DiagnosticSeverity.Error)) throw new ReportPreparationException(validation);
         var values = new Dictionary<string, Value>(StringComparer.OrdinalIgnoreCase);
@@ -27,12 +30,10 @@ public sealed class ReportPreparer(ITextMeasurer? textMeasurer = null, Expressio
                 throw new ReportPreparationException([new("RS1002", $"Required parameter '{p.Name}' has no value.")]);
         var context = new EvaluationContext
         {
-            Parameters = values,
-            Tables = document.Data.ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase),
+            Parameters = values, Tables = document.Data.ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase),
             ReportDate = options.ReportDate ?? DateTime.UtcNow
         };
-        var watch = Stopwatch.StartNew();
-        int totalPages = 1;
+        var watch = Stopwatch.StartNew(); int totalPages = 1;
         for (int pass = 0; pass < options.MaximumPasses; pass++)
         {
             cancellationToken.ThrowIfCancellationRequested();

@@ -47,6 +47,7 @@ public sealed record ItemStyle
 [JsonDerivedType(typeof(ChartItem), "chart")]
 [JsonDerivedType(typeof(TableItem), "table")]
 [JsonDerivedType(typeof(MatrixItem), "matrix")]
+[JsonDerivedType(typeof(SubreportItem), "subreport")]
 public abstract record ReportItem
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
