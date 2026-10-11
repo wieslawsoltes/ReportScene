@@ -15,6 +15,8 @@ test('all eight visible resize handles anchor opposite edges and preserve undo c
     const snapshot = await state(page), r = snapshot.Objects.find(o => o.Id === 'a').Screen, scale = snapshot.Zoom * 96 / 72;
     await page.mouse.move(r.X + r.Width * hx, r.Y + r.Height * hy); await page.mouse.down();
     await page.mouse.move(r.X + r.Width * hx + 12 * scale, r.Y + r.Height * hy + 8 * scale, { steps: 4 }); await page.mouse.up();
+    await expect.poll(async () => (await state(page)).ActiveDrag).toBe(false);
+    await expect.poll(async () => (await state(page)).CanUndo).toBe(true);
     await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'a').Bounds, { message: name }).toEqual({ X: x, Y: y, Width: width, Height: height });
     expect((await state(page)).HistoryCount).toBe(1); expect((await state(page)).CanUndo).toBe(true);
     await click(page, 'quick-undo'); await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'a').Bounds).toEqual(original);

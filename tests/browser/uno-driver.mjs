@@ -10,11 +10,16 @@ export async function ready(page) {
   await page.waitForFunction(() => window.reportScene?.presented || window.reportScene?.presentationError, null, { timeout: 60_000 });
   expect(await page.evaluate(() => window.reportScene.presentationError)).toBeFalsy();
   await expect(page.locator('.uno-loader, #uno-loading')).toHaveCount(0);
-  await fresh(page); await screenshot(page);
+  await screenshot(page); await fresh(page);
 }
 export async function fresh(page) {
   const before = (await state(page))?.SnapshotSequence ?? 0;
-  await expect.poll(async () => (await state(page))?.SnapshotSequence ?? 0).toBeGreaterThan(before + 1);
+  try {
+    await expect.poll(async () => (await state(page))?.SnapshotSequence ?? 0).toBeGreaterThan(before + 1);
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => ({ fatal: window.reportSceneFatal, diagnosticError: window.reportScene?.diagnosticError, presented: window.reportScene?.presented, sequence: window.reportScene?.state?.SnapshotSequence }));
+    throw new Error(`Native diagnostic publication stopped: ${JSON.stringify(diagnostic)}`, { cause: error });
+  }
 }
 export async function bounds(page, id) {
   await expect.poll(async () => Boolean((await state(page))?.Commands[id]), { message: `Visible Uno control ${id}` }).toBeTruthy();
@@ -35,7 +40,20 @@ export async function fill(page, id, text) {
 export async function choose(page, id, index) {
   const r = await bounds(page, id);
   await page.mouse.click(r.X + r.Width - 14, r.Y + r.Height - 15);
-  await click(page, `${id}-option-${index}`);
+  const optionId = `${id}-option-${index}`;
+  await fresh(page);
+  // Realized ComboBox containers may be reported before the popup's opening animation
+  // has settled. Require the same rectangle across three distinct published snapshots.
+  let previous = '', previousSequence = -1, stable = 0;
+  await expect.poll(async () => {
+    const snapshot = await state(page), rect = snapshot?.Commands[optionId];
+    if (!rect || snapshot.SnapshotSequence === previousSequence) return false;
+    const key = JSON.stringify(rect); stable = key === previous ? stable + 1 : 1;
+    previous = key; previousSequence = snapshot.SnapshotSequence;
+    return stable >= 3;
+  }, { message: `Stable native popup item ${optionId}` }).toBe(true);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await click(page, optionId);
   await expect.poll(async () => Boolean((await state(page))?.Commands[`${id}-option-${index}`])).toBe(false);
 }
 export async function save(page) {

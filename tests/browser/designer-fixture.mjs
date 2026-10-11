@@ -30,7 +30,9 @@ export async function selectObject(page, id, additive = false) {
   try { await page.mouse.click(item.Screen.X + item.Screen.Width / 2, item.Screen.Y + item.Screen.Height / 2); }
   finally { if (additive) await page.keyboard.up('Control'); }
   await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === id)?.Selected).toBe(true);
-  await expect.poll(async () => (await state(page)).ActiveDrag).toBe(false); await fresh(page);
+  await expect.poll(async () => (await state(page)).ActiveDrag).toBe(false);
+  if (!additive) await expect.poll(async () => (await state(page)).SelectedCount).toBe(1);
+  await fresh(page);
 }
 export async function propertyBounds(page, id) {
   await expect.poll(async () => Boolean((await state(page)).Properties[id]), { message: `Native property ${id}` }).toBe(true);

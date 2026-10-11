@@ -7,7 +7,9 @@ public sealed record DesignObject(ReportItem Item, Band Band, RectD Bounds);
 public sealed record DesignLayout(ReportPage Page, RectD Paper, IReadOnlyList<DesignBand> Bands, IReadOnlyList<DesignObject> Objects, double Width, double Height)
 {
     public const double BandPanelWidth = 110, RulerSize = 20;
-    public static DesignLayout Create(ReportPage page)
+    public static DesignLayout Create(ReportPage page) => Create(page, true);
+    /// <summary>Compact band authoring need not show unused physical-paper height. Stored geometry is unchanged.</summary>
+    public static DesignLayout Create(ReportPage page, bool showFullPage)
     {
         var bands = new List<DesignBand>(); var objects = new List<DesignObject>();
         double y = RulerSize + page.Margins.Top;
@@ -28,7 +30,7 @@ public sealed record DesignLayout(ReportPage Page, RectD Paper, IReadOnlyList<De
             foreach (var item in band.Items) objects.Add(new(item, band, item.Bounds.Offset(bounds.X, y)));
             y += height + 1;
         }
-        double paperHeight = Math.Max(page.Height, y + page.Margins.Bottom - RulerSize);
+        double paperHeight = Math.Max(showFullPage ? page.Height : RulerSize, y + page.Margins.Bottom - RulerSize);
         return new(page, new(BandPanelWidth + RulerSize, RulerSize, page.Width, paperHeight), bands, objects, BandPanelWidth + RulerSize + page.Width + 12, paperHeight + RulerSize + 12);
     }
     public DesignObject? HitTest(double x, double y) => Objects.Reverse().FirstOrDefault(o => o.Bounds.Contains(x, y));

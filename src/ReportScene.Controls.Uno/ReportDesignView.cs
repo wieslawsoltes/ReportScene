@@ -21,7 +21,11 @@ public sealed class ReportDesignView : UserControl, IDisposable
     private bool dragging, marquee, additive, disposed;
     private ResizeHandle? resizeHandle;
     private uint? pointerId;
+    private string? clickSelection;
+    private bool pointerMoved;
     private double zoom = .85;
+    private bool showFullPage;
+    public bool ShowFullPage { get => showFullPage; set { if (showFullPage == value) return; showFullPage = value; Refresh(); } }
     public DesignerSession Session { get; }
     public ReportRenderer Renderer { get; }
     public bool ShowGrid { get => surface.ShowGrid; set { if (surface.ShowGrid == value) return; surface.ShowGrid = value; surface.Invalidate(); ViewChanged?.Invoke(); } }
@@ -64,7 +68,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     private void SelectionChanged(object? sender, EventArgs e) { surface.Invalidate(); ViewChanged?.Invoke(); }
     public void Refresh()
     {
-        surface.Layout = DesignLayout.Create(Session.Page); LayoutBuildCount++; SizeSurface();
+        surface.Layout = DesignLayout.Create(Session.Page, ShowFullPage); LayoutBuildCount++; SizeSurface();
     }
     private void SizeSurface()
     {
@@ -84,12 +88,14 @@ public sealed class ReportDesignView : UserControl, IDisposable
         var pointer = e.GetCurrentPoint(surface);
         if (!pointer.Properties.IsLeftButtonPressed && pointer.PointerDevice.PointerDeviceType == Windows.Devices.Input.PointerDeviceType.Mouse) return;
         Focus(FocusState.Pointer); start = new(pointer.Position.X / PointScale, pointer.Position.Y / PointScale);
+        clickSelection = null; pointerMoved = false;
         additive = (e.KeyModifiers & (VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift)) != 0;
         var selected = surface.Layout.Objects.LastOrDefault(o => Session.SelectedIds.Contains(o.Item.Id) && !o.Item.Locked);
         resizeHandle = selected is null ? null : DesignerGeometry.HitHandle(selected.Bounds, start.X, start.Y, 5 / PointScale);
         if (resizeHandle is not null) { Session.BeginDrag(); dragging = Session.HasActiveDrag; }
         else if (surface.Layout.HitTest(start.X, start.Y) is { } hit)
         {
+            if (!additive && Session.SelectedIds.Count > 1 && Session.SelectedIds.Contains(hit.Item.Id)) clickSelection = hit.Item.Id;
             if (additive || !Session.SelectedIds.Contains(hit.Item.Id)) Session.Select(hit.Item.Id, additive);
             Session.BeginDrag(); dragging = Session.HasActiveDrag;
         }
@@ -107,6 +113,9 @@ public sealed class ReportDesignView : UserControl, IDisposable
     {
         if (pointerId != e.Pointer.PointerId || !dragging && !marquee) return;
         var p = e.GetCurrentPoint(surface).Position; double x = p.X / PointScale, y = p.Y / PointScale;
+        // Preserve a multi-selection for dragging, but collapse an ordinary completed click.
+        // A physical movement remains a drag even when it snaps back to the same geometry.
+        pointerMoved |= Math.Abs(x - start.X) * PointScale > 3 || Math.Abs(y - start.Y) * PointScale > 3;
         if (dragging)
         {
             if (resizeHandle is { } handle) Session.PreviewResize(x - start.X, y - start.Y, handle);
@@ -119,13 +128,15 @@ public sealed class ReportDesignView : UserControl, IDisposable
     {
         if (pointerId != e.Pointer.PointerId) return;
         if (dragging) Session.CommitDrag();
+        if (!pointerMoved && clickSelection is { } clicked) Session.Select(clicked);
+        clickSelection = null;
         if (marquee && surface.Marquee is { } box && box.Width > 1 && box.Height > 1) Session.SelectMany(surface.Layout.Intersect(box).Select(o => o.Item.Id), additive);
         dragging = marquee = false; resizeHandle = null; pointerId = null; surface.Marquee = null;
         surface.ReleasePointerCapture(e.Pointer); surface.Invalidate(); InteractionCompleted?.Invoke(); ViewChanged?.Invoke(); e.Handled = true;
     }
     private void Cancel()
     {
-        Session.CancelDrag(); dragging = marquee = false; resizeHandle = null; pointerId = null; surface.Marquee = null;
+        Session.CancelDrag(); clickSelection = null; dragging = marquee = false; resizeHandle = null; pointerId = null; surface.Marquee = null;
         surface.ReleasePointerCaptures(); surface.Invalidate(); InteractionCompleted?.Invoke(); ViewChanged?.Invoke();
     }
     private void OnKeyDown(object sender, KeyRoutedEventArgs e)
@@ -155,7 +166,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     }
     private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer) : SKCanvasElement
     {
-        public DesignLayout Layout { get; set; } = DesignLayout.Create(session.Page);
+        public DesignLayout Layout { get; set; } = DesignLayout.Create(session.Page, false);
         public double PointScale { get; set; } = 1;
         public bool ShowGrid { get; set; } = true;
         public bool ShowRulers { get; set; } = true;
