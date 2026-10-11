@@ -86,7 +86,11 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private void ViewChanged() { SyncStatusZoom(); NotifyState(); }
     private void AddRoot(UIElement element, int row) { Grid.SetRow(element, row); root.Children.Add(element); }
     private Button Command(string id, string label, string icon, Action action, bool large = false, bool text = true)
-    { var button = ControlTheme.Button(id, label, icon, () => Run(action), large, text); commands[id] = button; return button; }
+    {
+        var button = ControlTheme.Button(id, label, icon, () => Run(action), large, text);
+        if (large) button.Height = 61;
+        commands[id] = button; return button;
+    }
     private Button AsyncCommand(string id, string label, string icon, Func<Task> action, bool large = false, bool text = true)
         => Command(id, label, icon, () => Run(action), large, text);
     private static void Menu(MenuFlyout menu, string label, Action action) { var item = new MenuFlyoutItem { Text = label }; item.Click += (_, _) => action(); menu.Items.Add(item); }
@@ -124,8 +128,10 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private void TextAlignment(TextAlign alignment) => Session.UpdateSelection("Text alignment", i => i with { Style = i.Style with { Alignment = alignment } });
     private void ToggleStyle(string key)
     {
-        var first = Session.Selection.FirstOrDefault(i => !i.Locked); if (first is null) return;
-        Session.UpdateSelection("Toggle " + key, i => i with { Style = key switch { "bold" => i.Style with { Bold = !first.Style.Bold }, "italic" => i.Style with { Italic = !first.Style.Italic }, _ => i.Style with { Underline = !first.Style.Underline } } });
+        var editable = Session.Selection.Where(i => !i.Locked).ToArray(); if (editable.Length == 0) return;
+        // A mixed selection becomes uniformly enabled; only an all-enabled selection turns off.
+        bool enabled = !editable.All(i => key switch { "bold" => i.Style.Bold, "italic" => i.Style.Italic, _ => i.Style.Underline });
+        Session.UpdateSelection("Toggle " + key, i => i with { Style = key switch { "bold" => i.Style with { Bold = enabled }, "italic" => i.Style with { Italic = enabled }, _ => i.Style with { Underline = enabled } } });
     }
     private void Insert(string kind)
     {

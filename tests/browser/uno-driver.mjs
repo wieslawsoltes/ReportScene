@@ -4,10 +4,10 @@ import fs from 'node:fs/promises';
 export const state = page => page.evaluate(() => window.reportScene?.state);
 export async function ready(page) {
   await page.goto('?diagnostics=1');
-  await page.waitForFunction(() => window.reportScene?.ready || window.reportSceneFatal, { timeout: 180_000 });
+  await page.waitForFunction(() => window.reportScene?.ready || window.reportSceneFatal, null, { timeout: 180_000 });
   expect(await page.evaluate(() => window.reportSceneFatal)).toBeFalsy();
   await expect.poll(async () => (await state(page))?.RenderCount ?? 0).toBeGreaterThan(0);
-  await page.waitForFunction(() => window.reportScene?.presented || window.reportScene?.presentationError, { timeout: 60_000 });
+  await page.waitForFunction(() => window.reportScene?.presented || window.reportScene?.presentationError, null, { timeout: 60_000 });
   expect(await page.evaluate(() => window.reportScene.presentationError)).toBeFalsy();
   await expect(page.locator('.uno-loader, #uno-loading')).toHaveCount(0);
   await fresh(page); await screenshot(page);

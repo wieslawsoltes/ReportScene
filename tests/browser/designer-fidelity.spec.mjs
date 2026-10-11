@@ -1,0 +1,95 @@
+import { test, expect } from '@playwright/test';
+import { state, ready, fresh, bounds, click, fill, choose, save, artifact, screenshot } from './uno-driver.mjs';
+import { loadDesignerFixture, selectObject, typeProperty, propertyBounds, filterProperties } from './designer-fixture.mjs';
+
+test('compact native tool windows resize, cancel, hide and restore without editing the report', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1280, height: 860 }); await ready(page); await loadDesignerFixture(page); await selectObject(page, 'a');
+  const before = await state(page);
+  const search = await bounds(page, 'outline-filter'), tabs = await bounds(page, 'tree-report'), selector = await bounds(page, 'object-selector');
+  expect(tabs.Y).toBeGreaterThan(search.Y); expect(selector.Y).toBeGreaterThan(tabs.Y);
+  expect((await propertyBounds(page, 'name')).Height).toBeLessThanOrEqual(24);
+  expect((await propertyBounds(page, 'text')).Height).toBeLessThanOrEqual(48);
+  let r = await bounds(page, 'sidebar-splitter');
+  await page.mouse.move(r.X + r.Width / 2, r.Y + 80); await page.mouse.down(); await page.mouse.move(r.X + r.Width / 2 - 48, r.Y + 80, { steps: 5 }); await page.mouse.up();
+  await expect.poll(async () => (await state(page)).SidebarWidth).toBeCloseTo(before.SidebarWidth + 48, 0);
+  await page.keyboard.press('ArrowRight'); await expect.poll(async () => (await state(page)).SidebarWidth).toBeCloseTo(before.SidebarWidth + 40, 0);
+  const committed = (await state(page)).SidebarWidth; r = await bounds(page, 'sidebar-splitter');
+  await page.mouse.move(r.X + r.Width / 2, r.Y + 80); await page.mouse.down(); await page.mouse.move(r.X - 30, r.Y + 80, { steps: 3 });
+  await page.keyboard.press('Escape'); await page.mouse.up(); await expect.poll(async () => (await state(page)).SidebarWidth).toBeCloseTo(committed, 0);
+  r = await bounds(page, 'tree-splitter'); await page.mouse.move(r.X + 70, r.Y + r.Height / 2); await page.mouse.down(); await page.mouse.move(r.X + 70, r.Y + r.Height / 2 + 35, { steps: 4 }); await page.mouse.up();
+  await expect.poll(async () => (await state(page)).TreePaneHeight).toBeCloseTo(before.TreePaneHeight + 35, 0);
+  await click(page, 'close-tree'); expect((await state(page)).TreeShown).toBe(false); expect((await state(page)).PropertiesShown).toBe(true);
+  await click(page, 'close-properties'); expect((await state(page)).PropertiesShown).toBe(false);
+  await click(page, 'tab-view'); await click(page, 'reset-layout');
+  await expect.poll(async () => (await state(page)).SidebarWidth).toBe(280); expect((await state(page)).TreePaneHeight).toBe(210);
+  expect((await state(page)).TreeShown && (await state(page)).PropertiesShown).toBe(true);
+  await click(page, 'tab-home'); expect((await state(page)).HistoryCount).toBe(before.HistoryCount); expect((await state(page)).Dirty).toBe(before.Dirty);
+  expect((await state(page)).Diagnostics).toEqual([]);
+  await screenshot(page, info.outputPath('designer-compact-1280.png')); await artifact(info, 'native-workspace-layout.json', await state(page));
+});
+
+test('report explorer filters nested paths, preserves collapsed state and reuses nodes during edits', async ({ page }, info) => {
+  await ready(page); await loadDesignerFixture(page); await click(page, 'tree-report');
+  await expect.poll(async () => (await state(page)).OutlineProjectedCount).toBe(9);
+  await click(page, 'outline-collapse'); await expect.poll(async () => (await state(page)).OutlineVisibleRows).toBe(2);
+  await fill(page, 'outline-filter', 'NestedNote'); await expect.poll(async () => (await state(page)).OutlineProjectedCount).toBe(4);
+  await expect.poll(async () => (await state(page)).OutlineVisibleRows).toBe(4);
+  await screenshot(page, info.outputPath('nested-tree-search.png'));
+  await click(page, 'outline-clear'); await expect.poll(async () => (await state(page)).OutlineVisibleRows).toBe(2);
+  await click(page, 'outline-expand'); await expect.poll(async () => (await state(page)).OutlineVisibleRows).toBe(9);
+  await choose(page, 'object-selector', 5); await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'c')?.Selected).toBe(true);
+  await selectObject(page, 'c'); const before = await state(page); await page.keyboard.press('ArrowRight'); await fresh(page);
+  expect((await state(page)).OutlineCreatedNodes).toBe(before.OutlineCreatedNodes); expect((await state(page)).OutlineUpdates).toBe(before.OutlineUpdates);
+  await filterProperties(page, 'name'); await typeProperty(page, 'name', 'RenamedNote');
+  await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'c')?.Name).toBe('RenamedNote');
+  expect((await state(page)).OutlineCreatedNodes).toBe(before.OutlineCreatedNodes);
+  await expect.poll(async () => (await state(page)).OutlineUpdates).toBeGreaterThan(before.OutlineUpdates);
+  await click(page, 'quick-undo'); await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'c')?.Name).toBe('NestedNote');
+  await fill(page, 'outline-filter', 'NestedNote'); await click(page, 'outline-item:c'); expect((await state(page)).SelectedCount).toBe(1);
+  await click(page, 'tree-data'); await fill(page, 'outline-filter', 'RowNumber'); await click(page, 'outline-table:0/field:1');
+  await expect.poll(async () => (await state(page)).Objects.some(o => o.Text === '[Sales.RowNumber]' && o.Selected)).toBe(true);
+  expect((await state(page)).Diagnostics).toEqual([]); await artifact(info, 'keyed-explorer.json', await state(page));
+});
+
+test('formatting controls track single and mixed selections and undo without inventing edits', async ({ page }, info) => {
+  await ready(page); await loadDesignerFixture(page); const initial = (await state(page)).HistoryCount;
+  await selectObject(page, 'a'); await expect.poll(async () => (await state(page)).Inputs['font-family-value']).toBe('Arial');
+  expect((await state(page)).Inputs['font-size-value']).toBe('14'); expect((await state(page)).Inputs.bold).toBe('True');
+  await selectObject(page, 'b'); await expect.poll(async () => (await state(page)).Inputs['font-family-value']).toBe('Courier New');
+  expect((await state(page)).Inputs['font-size-value']).toBe('9'); expect((await state(page)).Inputs.italic).toBe('True');
+  await selectObject(page, 'a', true); await expect.poll(async () => (await state(page)).SelectedCount).toBe(2);
+  await expect.poll(async () => (await state(page)).Inputs.bold).toBe('Mixed'); expect((await state(page)).Inputs['font-family-value']).toBe('');
+  expect((await state(page)).HistoryCount).toBe(initial); expect((await state(page)).Dirty).toBe(false);
+  await click(page, 'bold'); await expect.poll(async () => (await state(page)).Inputs.bold).toBe('True');
+  expect((await state(page)).HistoryCount).toBe(initial + 1);
+  const edited = await save(page); expect(edited.pages[0].bands[0].items.every(i => i.style.bold)).toBe(true);
+  await click(page, 'quick-undo'); await expect.poll(async () => (await state(page)).Inputs.bold).toBe('Mixed');
+  await selectObject(page, 'a'); await choose(page, 'font-size', 6); await expect.poll(async () => (await state(page)).Inputs['font-size-value']).toBe('16');
+  await click(page, 'quick-undo'); await expect.poll(async () => (await state(page)).Inputs['font-size-value']).toBe('14');
+  await click(page, 'quick-redo'); await expect.poll(async () => (await state(page)).Inputs['font-size-value']).toBe('16');
+  await screenshot(page, info.outputPath('synchronized-formatting.png')); expect((await state(page)).Diagnostics).toEqual([]);
+  await artifact(info, 'formatting-state.json', await state(page));
+});
+
+test('property filtering, categories, validation, Escape and display units use real native editors', async ({ page }, info) => {
+  await ready(page); await loadDesignerFixture(page); await selectObject(page, 'a'); const initial = await state(page);
+  await filterProperties(page, 'Position'); expect((await state(page)).PropertyProjection).toEqual(['left', 'top', 'width', 'height']);
+  await typeProperty(page, 'width', '0'); await expect.poll(async () => (await state(page)).PropertyValidation.length).toBeGreaterThan(0);
+  expect((await state(page)).Objects.find(o => o.Id === 'a').Bounds.Width).toBe(200); expect((await state(page)).HistoryCount).toBe(initial.HistoryCount);
+  await page.keyboard.press('Escape'); await fresh(page); expect((await state(page)).Inputs['property:width']).toBe('200');
+  await typeProperty(page, 'width', '240'); await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'a').Bounds.Width).toBe(240);
+  await click(page, 'quick-undo'); await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'a').Bounds.Width).toBe(200);
+  await click(page, 'properties-clear'); await click(page, 'properties-collapse'); expect((await state(page)).PropertyProjection).toEqual([]);
+  await filterProperties(page, 'text'); expect((await state(page)).PropertyProjection).toContain('text');
+  await click(page, 'properties-alphabetical'); expect((await state(page)).PropertiesAlphabetical).toBe(true);
+  await click(page, 'properties-clear'); await click(page, 'properties-categorized'); await click(page, 'properties-expand');
+  await click(page, 'tab-view'); const beforeUnitChange = (await state(page)).ContentRevision; await choose(page, 'display-units', 0);
+  await expect.poll(async () => (await state(page)).DisplayUnit).toBe('Millimeters'); expect((await state(page)).ContentRevision).toBe(beforeUnitChange);
+  await click(page, 'tab-home'); await filterProperties(page, 'Position');
+  expect(Number((await state(page)).Inputs['property:width'])).toBeCloseTo(200 * 25.4 / 72, 2);
+  await typeProperty(page, 'width', '50.8'); await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'a').Bounds.Width).toBeCloseTo(144, 5);
+  const document = await save(page); expect(document.pages[0].bands[0].items[0].bounds.width).toBeCloseTo(144, 5);
+  expect(document.pages[0].bands[0].items[0].style.fontSize).toBe(14);
+  await screenshot(page, info.outputPath('property-units.png')); await click(page, 'preview'); expect((await state(page)).Diagnostics).toEqual([]);
+  await artifact(info, 'property-native-input.report.json', document);
+});
