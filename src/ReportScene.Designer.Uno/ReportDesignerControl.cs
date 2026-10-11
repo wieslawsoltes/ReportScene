@@ -1,17 +1,15 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
 using ReportScene.Controls.Uno;
 using ReportScene.Engine;
 using ReportScene.Model;
 using ReportScene.Rendering.Skia;
 using ReportScene.Samples;
 using ReportScene.Serialization;
-using Windows.System;
 
 namespace ReportScene.Designer.Uno;
 
-/// <summary>An embeddable report designer. All document mutations pass through DesignerSession; preview and exports share the same prepared report.</summary>
+/// <summary>An embeddable report designer. Document mutations use DesignerSession; preview and exports share prepared output.</summary>
 public sealed partial class ReportDesignerControl : UserControl, IDisposable
 {
     private readonly IReportWorkspaceHost host;
@@ -33,7 +31,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private readonly DispatcherTimer recoveryTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly RecoverySaveCoordinator recovery = new();
     private readonly DesignerActivityTracker activity;
-    private string activeRibbon = "Home", activeTree = "Data", structuralKey = "", clipboard = "";
+    private string activeRibbon = "Home", activeTree = "Data", structuralKey = "";
     private bool refreshingProperties, disposed, previewMode;
     private PreparedReport? prepared;
     private List<SearchHit> searchHits = [];
@@ -78,8 +76,6 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
             {
                 await recovery.FlushWhenReadyAsync(() => !disposed && !Session.HasActiveDrag,
                     () => ReportJson.Serialize(Session.Document), json => host.SaveRecoveryAsync(json));
-                // A request queued before a drag must not capture intermediate geometry.
-                // Check again after each awaited write; retry deferred work after the drag.
                 if (!disposed && recovery.HasPending) recoveryTimer.Start();
             }
             catch (Exception e) { if (!disposed) SetStatus("Recovery save failed: " + e.Message); }
@@ -156,10 +152,10 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         var change = activity.Observe(Session);
         if (change.InvalidatePrepared)
         {
-            prepared = null; searchSession = null; searchHits.Clear(); searchIndex = -1; PreviewView.Report = null;
+            prepared = null; searchSession = null; searchHits.Clear(); searchIndex = -1;
+            if (PreviewView.Report is not null) PreviewView.Report = null;
             if (previewMode) { SetPreview(false); BuildRibbon(); }
         }
-        // Geometry-only drag notifications must not walk and concatenate the whole report tree.
         if (change.RefreshStructure) RefreshStructure();
         if (change.SaveRecovery) { recovery.Request(); recoveryTimer.Stop(); recoveryTimer.Start(); }
         UpdateStatus(); NotifyState();
@@ -230,36 +226,9 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     }
     private void ShowError(Exception error)
     {
+        if (disposed) return;
         if (error is ReportPreparationException preparation) ShowDiagnostics(preparation.Diagnostics);
         else ShowDiagnostics([new("RSUI001", error.Message, ObjectId: error is ReportRenderException rendering ? rendering.ObjectId : null)]);
         SetStatus(error.Message);
-    }
-    private void Run(Action action) { try { action(); } catch (Exception e) { ShowError(e); } }
-    private async void Run(Func<Task> action) { try { await action(); } catch (Exception e) { ShowError(e); } }
-    private void NotifyState() => StateChanged?.Invoke();
-    private void HandleShortcuts(object sender, KeyRoutedEventArgs e)
-    {
-        bool ctrl = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
-        if (e.Key == VirtualKey.F5) { Run(PreparePreview); e.Handled = true; return; }
-        if (!ctrl) return;
-        if (e.OriginalSource is TextBox && e.Key is VirtualKey.C or VirtualKey.X or VirtualKey.V or VirtualKey.A or VirtualKey.Z or VirtualKey.Y) return;
-        switch (e.Key)
-        {
-            case VirtualKey.S: Run(SaveAsync); break; case VirtualKey.O: Run(OpenAsync); break; case VirtualKey.N: Run(NewAsync); break;
-            case VirtualKey.Z: Session.Undo(); break; case VirtualKey.Y: Session.Redo(); break; case VirtualKey.C: Run(CopyAsync); break; case VirtualKey.X: Run(CutAsync); break; case VirtualKey.V: Run(PasteAsync); break; case VirtualKey.A: Session.SelectAll(); break;
-            case VirtualKey.P: Run(PrintAsync); break;
-            default: return;
-        }
-        e.Handled = true;
-    }
-    public async Task RestoreRecoveryAsync()
-    {
-        var json = await host.LoadRecoveryAsync(); if (string.IsNullOrWhiteSpace(json)) return;
-        try { Session.Load(ReportJson.Deserialize(json)); SetStatus("Restored the most recent local workspace."); } catch (Exception e) { SetStatus("Recovery could not be loaded: " + e.Message); }
-    }
-    public new void Dispose()
-    {
-        if (disposed) return; disposed = true; recoveryTimer.Stop(); Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectedChanged;
-        searchSession = null; prepared = null; PreviewView.Report = null; commands.Clear(); treeActions.Clear(); DesignView.Dispose(); renderer.Dispose();
     }
 }

@@ -5,9 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using ReportScene.Controls.Uno;
 using ReportScene.Data;
-using ReportScene.Export;
 using ReportScene.Model;
-using ReportScene.Samples;
 using ReportScene.Serialization;
 
 namespace ReportScene.Designer.Uno;
@@ -16,82 +14,23 @@ public sealed partial class ReportDesignerControl
 {
     private async Task<bool> DialogAsync(string heading, UIElement content, Action? apply = null)
     {
+        var target = apply is null ? null : Operations.CaptureTarget();
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = ControlTheme.Brush("#AD362C"), FontSize = 12, Margin = new(0, 8, 0, 0) };
         var panel = new StackPanel { Spacing = 8, Width = Math.Clamp(ActualWidth - 120, 300, 760) };
         panel.Children.Add(new ScrollViewer { Content = content, MaxHeight = Math.Clamp(ActualHeight - 240, 190, 570), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto }); panel.Children.Add(error);
         var dialog = new ContentDialog { Title = heading, Content = panel, XamlRoot = XamlRoot, PrimaryButtonText = apply is null ? "" : "Apply", CloseButtonText = apply is null ? "Close" : "Cancel", DefaultButton = apply is null ? ContentDialogButton.Close : ContentDialogButton.Primary };
         dialog.Resources["ContentDialogMaxWidth"] = 900d;
-        dialog.PrimaryButtonClick += (_, e) => { try { apply?.Invoke(); } catch (Exception ex) { error.Text = ex.Message; e.Cancel = true; } };
+        dialog.PrimaryButtonClick += (_, e) =>
+        {
+            try { if (target is not null) Operations.EnsureCurrent(target); apply?.Invoke(); }
+            catch (Exception ex) { error.Text = ex.Message; e.Cancel = true; }
+        };
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
     private TextBox Editor(string value, double height = 310)
     {
         var editor = new TextBox { Text = value, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, FontFamily = new FontFamily("Consolas"), FontSize = 12, Height = height, MinWidth = 290, Padding = new(8), MaxLength = ReportJson.MaximumCharacters };
         ScrollViewer.SetHorizontalScrollBarVisibility(editor, ScrollBarVisibility.Auto); ScrollViewer.SetVerticalScrollBarVisibility(editor, ScrollBarVisibility.Auto); commands["dialog-editor"] = ControlTheme.Identify(editor, "dialog-editor", "Document editor"); return editor;
-    }
-    private async Task<bool> DiscardAsync()
-    {
-        if (!Session.IsDirty) return true;
-        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Save report changes?", Content = "Save your current report before opening another document.", PrimaryButtonText = "Save", SecondaryButtonText = "Discard", CloseButtonText = "Cancel" };
-        var result = await dialog.ShowAsync();
-        if (result == ContentDialogResult.None) return false;
-        if (result == ContentDialogResult.Primary) await SaveAsync();
-        return true;
-    }
-    private async Task NewAsync()
-    {
-        if (!await DiscardAsync()) return;
-        Load(new ReportDocument { Name = "Untitled report", Pages = [new() { Bands = [new() { Name = "ReportTitle", Kind = BandKind.ReportTitle, Height = 120 }, new() { Name = "PageFooter", Kind = BandKind.PageFooter, Height = 24 }] }] });
-    }
-    private async Task LoadSampleAsync(string name) { if (await DiscardAsync()) Load(SampleReports.Create(name)); }
-    private void Load(ReportDocument document)
-    {
-        Session.Load(document); prepared = null; PreviewView.Report = null; SetPreview(false); searchTerm = ""; searchHits.Clear(); searchIndex = -1; ShowDiagnostics([]); BuildRibbon(); RefreshStructure(true); SetStatus("Loaded " + document.Name);
-    }
-    private async Task OpenAsync()
-    {
-        if (!await DiscardAsync()) return;
-        var file = await host.OpenFileAsync([".json", ".frx"]); if (file is null) return;
-        string content = Encoding.UTF8.GetString(file.Content);
-        if (file.Name.EndsWith(".frx", StringComparison.OrdinalIgnoreCase) || content.TrimStart().StartsWith('<'))
-        {
-            var imported = FrxSerializer.Import(content); ShowDiagnostics(imported.Diagnostics);
-            if (!imported.Success) throw new FormatException("This FRX file contains unsupported features. The current document has not been replaced. See Messages for the import diagnostics.");
-            Load(imported.Document); ShowDiagnostics(imported.Diagnostics);
-        }
-        else Load(ReportJson.Deserialize(content));
-    }
-    private async Task SaveAsync()
-    {
-        var problems = DocumentValidator.Validate(Session.Document);
-        if (problems.Any(d => d.Severity == DiagnosticSeverity.Error)) { ShowDiagnostics(problems); throw new FormatException("Correct validation errors before saving."); }
-        await host.SaveFileAsync(new(Session.Document.Name + ".report.json", "application/json", Encoding.UTF8.GetBytes(ReportJson.Serialize(Session.Document)))); Session.MarkSaved(); SetStatus("Saved " + Session.Document.Name);
-    }
-    private async Task SaveFrxAsync()
-    {
-        string xml = FrxSerializer.Export(Session.Document);
-        await host.SaveFileAsync(new(Session.Document.Name + ".frx", "application/xml", Encoding.UTF8.GetBytes(xml)));
-        SetStatus("FRX subset exported. Bound row data is retained in native JSON, not embedded in this FRX export.");
-    }
-    private async Task ExportAsync(ExportFormat format)
-    {
-        var report = prepared ?? Prepare(); prepared = report;
-        var file = new ReportExporter().Export(report, format, document: Session.Document); await host.SaveFileAsync(file); SetStatus($"Exported {file.Name} · {file.Content.Length:N0} bytes");
-    }
-    private async Task PrintAsync()
-    {
-        var report = prepared ?? Prepare(); prepared = report;
-        await host.PrintAsync(new ReportExporter().Export(report, ExportFormat.Html)); SetStatus("Opened the prepared report for printing.");
-    }
-    private async Task CopyAsync() { clipboard = Session.Copy(); await host.SetClipboardTextAsync(clipboard); SetStatus("Copied " + Session.SelectedIds.Count + " object(s)"); }
-    private async Task CutAsync() { await CopyAsync(); Session.DeleteSelection(); }
-    private async Task PasteAsync()
-    {
-        string? value;
-        try { value = await host.GetClipboardTextAsync(); } catch { value = clipboard; }
-        if (string.IsNullOrWhiteSpace(value)) value = clipboard;
-        if (string.IsNullOrWhiteSpace(value)) return;
-        Session.Paste(value); DesignView.ScrollToSelection();
     }
     private async Task ColorAsync(bool foreground)
     {
@@ -108,11 +47,13 @@ public sealed partial class ReportDesignerControl
         if (item.Locked) throw new InvalidOperationException("The selected object is locked.");
         if (item is ImageItem)
         {
-            var file = await host.OpenFileAsync([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"]); if (file is null) return;
-            if (file.Content.Length > 16_000_000) throw new FormatException("Embedded images are limited to 16 MB.");
-            using var data = SkiaSharp.SKData.CreateCopy(file.Content); using var codec = SkiaSharp.SKCodec.Create(data) ?? throw new FormatException("Unsupported image format.");
-            if ((long)codec.Info.Width * codec.Info.Height > 32_000_000) throw new FormatException("Decoded images are limited to 32 megapixels.");
-            Session.UpdateSelection("Load image", i => i is ImageItem image ? image with { Data = file.Content } : i); return;
+            await Operations.ReadAndApplyAsync(() => host.OpenFileAsync([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"]), file =>
+            {
+                if (file.Content.Length > 16_000_000) throw new FormatException("Embedded images are limited to 16 MB.");
+                using var data = SkiaSharp.SKData.CreateCopy(file.Content); using var codec = SkiaSharp.SKCodec.Create(data) ?? throw new FormatException("Unsupported image format.");
+                if ((long)codec.Info.Width * codec.Info.Height > 32_000_000) throw new FormatException("Decoded images are limited to 32 megapixels.");
+                Session.UpdateSelection("Load image", i => i is ImageItem image ? image with { Data = file.Content } : i);
+            }, selectionSensitive: true); return;
         }
         if (item is TextItem text)
         {
@@ -197,11 +138,14 @@ public sealed partial class ReportDesignerControl
     }
     private async Task ImportDataAsync()
     {
+        var requested = Operations.CaptureRevision();
         var file = await host.OpenFileAsync([".json", ".csv"]); if (file is null) return;
+        Operations.EnsureCurrent(requested);
         var name = new TextBox { Header = "Data table name (replaces an existing table with this name)", Text = Session.SelectedBand?.DataSource ?? Path.GetFileNameWithoutExtension(file.Name) };
         var infer = new CheckBox { Content = "Infer numeric CSV values (may remove leading zeros)", IsChecked = false };
         await DialogAsync("Import local data", Vertical(name, infer), () =>
         {
+            Operations.EnsureCurrent(requested);
             string text = Encoding.UTF8.GetString(file.Content); string tableName = RequireName(name.Text);
             var table = file.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) ? DataReaders.Csv(text, tableName, options: new(InferNumbers: infer.IsChecked == true)) : DataReaders.Json(text, tableName);
             Session.ReplaceData(table); SetStatus($"Imported {table.Rows.Count} rows into {table.Name}");
@@ -248,9 +192,5 @@ public sealed partial class ReportDesignerControl
         var editor = Editor(ReportJson.Serialize(Session.Document), 400);
         await DialogAsync("Native report document — JSON", editor, () => Load(ReportJson.Deserialize(editor.Text)));
     }
-    private Task ShowCompatibilityAsync()
-    {
-        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Text = "ReportScene is an independent Uno Platform reporting application, not an official FastReport product.\n\nImplemented: typed report objects, band pagination, grouping and aggregates, master/detail relations, columns, parameters, CSV/JSON data, transactional editing, Skia/HarfBuzz rendering, six encoded barcode types, charts/tables, and PDF/SVG/PNG/HTML/text/CSV/native exports.\n\nFRX is a diagnosed subset: scripts, unsupported objects and incompatible features are rejected rather than silently treated as supported. Importing an FRX data schema does not import its external database rows.\n\nNot complete FastReport .NET parity: arbitrary C#/VB.NET scripts and events, all data providers, report inheritance, rich text/HTML objects, matrix/cross-tab, subreport objects, dialog pages, all commercial object types and export formats, and pixel-identical UI conformance remain outside this implementation.\n\nThe application never executes imported scripts or opens imported connection strings. Keep the native .report.json format to preserve embedded data and ReportScene-specific features.\n\nSource and implementation matrix: github.com/wieslawsoltes/ReportScene" };
-        return DialogAsync("ReportScene — compatibility", text);
-    }
+    private Task ShowCompatibilityAsync() => ShowCurrentCompatibilityAsync();
 }
