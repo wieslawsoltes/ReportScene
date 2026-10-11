@@ -6,7 +6,7 @@ namespace ReportScene.Designer;
 public enum AlignmentCommand { Left, Center, Right, Top, Middle, Bottom, SameWidth, SameHeight, DistributeHorizontal, DistributeVertical }
 
 /// <summary>Delta-based history keeps data tables out of per-pointer-move snapshots. One drag creates one undo entry.</summary>
-public sealed class DesignerSession
+public sealed partial class DesignerSession
 {
     private sealed record Edit(string Name, Action Redo, Action Undo, long Before, long After, string[] BeforeSelection, string[] AfterSelection);
     private readonly List<Edit> history = [];
@@ -63,8 +63,7 @@ public sealed class DesignerSession
     private void Execute(string name, Action redo, Action undo, string[]? afterSelection = null)
     {
         if (dragOriginal is not null) throw new InvalidOperationException("Complete or cancel the active drag before another edit.");
-        var before = selected.ToArray(); var after = afterSelection ?? before;
-        redo();
+        var before = selected.ToArray(); var after = afterSelection ?? before; redo();
         if (position < history.Count) history.RemoveRange(position, history.Count - position);
         var edit = new Edit(name, redo, undo, revision, ++sequence, before, after);
         history.Add(edit); position++; revision = edit.After;
@@ -91,21 +90,25 @@ public sealed class DesignerSession
     }
     public void UpdateSelection(string description, Func<ReportItem, ReportItem> change)
     {
-        var before = Selection.Where(i => !i.Locked).ToArray();
-        if (before.Length == 0) return;
+        var before = Selection.Where(i => !i.Locked).ToArray(); if (before.Length == 0) return;
         var after = before.Select(change).ToArray();
         foreach (var item in after)
             if (!double.IsFinite(item.Bounds.X) || !double.IsFinite(item.Bounds.Y) || !double.IsFinite(item.Bounds.Width) || !double.IsFinite(item.Bounds.Height) || item.Bounds.X < 0 || item.Bounds.Y < 0 || item.Bounds.Width <= 0 || item.Bounds.Height <= 0)
                 throw new ArgumentException("Invalid object bounds.");
         if (before.SequenceEqual(after)) return;
+        if (after.Any(i => i is SubreportItem))
+        {
+            var replacements = after.ToDictionary(i => i.Id);
+            ValidateReferences(MapDocument(Document, b => b with { Items = b.Items.Select(i => replacements.GetValueOrDefault(i.Id, i)).ToList() }));
+        }
         Execute(description, () => { foreach (var i in after) Replace(i.Id, i); }, () => { foreach (var i in before) Replace(i.Id, i); });
     }
     public ReportItem Add(ReportItem item, string? bandId = null)
     {
         var band = DocumentTree.AllBands(Document).FirstOrDefault(b => b.Id == (bandId ?? BandId)) ?? throw new InvalidOperationException("Select a band before inserting an object.");
         var added = item with { Id = Guid.NewGuid().ToString("N"), Name = UniqueName(item.Name) };
-        Execute("Insert " + added.Name, () => band.Items.Add(added), () => band.Items.RemoveAll(i => i.Id == added.Id), [added.Id]);
-        return added;
+        if (added is SubreportItem) ValidateReferences(MapDocument(Document, b => b.Id == band.Id ? b with { Items = [.. b.Items, added] } : b));
+        Execute("Insert " + added.Name, () => band.Items.Add(added), () => band.Items.RemoveAll(i => i.Id == added.Id), [added.Id]); return added;
     }
     private string UniqueName(string prefix)
     {
@@ -123,16 +126,15 @@ public sealed class DesignerSession
     public void Paste(string json)
     {
         var band = SelectedBand ?? throw new InvalidOperationException("Select a band before pasting.");
-        var source = ReportJson.DeserializeItems(json);
-        if (source.Count == 0) return;
+        var source = ReportJson.DeserializeItems(json); if (source.Count == 0) return;
         var added = source.Select(i => i with { Id = Guid.NewGuid().ToString("N"), Name = UniqueName(i.Name + "Copy"), Bounds = i.Bounds.Offset(8, 8), Locked = false }).ToArray();
+        if (added.Any(i => i is SubreportItem)) ValidateReferences(MapDocument(Document, b => b.Id == band.Id ? b with { Items = [.. b.Items, .. added] } : b));
         Execute("Paste objects", () => band.Items.AddRange(added), () => band.Items.RemoveAll(i => added.Any(a => a.Id == i.Id)), added.Select(i => i.Id).ToArray());
     }
     public void Move(double dx, double dy)
     {
         var items = Selection.Where(i => !i.Locked).ToArray(); if (items.Length == 0) return;
-        dx = Math.Max(dx, -items.Min(i => i.Bounds.X)); dy = Math.Max(dy, -items.Min(i => i.Bounds.Y));
-        UpdateSelection("Move objects", i => i with { Bounds = i.Bounds.Offset(dx, dy) });
+        dx = Math.Max(dx, -items.Min(i => i.Bounds.X)); dy = Math.Max(dy, -items.Min(i => i.Bounds.Y)); UpdateSelection("Move objects", i => i with { Bounds = i.Bounds.Offset(dx, dy) });
     }
     public void BeginDrag() { if (dragOriginal is not null) CancelDrag(); dragOriginal = Selection.Where(i => !i.Locked).ToDictionary(i => i.Id); }
     public void PreviewDrag(double dx, double dy, bool resize = false)
@@ -175,10 +177,8 @@ public sealed class DesignerSession
         if (command is AlignmentCommand.DistributeHorizontal or AlignmentCommand.DistributeVertical)
         {
             bool horizontal = command == AlignmentCommand.DistributeHorizontal;
-            double start = horizontal ? sorted[0].Bounds.X : sorted[0].Bounds.Y;
-            double end = horizontal ? sorted[^1].Bounds.Right : sorted[^1].Bounds.Bottom;
-            double sum = sorted.Sum(i => horizontal ? i.Bounds.Width : i.Bounds.Height);
-            double gap = (end - start - sum) / (sorted.Length - 1), cursor = start;
+            double start = horizontal ? sorted[0].Bounds.X : sorted[0].Bounds.Y, end = horizontal ? sorted[^1].Bounds.Right : sorted[^1].Bounds.Bottom;
+            double sum = sorted.Sum(i => horizontal ? i.Bounds.Width : i.Bounds.Height), gap = (end - start - sum) / (sorted.Length - 1), cursor = start;
             foreach (var item in sorted) { changes[item.Id] = horizontal ? item.Bounds with { X = Math.Max(0, cursor) } : item.Bounds with { Y = Math.Max(0, cursor) }; cursor += (horizontal ? item.Bounds.Width : item.Bounds.Height) + gap; }
         }
         UpdateSelection(command.ToString(), i => i with { Bounds = changes[i.Id] });
@@ -193,12 +193,9 @@ public sealed class DesignerSession
     public void UpdateBand(Band band)
     {
         var old = SelectedBand ?? throw new InvalidOperationException("No band selected.");
-        void ReplaceBand(Band from, Band to)
-        {
-            foreach (var p in Document.Pages) { int index = p.Bands.FindIndex(b => b.Id == from.Id); if (index >= 0) { p.Bands[index] = to; return; } }
-            throw new NotSupportedException("Editing nested band settings is not available in this command; edit the native report document.");
-        }
-        Execute("Edit band", () => ReplaceBand(old, band), () => ReplaceBand(band, old));
+        if (band.Id != old.Id) throw new ArgumentException("Band edits must retain the band identifier.", nameof(band));
+        var updated = MapDocument(Document, b => b.Id == old.Id ? band : b);
+        ValidateReferences(updated); ReplaceDocument("Edit band", updated);
     }
     public void AddBand(BandKind kind)
     {
@@ -215,17 +212,20 @@ public sealed class DesignerSession
     public void UpdatePage(ReportPage page)
     {
         int index = PageIndex; var old = Page;
-        Execute("Page setup", () => Document.Pages[index] = page, () => Document.Pages[index] = old);
+        var updated = Document with { Pages = Document.Pages.Select((p, n) => n == index ? page : p).ToList() };
+        if (page.Name != old.Name) updated = MapDocument(updated, b => b with
+        { Items = b.Items.Select(i => i is SubreportItem s && s.PageName.Equals(old.Name, StringComparison.OrdinalIgnoreCase) ? s with { PageName = page.Name } : i).ToList() });
+        ValidateReferences(updated); ReplaceDocument("Page setup", updated);
     }
     public void AddPage()
     {
-        var page = new ReportPage { Name = "Page" + (Document.Pages.Count + 1), Bands = [new() { Kind = BandKind.ReportTitle, Name = "ReportTitle", Height = 60 }] };
+        string name = UniquePageName("Page");
+        var page = new ReportPage { Name = name, Bands = [new() { Kind = BandKind.ReportTitle, Name = "ReportTitle", Height = 60 }] };
         Execute("Add page", () => Document.Pages.Add(page), () => Document.Pages.Remove(page), []); SetPage(Document.Pages.Count - 1);
     }
     public void ReplaceData(DataTable table)
     {
-        int index = Document.Data.FindIndex(t => t.Name.Equals(table.Name, StringComparison.OrdinalIgnoreCase));
-        DataTable? old = index >= 0 ? Document.Data[index] : null;
+        int index = Document.Data.FindIndex(t => t.Name.Equals(table.Name, StringComparison.OrdinalIgnoreCase)); DataTable? old = index >= 0 ? Document.Data[index] : null;
         Execute("Import data", () => { if (index >= 0) Document.Data[index] = table; else Document.Data.Add(table); }, () => { if (index >= 0) Document.Data[index] = old!; else Document.Data.Remove(table); });
     }
     public void UpdateParameters(List<ReportParameter> parameters)

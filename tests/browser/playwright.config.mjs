@@ -1,8 +1,8 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: '.', testMatch: '*.spec.mjs',
-  // Cold interpreter and software Skia renders on shared runners can exceed 20 seconds.
-  // Wait on native state/realized popup items; never retry a failing test or waive assertions.
+  globalTeardown: './summarize-evidence.mjs',
+  // Wait on observed native state, never retry a failing test or waive assertions.
   timeout: 420_000, expect: { timeout: 60_000 },
   fullyParallel: false, workers: 1, retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],

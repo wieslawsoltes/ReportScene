@@ -2,13 +2,17 @@
 
 A modular .NET reporting engine and Uno Platform designer for desktop and WebAssembly. ReportScene is an independent implementation developed against publicly documented reporting concepts, not an official Fast Reports product or a drop-in FastReport replacement.
 
-[Browser application](https://wieslawsoltes.github.io/ReportScene/) · [Compatibility](docs/compatibility.md) · [Data providers](docs/data-providers.md) · [Validation](docs/validation.md)
+[Browser application](https://wieslawsoltes.github.io/ReportScene/) · [Compatibility](docs/compatibility.md) · [Subreports](docs/subreports.md) · [Data providers](docs/data-providers.md) · [Validation](docs/validation.md)
 
 ## Reporting and authoring
 
 Band pagination, grouping and aggregates, master/detail relations, parameters, multi-column pages, growing text, prepared-page search, charts, tables, pictures, shapes and six barcode symbologies share the same .NET model and preparation engine. Matrix reports add typed hierarchical axes, subtotals and grand totals, nine aggregation operations, multiple measures, percentages, horizontal page tiling and repeated column headers.
 
-The designer offers report/data trees, property editors, drag/resize/snap, alignment, clipboard operations, transactional undo/redo, local recovery, a visual matrix definition editor, and CSV/JSON/XML import with a bounded typed preview. PDF, SVG, PNG, printable HTML, text, CSV and native prepared JSON use the common prepared-page representation. Native report JSON is the lossless interchange format for implemented objects. FRX is an explicitly diagnosed subset; FPX is not supported.
+Subreports reference reusable pages inside the document. Independent mode supports nested and side-by-side report flows with different row heights, caller-scoped parameters, parent-column continuation and physical page numbering. PrintOnParent composes report objects into the containing band, with growing/shrinking content and following-object shifts. Cycles, excessive nesting and unsupported layouts are diagnosed explicitly; [the subreport guide](docs/subreports.md) records the exact boundaries.
+
+The designer offers report/data trees, property editors, drag/resize/snap, alignment, clipboard operations, transactional undo/redo, local recovery, native matrix and subreport editors, target-page navigation, reference-safe page renaming, and CSV/JSON/XML import with a bounded typed preview. Creating a subreport and its target page is one undoable operation.
+
+PDF, SVG, PNG, printable HTML, text, CSV and native prepared JSON use the common prepared-page representation. Native report JSON is the lossless interchange format for implemented objects. FRX is an explicitly diagnosed subset and does not yet translate subreport or matrix objects; FPX is not supported.
 
 Uno controls and report drawing use Skia; text metrics/shaping use HarfBuzz. Browser validation runs the actual .NET WebAssembly application rather than a separate JavaScript mock. CI uses software WebGL, not evidence of hardware GPU performance.
 
@@ -16,17 +20,17 @@ Uno controls and report drawing use Skia; text metrics/shaping use HarfBuzz. Bro
 
 | Package | Responsibility |
 | --- | --- |
-| `ReportScene.Model` | Report objects, typed scalar data and validation |
+| `ReportScene.Model` | Report objects, typed scalar data, validation and subreport reference graph |
 | `ReportScene.Expressions` | Bounded expression parsing and aggregate evaluation |
 | `ReportScene.Data` | CSV/JSON/XML readers, file dispatch and provider contract |
 | `ReportScene.Data.AdoNet` | CLR/DataTable/DataSet/DbDataReader adapters and explicit parameterized query providers |
 | `ReportScene.Matrix` | Independent typed cross-tab aggregation |
-| `ReportScene.Engine` | Band, table and matrix preparation and pagination |
+| `ReportScene.Engine` | Band, table, matrix and nested subreport preparation/pagination |
 | `ReportScene.Serialization` | Source-generated native JSON and diagnosed FRX subset |
-| `ReportScene.Designer` | Headless authoring state and transactional history |
+| `ReportScene.Designer` | Headless authoring state, reference-aware structural editing and transactional history |
 | `ReportScene.Rendering.Skia` | Common report drawing and font-backed metrics |
 | `ReportScene.Export` | Prepared-report exporters |
-| `ReportScene.Controls.Uno` | Reusable design/preview surfaces, property sheets, matrix editor and data preview |
+| `ReportScene.Controls.Uno` | Reusable design/preview surfaces, property sheets, matrix/subreport editors and data preview |
 | `ReportScene.Designer.Uno` | Embeddable designer with host-supplied file/clipboard/print services |
 | `ReportScene.Samples` | Executable example reports |
 
@@ -54,10 +58,10 @@ npx playwright install chromium
 npx playwright test
 ```
 
-Open **View → Samples → Matrix sales** for the cross-tab example, or **Report → Import data** to bind CSV, JSON or scalar XML data. Select a matrix and double-click it or choose **Home → Edit matrix** to edit dimensions, measures, totals and layout.
+Open **View → Samples → Matrix sales**, **Subreport dashboard**, or **Subreport master-detail**. Use **Report → Import data** to bind CSV, JSON or scalar XML data. Double-click a matrix or subreport to edit its definition. The left toolbar includes **Insert subreport and page**, **Edit selected subreport**, and **Open subreport page**. Report page tabs expose the target's normal band/object editor.
 
 ## Scope
 
-This is active development, not complete FastReport .NET parity or production certification. General subreports, rich-text/HTML objects, report inheritance, arbitrary C#/VB.NET scripts/events, dialog pages, native FPX, the full provider/export catalog, and complete original-designer visual/behavioral matching remain outstanding. See the compatibility document for narrower boundaries within implemented areas.
+This is active development, not complete FastReport .NET parity or production certification. Rich-text/HTML objects, report inheritance, arbitrary C#/VB.NET scripts/events, dialog pages, native FPX, the full provider/export catalog, advanced subreport presentation options, and complete original-designer visual/behavioral matching remain outstanding. See the compatibility document for narrower boundaries within implemented areas.
 
 FastReport is a trademark of its respective owner. No proprietary FastReport source, artwork or binaries are included. See [LICENSE](LICENSE).

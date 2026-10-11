@@ -14,6 +14,7 @@ namespace ReportScene.Serialization;
 [JsonSerializable(typeof(ItemStyle))]
 [JsonSerializable(typeof(MatrixDimension))]
 [JsonSerializable(typeof(MatrixMeasure))]
+[JsonSerializable(typeof(SubreportParameter))]
 [JsonSerializable(typeof(List<ReportItem>))]
 [JsonSerializable(typeof(List<Diagnostic>))]
 [JsonSerializable(typeof(DataTable))]
@@ -70,12 +71,9 @@ public static class ReportJson
     private static JsonNode? Parse(string json) => JsonNode.Parse(json, documentOptions: new JsonDocumentOptions { MaxDepth = 96 });
     private static JsonObject Object(JsonNode? node, string name) => node as JsonObject ?? throw new FormatException($"The {name} must be a non-null object.");
     private static JsonArray Array(JsonObject parent, string name) => parent[name] as JsonArray ?? throw new FormatException($"'{name}' must be a non-null array.");
-    private static void Defaults<T>(JsonObject node, T value, JsonTypeInfo<T> info)
-        => Merge(node, JsonSerializer.SerializeToNode(value, info)!.AsObject());
+    private static void Defaults<T>(JsonObject node, T value, JsonTypeInfo<T> info) => Merge(node, JsonSerializer.SerializeToNode(value, info)!.AsObject());
     private static void Merge(JsonObject node, JsonObject defaults)
     {
-        // Populate omitted init-only values explicitly for reflection-free source-generated
-        // WebAssembly deserialization. An explicit null is not an omitted property.
         foreach (var pair in defaults)
         {
             if (!node.ContainsKey(pair.Key)) node.Add(pair.Key, pair.Value?.DeepClone());
@@ -105,18 +103,20 @@ public static class ReportJson
         {
             "text" => new TextItem(), "shape" => new ShapeItem(), "image" => new ImageItem(), "checkbox" => new CheckBoxItem(),
             "barcode" => new BarcodeItem(), "chart" => new ChartItem(), "table" => new TableItem(), "matrix" => new MatrixItem(),
-            _ => throw new FormatException($"Unknown report object type '{type}'.")
+            "subreport" => new SubreportItem(), _ => throw new FormatException($"Unknown report object type '{type}'.")
         };
         var defaultNode = JsonSerializer.SerializeToNode(new List<ReportItem> { defaults }, Context.ListReportItem)![0]!.AsObject();
-        Merge(item, defaultNode);
-        DefaultsObject(item, "bounds", defaultNode["bounds"]!.AsObject());
+        Merge(item, defaultNode); DefaultsObject(item, "bounds", defaultNode["bounds"]!.AsObject());
         NormalizeStyle(Object(item["style"], "object style"));
         if (type == "matrix")
         {
-            foreach (var node in Array(item, "rowDimensions").Concat(Array(item, "columnDimensions")))
-                Defaults(Object(node, "matrix dimension"), new MatrixDimension(), Context.MatrixDimension);
-            foreach (var node in Array(item, "measures"))
-                Defaults(Object(node, "matrix measure"), new MatrixMeasure(), Context.MatrixMeasure);
+            foreach (var node in Array(item, "rowDimensions").Concat(Array(item, "columnDimensions"))) Defaults(Object(node, "matrix dimension"), new MatrixDimension(), Context.MatrixDimension);
+            foreach (var node in Array(item, "measures")) Defaults(Object(node, "matrix measure"), new MatrixMeasure(), Context.MatrixMeasure);
+        }
+        if (type == "subreport") foreach (var node in Array(item, "parameterBindings"))
+        {
+            var parameter = Object(node, "subreport parameter");
+            if (parameter["name"] is null || parameter["expression"] is null) throw new FormatException("A subreport parameter requires a name and expression.");
         }
     }
 }

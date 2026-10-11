@@ -62,6 +62,8 @@ public static partial class DocumentValidator
             if (table.Columns.Distinct(StringComparer.OrdinalIgnoreCase).Count() != table.Columns.Count) Error($"Table '{table.Name}' has duplicate columns.");
             if (table.Rows.Count > 1_000_000) Error($"Table '{table.Name}' exceeds one million rows.");
         }
+        // Do not traverse a malformed band tree while diagnosing page references.
+        if (errors.Count == 0) errors.AddRange(SubreportGraph.Validate(document));
         return errors;
     }
 }

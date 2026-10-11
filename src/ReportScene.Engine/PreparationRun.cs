@@ -15,7 +15,13 @@ internal sealed partial class PreparationRun
     private readonly CancellationToken cancellation;
     private readonly List<PreparedPage> pages = [];
     private readonly CultureInfo culture;
-    private int instances, itemCount;
+    private int itemCount;
+    private sealed class PreparationBudget { public int BandInstances; public int SubreportInvocations; }
+    private PreparationBudget budget = new();
+    private int subreportDepth;
+    private string invocationPrefix = "";
+    private Func<int, FragmentViewport>? embeddedViewport;
+    private double lastUsedHeight;
     public PreparationRun(ReportDocument document, EvaluationContext root, PreparationOptions options,
         ExpressionEngine expressions, ITextMeasurer measurer, CancellationToken cancellation)
     {
@@ -26,8 +32,11 @@ internal sealed partial class PreparationRun
     private sealed record Instance(Band Band, EvaluationContext Context, IReadOnlyList<Instance> Repeat, bool KeepWithNext = false);
     private sealed record FlowSection(double Top, double Bottom, double HeaderHeight, double[] RowEnds,
         List<PreparedItem> HeaderItems, bool RepeatHeaders = true, bool BreakBefore = false);
-    private sealed record Layout(double Height, List<PreparedItem> Items, List<FlowSection>? Sections = null)
-    { public IReadOnlyList<FlowSection> Flows => Sections ?? (IReadOnlyList<FlowSection>)Array.Empty<FlowSection>(); }
+    private sealed record Layout(double Height, List<PreparedItem> Items, List<FlowSection>? Sections = null, List<SubreportItem>? SubreportItems = null)
+    {
+        public IReadOnlyList<FlowSection> Flows => Sections ?? (IReadOnlyList<FlowSection>)Array.Empty<FlowSection>();
+        public IReadOnlyList<SubreportItem> Subreports => SubreportItems ?? (IReadOnlyList<SubreportItem>)Array.Empty<SubreportItem>();
+    }
     private Value Evaluate(string text, EvaluationContext c, string id)
     {
         cancellation.ThrowIfCancellationRequested();
@@ -36,13 +45,14 @@ internal sealed partial class PreparationRun
     }
     private string Text(string text, EvaluationContext c, string id, string? format = null)
     {
+        cancellation.ThrowIfCancellationRequested();
         try { return expressions.Interpolate(text, c, format, culture); }
         catch (ExpressionException e) { throw Failure("RS2001", e.Message, id); }
     }
     private bool Visible(string? expression, EvaluationContext c, string id) => string.IsNullOrWhiteSpace(expression) || Evaluate(expression, c, id).AsBoolean();
     public IReadOnlyList<PreparedPage> Prepare()
     {
-        foreach (var page in document.Pages) Paginate(page);
+        foreach (var page in SubreportGraph.PrintablePages(document)) Paginate(page);
         return pages;
     }
     private IEnumerable<Instance> Emit(Band band, EvaluationContext parent, IReadOnlyList<Instance> inherited)
@@ -57,6 +67,8 @@ internal sealed partial class PreparationRun
         }
         IReadOnlyList<DataRow> source = band.DataSource is { Length: > 0 } name ? root.Tables[name].Rows : [parent.Row];
         string table = band.DataSource ?? parent.TableName;
+        // A subreport invoked from a group in the same table inherits that group's rows.
+        if (subreportDepth > 0 && table.Equals(parent.TableName, StringComparison.OrdinalIgnoreCase)) source = parent.Rows;
         var relation = document.Relations.FirstOrDefault(r => r.ParentTable.Equals(parent.TableName, StringComparison.OrdinalIgnoreCase) && r.ChildTable.Equals(table, StringComparison.OrdinalIgnoreCase));
         string? parentKey = band.ParentKey ?? relation?.ParentColumn, childKey = band.ChildKey ?? relation?.ChildColumn;
         var candidates = new List<(DataRow Row, Value[] Keys, int Index)>();
@@ -100,8 +112,7 @@ internal sealed partial class PreparationRun
             }
             yield break;
         }
-        var group = data.Groups[depth];
-        int start = 0;
+        var group = data.Groups[depth]; int start = 0;
         while (start < rows.Count)
         {
             var value = Evaluate(group.Expression, context with { Row = rows[start] }, data.Id);
@@ -117,7 +128,7 @@ internal sealed partial class PreparationRun
     }
     private Instance Count(Instance instance)
     {
-        if (++instances > options.MaximumBandInstances) throw Failure("RS2002", "Maximum band instance count exceeded.");
+        if (++budget.BandInstances > options.MaximumBandInstances) throw Failure("RS2002", "Maximum band instance count exceeded, including subreports.");
         return instance;
     }
     private void Append(List<PreparedItem> items, PreparedItem item)
@@ -126,6 +137,8 @@ internal sealed partial class PreparationRun
         items.Add(item);
     }
     private Layout Build(Band band, EvaluationContext context, double width)
+        => band.Items.Any(i => i is SubreportItem) ? BuildComposedBand(band, context, width) : BuildCore(band, context, width);
+    private Layout BuildCore(Band band, EvaluationContext context, double width)
     {
         if (!Visible(band.VisibleExpression, context, band.Id)) return new(0, []);
         var items = new List<PreparedItem>(); var flows = new List<FlowSection>(); double height = band.Height;
@@ -142,8 +155,7 @@ internal sealed partial class PreparationRun
             {
                 TextItem t => Text(t.Text, context, item.Id, t.Format),
                 BarcodeItem b => Text(b.Text, context, item.Id),
-                CheckBoxItem check => Evaluate(check.Expression, context, item.Id).AsBoolean() ? "True" : "False",
-                _ => ""
+                CheckBoxItem check => Evaluate(check.Expression, context, item.Id).AsBoolean() ? "True" : "False", _ => ""
             };
             var bounds = item.Bounds;
             if (item is TextItem)
@@ -158,15 +170,12 @@ internal sealed partial class PreparationRun
             {
                 var layout = BuildMatrix(matrix, context, width);
                 foreach (var prepared in layout.Items) Append(items, prepared);
-                flows.AddRange(layout.Flows);
-                bounds = bounds with { Height = layout.Height };
+                flows.AddRange(layout.Flows); bounds = bounds with { Height = layout.Height };
             }
             else if (item is TableItem table)
             {
                 if (!root.Tables.TryGetValue(table.DataSource, out var data)) throw Failure("RS2003", $"Table data source '{table.DataSource}' is not bound.", item.Id);
-                double y = bounds.Y;
-                var columns = table.Columns;
-                double totalWidth = columns.Sum(col => col.Width);
+                double y = bounds.Y; var columns = table.Columns; double totalWidth = columns.Sum(col => col.Width);
                 var rowEnds = new List<double>(); var headerItems = new List<PreparedItem>();
                 void TableRow(DataRow? row, bool header, int number)
                 {
@@ -177,11 +186,9 @@ internal sealed partial class PreparationRun
                         string value = header ? col.Title : Evaluate(col.Expression, context with { Row = row!, TableName = data.Name, Rows = data.Rows, RowNumber = number, Parent = context }, item.Id).AsString(col.Format, culture);
                         var style = item.Style with { Bold = header || item.Style.Bold, Fill = header ? "#E1EAF4" : number % 2 == 0 ? "#F5F7FA" : "#FFFFFF", BorderWidth = Math.Max(.4, item.Style.BorderWidth) };
                         var cell = new TextItem { Id = item.Id + ":" + number + ":" + ci, Name = item.Name, Text = value, Style = style, Bounds = new(x, y, w, table.RowHeight) };
-                        AddText(items, cell, cell.Bounds, TextLayout.Wrap(value, w - style.Padding * 2, style, measurer));
-                        x += w;
+                        AddText(items, cell, cell.Bounds, TextLayout.Wrap(value, w - style.Padding * 2, style, measurer)); x += w;
                     }
-                    y += table.RowHeight;
-                    if (!header) rowEnds.Add(y);
+                    y += table.RowHeight; if (!header) rowEnds.Add(y);
                 }
                 if (table.ShowHeader)
                 {
@@ -199,12 +206,13 @@ internal sealed partial class PreparationRun
                 var points = data.Rows.Select(row => new ChartPoint(row.TryGetValue(chart.CategoryColumn, out var v) ? v.AsString() : "", Evaluate(chart.ValueExpression, context with { Row = row, TableName = data.Name, Rows = data.Rows }, item.Id).AsNumber())).ToArray();
                 Append(items, new(item, bounds, chart.Title, points));
             }
+            else if (item is SubreportItem) throw Failure("RS1501", "Subreport composition was not resolved before drawing.", item.Id);
             else Append(items, new(item, bounds, text));
             height = Math.Max(height, bounds.Bottom);
         }
         flows.Sort((a, b) => a.Top.CompareTo(b.Top));
         for (int i = 1; i < flows.Count; i++)
-            if (flows[i].Top < flows[i - 1].Bottom - .001) throw Failure("RS1412", "Independently paginated tables or matrices overlap vertically. Place them in separate bands.", band.Id);
+            if (flows[i].Top < flows[i - 1].Bottom - .001) throw Failure("RS1412", "Independently paginated tables or matrices overlap vertically. Place them in separate bands or independent subreports.", band.Id);
         if (band.AlternateFill is { } fill && context.RowNumber % 2 == 0)
         {
             if (items.Count >= options.MaximumItems) throw Failure("RS2005", "One band exceeds the prepared-item limit.", band.Id);
