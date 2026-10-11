@@ -33,6 +33,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private readonly DesignerActivityTracker activity;
     private string activeRibbon = "Home", activeTree = "Data", structuralKey = "";
     private bool refreshingProperties, disposed, previewMode;
+    private long statusGeneration;
     private PreparedReport? prepared;
     private List<SearchHit> searchHits = [];
     private int searchIndex = -1;
@@ -163,7 +164,18 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private void SelectedChanged(object? sender, EventArgs args)
     {
         if (refreshingProperties) return; refreshingProperties = true;
-        DispatcherQueue.TryEnqueue(() => { refreshingProperties = false; if (!disposed) { RefreshObjectProperties(); UpdateStatus(); NotifyState(); } });
+        long queuedGeneration = statusGeneration;
+        if (!DispatcherQueue.TryEnqueue(() =>
+        {
+            refreshingProperties = false;
+            if (disposed) return;
+            RefreshObjectProperties();
+            // MarkSaved notifies selection before SaveCurrentAsync publishes its outcome.
+            // Refresh controls/title, but an older queued refresh must not erase a newer
+            // success/error message, particularly the warning that newer edits are unsaved.
+            UpdateStatus(preserveMessage: statusGeneration != queuedGeneration);
+            NotifyState();
+        })) refreshingProperties = false;
     }
     private void RefreshStructure(bool force = false)
     {
@@ -207,16 +219,18 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
             }
         }
     }
-    private void UpdateStatus()
+    private void UpdateStatus() => UpdateStatus(preserveMessage: false);
+    private void UpdateStatus(bool preserveMessage)
     {
         title.Text = Session.Document.Name + (Session.IsDirty ? " *" : "") + " — Report Designer";
         if (commands.TryGetValue("quick-undo", out var undo) && undo is Control u) u.IsEnabled = Session.CanUndo;
         if (commands.TryGetValue("quick-redo", out var redo) && redo is Control r) r.IsEnabled = Session.CanRedo;
         if (commands.TryGetValue("matrix-edit", out var matrix) && matrix is Control m) m.IsEnabled = Session.Selection.OfType<MatrixItem>().Any(i => !i.Locked);
+        if (preserveMessage) return;
         var count = Session.SelectedIds.Count;
         status.Text = previewMode ? $"Preview · page {PreviewView.PageIndex + 1} of {PreviewView.Report?.Pages.Count ?? 0} · {PreviewView.Zoom:P0} · Uno / Skia" : $"{Session.Page.Name} · {(count == 0 ? Session.SelectedBand?.Name ?? "No selection" : count + " object(s) selected")} · {DesignView.Zoom:P0} · points (1/72 in) · Uno / Skia";
     }
-    private void SetStatus(string text) { status.Text = text; NotifyState(); }
+    private void SetStatus(string text) { statusGeneration++; status.Text = text; NotifyState(); }
     private void ToggleMessages() => root.RowDefinitions[4].Height = new(root.RowDefinitions[4].Height.Value == 0 ? 105 : 0);
     private void ShowDiagnostics(IEnumerable<Diagnostic> source)
     {
