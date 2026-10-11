@@ -1,5 +1,4 @@
 #if __WASM__
-using System.Reflection;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using ReportScene.Designer.Uno;
@@ -23,6 +22,18 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
     private static string Invoke(string expression) => WebAssemblyRuntime.InvokeJS(expression);
     public void Attach(ReportDesignerControl designer)
     {
+        // The window is activated before asynchronous font initialization replaces its loading
+        // content. Uno's one-shot bootstrap observer may already have retained the Skia splash.
+        // Complete the framework's normal splash handoff only after this real designer has drawn.
+        // This runs in ordinary application mode too, not only when diagnostics/tests are enabled.
+        var firstFrame = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+        firstFrame.Tick += (_, _) =>
+        {
+            if (!designer.IsLoaded || designer.DesignView.RenderCount == 0) return;
+            firstFrame.Stop();
+            Invoke("requestAnimationFrame(() => requestAnimationFrame(() => { const wrapper = globalThis.Uno?.UI?.Runtime?.Skia?.WebAssemblyWindowWrapper; if (typeof wrapper?.removeLoading !== 'function') { window.reportScene.presentationError = 'Uno Skia loading handoff is unavailable.'; return; } wrapper.removeLoading(); window.reportScene.presented = !document.querySelector('.uno-persistent-loader, #uno-loading'); }));");
+        };
+        firstFrame.Start();
         bool diagnostics = SelfTest || Invoke("String(new URLSearchParams(location.search).get('diagnostics') === '1')") == "true";
         if (diagnostics)
         {
