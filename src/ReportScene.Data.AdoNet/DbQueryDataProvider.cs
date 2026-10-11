@@ -31,7 +31,8 @@ public sealed class DbQueryDataProvider : IDataProvider
             throw new ArgumentException("Invalid query parameter name, type or size.", nameof(parameters));
         if (this.parameters.Select(p => p.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != this.parameters.Length)
             throw new ArgumentException("Query parameter names must be unique.", nameof(parameters));
-        Name = name; this.createConnection = createConnection; this.query = query; this.options = options ?? new(); this.timeoutSeconds = timeoutSeconds;
+        this.options = options ?? new(); this.options.Validate();
+        Name = name; this.createConnection = createConnection; this.query = query; this.timeoutSeconds = timeoutSeconds;
     }
     public async ValueTask<ReportTable> ReadAsync(CancellationToken cancellationToken = default)
     {
@@ -58,6 +59,6 @@ public sealed class DbQueryDataProvider : IDataProvider
         var result = await AdoDataReader.ReadAsync(reader, Name, options, cancellationToken).ConfigureAwait(false);
         if (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false))
             throw new NotSupportedException("A query data provider must return exactly one result set. Use separate providers for additional result sets.");
-        return result;
+        cancellationToken.ThrowIfCancellationRequested(); return result;
     }
 }

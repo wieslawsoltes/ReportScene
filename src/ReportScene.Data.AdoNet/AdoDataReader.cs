@@ -6,7 +6,14 @@ using ReportTable = ReportScene.Model.DataTable;
 namespace ReportScene.Data.AdoNet;
 
 public sealed record AdoDataOptions(int MaximumRows = 100_000, int MaximumColumns = 1024,
-    int MaximumCells = 1_000_000, int MaximumCharacters = 32_000_000, int MaximumBinaryBytes = 16_000_000);
+    int MaximumCells = 1_000_000, int MaximumCharacters = 32_000_000, int MaximumBinaryBytes = 16_000_000)
+{
+    internal void Validate()
+    {
+        if (MaximumRows < 1 || MaximumColumns < 1 || MaximumCells < 1 || MaximumCharacters < 1 || MaximumBinaryBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(AdoDataOptions), "Materialization budgets must be positive; the binary allowance may be zero.");
+    }
+}
 public sealed record ReportDataSet(IReadOnlyList<ReportTable> Tables, IReadOnlyList<DataRelation> Relations);
 
 /// <summary>Provider-independent snapshots. Reader methods consume only the current result set and leave the reader open.</summary>
@@ -17,7 +24,7 @@ public static class AdoDataReader
         ArgumentNullException.ThrowIfNull(reader); cancellationToken.ThrowIfCancellationRequested();
         var buffer = new Buffer(reader, name, options ?? new());
         while (reader.Read()) { cancellationToken.ThrowIfCancellationRequested(); buffer.Add(reader, cancellationToken); }
-        return buffer.Table;
+        cancellationToken.ThrowIfCancellationRequested(); return buffer.Table;
     }
     public static async ValueTask<ReportTable> ReadAsync(DbDataReader reader, string name = "Data", AdoDataOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -25,7 +32,7 @@ public static class AdoDataReader
         var buffer = new Buffer(reader, name, options ?? new());
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         { cancellationToken.ThrowIfCancellationRequested(); buffer.Add(reader, cancellationToken); }
-        return buffer.Table;
+        cancellationToken.ThrowIfCancellationRequested(); return buffer.Table;
     }
     public static ReportTable FromDataTable(System.Data.DataTable table, string? name = null, AdoDataOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -35,13 +42,14 @@ public static class AdoDataReader
     /// <summary>Single-column relations map directly to the report model. Composite relations are diagnosed, never partially copied.</summary>
     public static ReportDataSet FromDataSet(System.Data.DataSet source, AdoDataOptions? options = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(source); cancellationToken.ThrowIfCancellationRequested(); options ??= new();
+        ArgumentNullException.ThrowIfNull(source); cancellationToken.ThrowIfCancellationRequested(); options ??= new(); options.Validate();
         var input = source.Tables.Cast<System.Data.DataTable>().ToArray();
         if (input.Select(t => t.TableName).Distinct(StringComparer.OrdinalIgnoreCase).Count() != input.Length)
             throw new FormatException("Report data table names must be unique, irrespective of ADO.NET namespaces.");
         var relations = new List<DataRelation>();
         foreach (System.Data.DataRelation relation in source.Relations)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (relation.ParentColumns.Length != 1 || relation.ChildColumns.Length != 1)
                 throw new NotSupportedException($"Composite relation '{relation.RelationName}' cannot be represented by the report model. Materialize a single composite key first.");
             relations.Add(new(relation.ParentTable.TableName, relation.ParentColumns[0].ColumnName, relation.ChildTable.TableName, relation.ChildColumns[0].ColumnName));
@@ -57,7 +65,7 @@ public static class AdoDataReader
                 throw new FormatException("The combined DataSet exceeds its materialization limit.");
             result.Add(converted);
         }
-        return new(result.AsReadOnly(), relations.AsReadOnly());
+        cancellationToken.ThrowIfCancellationRequested(); return new(result.AsReadOnly(), relations.AsReadOnly());
     }
     private sealed class Buffer
     {
@@ -66,9 +74,7 @@ public static class AdoDataReader
         private long characters;
         public Buffer(DbDataReader reader, string name, AdoDataOptions options)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(name); this.options = options;
-            if (options.MaximumRows < 1 || options.MaximumColumns < 1 || options.MaximumCells < 1 || options.MaximumCharacters < 1 || options.MaximumBinaryBytes < 0)
-                throw new ArgumentOutOfRangeException(nameof(options));
+            ArgumentException.ThrowIfNullOrWhiteSpace(name); this.options = options; options.Validate();
             if (reader.FieldCount > options.MaximumColumns) throw new FormatException("ADO.NET column limit exceeded.");
             var columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToList();
             if (columns.Any(string.IsNullOrWhiteSpace) || columns.Distinct(StringComparer.OrdinalIgnoreCase).Count() != columns.Count)

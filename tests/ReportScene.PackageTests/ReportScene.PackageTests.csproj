@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><IsPackable>false</IsPackable>
+    <RestoreSources>$(ReportSceneLocalFeed)</RestoreSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ReportScene.Data.AdoNet" Version="0.1.0" />
+    <PackageReference Include="ReportScene.Matrix" Version="0.1.0" />
+    <PackageReference Include="ReportScene.Engine" Version="0.1.0" />
+    <PackageReference Include="ReportScene.Serialization" Version="0.1.0" />
+    <PackageReference Include="ReportScene.Designer" Version="0.1.0" />
+  </ItemGroup>
+  <Target Name="RequireLocalFeed" BeforeTargets="Restore;Build" Condition="'$(ReportSceneLocalFeed)' == ''">
+    <Error Text="Run scripts/pack-core.sh, or set ReportSceneLocalFeed to the directory containing the built nupkgs." />
+  </Target>
+</Project>
