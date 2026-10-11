@@ -18,19 +18,30 @@ internal sealed partial class PreparationRun
         bool explicitSource = !string.IsNullOrEmpty(band.DataSource);
         IReadOnlyList<DataRow> source = explicitSource ? root.Tables[band.DataSource!].Rows : [parent.Row];
         string table = explicitSource ? band.DataSource! : parent.TableName;
-        // Only explicitly bound same-table bands inherit a caller's group. A source-less
-        // band has exactly one implicit row, even in an empty root or multi-row caller.
         if (explicitSource && subreportDepth > 0 && table.Equals(parent.TableName, StringComparison.OrdinalIgnoreCase)) source = parent.Rows;
         var relation = document.Relations.FirstOrDefault(r => r.ParentTable.Equals(parent.TableName, StringComparison.OrdinalIgnoreCase) && r.ChildTable.Equals(table, StringComparison.OrdinalIgnoreCase));
         string? parentKey = band.ParentKey ?? relation?.ParentColumn, childKey = band.ChildKey ?? relation?.ChildColumn;
         var candidates = new List<(DataRow Row, Value[] Keys, int Index)>();
         var sort = band.Groups.Select(g => new Model.SortKey(g.Expression)).Concat(band.Sort).ToArray();
-        int index = 0;
-        foreach (var row in source)
+        IReadOnlyList<int>? positions = null;
+        if (parentKey is not null && childKey is not null && RelationIndex(source, childKey) is { } keyIndex)
         {
-            cancellation.ThrowIfCancellationRequested();
-            var context = parent with { Row = row, Rows = source, TableName = table, Parent = parent, RowNumber = ++index };
-            if (parentKey is not null && childKey is not null && (!row.TryGetValue(childKey, out var childValue) || Value.Compare(childValue, parent.Resolve(parentKey)) != 0)) continue;
+            if (keyIndex.KeyedRowCount == 0) positions = Array.Empty<int>();
+            else
+            {
+                var key = parent.Resolve(parentKey);
+                // Mixed/coercing comparisons retain the original interleaved scan. In
+                // particular, an early filter failure must not be replaced by a later
+                // numeric-conversion failure from eagerly checking every relation key.
+                if (keyIndex.CanUseLookup(key)) positions = keyIndex.Find(key, out _, cancellation);
+            }
+        }
+        IEnumerable<int> ordinals = positions ?? (IEnumerable<int>)Enumerable.Range(0, source.Count);
+        foreach (int ordinal in ordinals)
+        {
+            cancellation.ThrowIfCancellationRequested(); var row = source[ordinal]; int index = ordinal + 1;
+            var context = parent with { Row = row, Rows = source, TableName = table, Parent = parent, RowNumber = index };
+            if (positions is null && parentKey is not null && childKey is not null && (!row.TryGetValue(childKey, out var childValue) || Value.Compare(childValue, parent.Resolve(parentKey)) != 0)) continue;
             if (!Visible(band.Filter, context, band.Id)) continue;
             candidates.Add((row, sort.Select(s => Evaluate(s.Expression, context, band.Id)).ToArray(), index));
         }
