@@ -1,7 +1,7 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using ReportScene.Engine;
 using ReportScene.Model;
 using ReportScene.Rendering.Skia;
 using ReportScene.Validation;
@@ -46,13 +46,23 @@ records.Add(new { name = "page-index", itemCount = items.Length, queryCount = qu
     indexedCandidates = examined, build,
     oldMeasure = Measure(() => queries.Sum(q => items.Count(i => PreparedVisibility.Intersect(i.Bounds, q) is { Width: > 0, Height: > 0 }))),
     newMeasure = Measure(() => queries.Sum(q => index.Query(q).Count)) });
+var intervals = new VerticalIntervalIndex(items.Select(i => (i.Bounds.Y, i.Bounds.Bottom))); long intervalCandidates = 0;
+foreach (var query in queries) { _ = intervals.Query(query.Y, query.Bottom, out int candidates); intervalCandidates += candidates; }
+records.Add(new { name = "pagination-interval-index", intervalCount = intervals.Count, queryCount = queries.Length,
+    baselineCandidates = (long)intervals.Count * queries.Length, indexedCandidates = intervalCandidates,
+    queryMeasure = Measure(() => queries.Sum(q => intervals.Query(q.Y, q.Bottom, out _).Count)) });
+var table = PaginationPerformanceTests.TableReport(10000); var engine = new ReportPreparer();
+records.Add(new { name = "current-table-preparation", sourceRows = 10000,
+    note = "Current complete engine preparation, including page-count passes. No old-engine timing is inferred.",
+    measure = Measure(() => engine.Prepare(table).Pages.Count) });
 var report = new PreparedReport("Search", [page], [], TimeSpan.Zero); var search = new PreparedSearchSession(report); search.SetQuery("Row 999");
-records.Add(new { name = "search-navigation", matchCount = search.Matches.Count,
-    oldMeasure = Measure(() => Enumerable.Range(0, 100).Sum(_ => report.Search("Row 999").Count())),
-    newMeasure = Measure(() => { int found = 0; for (int n = 0; n < 100; n++) { search.SetQuery("Row 999"); if (search.MoveNext() is not null) found++; } return found; }),
+records.Add(new { name = "search-api-rescan-vs-session", matchCount = search.Matches.Count,
+    note = "Compares repeated lazy Search API scans with cached session navigation, not the prior designer's already-cached Find-next behavior.",
+    rescanMeasure = Measure(() => Enumerable.Range(0, 100).Sum(_ => report.Search("Row 999").Count())),
+    cachedNavigationMeasure = Measure(() => { int found = 0; for (int n = 0; n < 100; n++) { search.SetQuery("Row 999"); if (search.MoveNext() is not null) found++; } return found; }),
     search.QueryScanCount });
 var evidence = new { schema = 1, framework = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
-    processors = Environment.ProcessorCount, timestampUtc = DateTime.UtcNow, note = "Median of three in-process repetitions after one warmup; no hardware GPU, FPS or browser latency claim.", results = records };
+    processors = Environment.ProcessorCount, timestampUtc = DateTime.UtcNow, note = "Median of three in-process repetitions after one warmup; index build cost recorded separately. No hardware GPU, FPS or browser latency claim.", results = records };
 string json = JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true });
 Directory.CreateDirectory("artifacts"); File.WriteAllText("artifacts/performance.json", json); Console.WriteLine(json);
 return 0;
