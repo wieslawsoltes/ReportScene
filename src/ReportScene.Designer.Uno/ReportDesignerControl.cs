@@ -20,18 +20,17 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private readonly StackPanel pageTabs = new() { Orientation = Orientation.Horizontal, Spacing = 1 };
     private readonly StackPanel treeTabs = new() { Orientation = Orientation.Horizontal, Spacing = 0 };
     private readonly Border sidebar = new();
-    private readonly TreeView tree = new() { SelectionMode = TreeViewSelectionMode.Single };
+    private readonly ReportOutlineView tree = new();
     private readonly PropertySheet properties = new();
-    private readonly TextBlock title = ControlTheme.Label("ReportScene", 12, true);
+    private readonly TextBlock title = ControlTheme.Label("ReportScene", 11);
     private readonly TextBlock status = ControlTheme.Label("Ready", 11);
-    private readonly TextBlock objectName = ControlTheme.Label("Properties", 12, true);
+    private readonly TextBlock objectName = ControlTheme.Label("Properties", 11);
     private readonly TextBox messages = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontSize = 11, BorderThickness = new(0), Padding = new(8, 4, 8, 4), Background = ControlTheme.Brush("#FFFFFF") };
     private readonly Dictionary<string, FrameworkElement> commands = new(StringComparer.Ordinal);
-    private readonly Dictionary<TreeViewNode, Action> treeActions = new();
     private readonly DispatcherTimer recoveryTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly RecoverySaveCoordinator recovery = new();
     private readonly DesignerActivityTracker activity;
-    private string activeRibbon = "Home", activeTree = "Data", structuralKey = "";
+    private string activeRibbon = "Home", activeTree = "Data";
     private bool refreshingProperties, disposed, previewMode;
     private long statusGeneration;
     private PreparedReport? prepared;
@@ -56,20 +55,20 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         DesignView = new(Session, renderer); PreviewView = new(renderer) { Visibility = Visibility.Collapsed };
         DesignView.EditRequested += item => Run(() => EditAnyObjectAsync(item));
         DesignView.Failed += ShowError; PreviewView.Failed += ShowError; properties.Failed += ShowError;
-        DesignView.ViewChanged += NotifyState; PreviewView.ViewChanged += NotifyState;
+        DesignView.ViewChanged += ViewChanged; PreviewView.ViewChanged += ViewChanged;
+        DesignView.InteractionCompleted += () => SelectedChanged(this, EventArgs.Empty);
+        tree.Invoked += entry => Run(() => InvokeOutline(entry)); tree.ViewChanged += NotifyState;
+        properties.ViewChanged += NotifyState;
         HorizontalContentAlignment = HorizontalAlignment.Stretch; VerticalContentAlignment = VerticalAlignment.Stretch;
-        RequestedTheme = ElementTheme.Light; FontSize = 12;
-        root.Background = ControlTheme.Brush("#F0F1F2");
-        foreach (var height in new[] { new GridLength(29), new GridLength(28), new GridLength(89), new GridLength(1, GridUnitType.Star), new GridLength(0), new GridLength(25) }) root.RowDefinitions.Add(new() { Height = height });
+        RequestedTheme = ElementTheme.Light; FontSize = 11;
+        root.Background = ControlTheme.Brush("#F3F3F3");
+        foreach (var height in new[] { new GridLength(27), new GridLength(25), new GridLength(86), new GridLength(1, GridUnitType.Star), new GridLength(0), new GridLength(24) }) root.RowDefinitions.Add(new() { Height = height });
         BuildTitleBar(); BuildTabBar();
         var ribbonScroll = new ScrollViewer { Content = ribbon, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Enabled };
-        AddRoot(ControlTheme.Panel(ribbonScroll, "#F6F6F6"), 2);
-        BuildWorkspace(); AddRoot(workspace, 3); AddRoot(messages, 4);
-        var statusBar = new Grid { Background = ControlTheme.Brush("#276BA2"), Padding = new(9, 1, 9, 1) };
-        status.Foreground = ControlTheme.Brush("#FFFFFF"); statusBar.Children.Add(status); AddRoot(statusBar, 5);
+        AddRoot(ControlTheme.Panel(ribbonScroll, "#FAFAFA"), 2);
+        BuildWorkspace(); AddRoot(workspace, 3); AddRoot(messages, 4); BuildStatusBar();
         Content = root;
         Session.Changed += SessionChanged; Session.SelectionChanged += SelectedChanged;
-        tree.ItemInvoked += (_, args) => { if (args.InvokedItem is TreeViewNode node && treeActions.TryGetValue(node, out var action)) Run(action); };
         recoveryTimer.Tick += async (_, _) =>
         {
             recoveryTimer.Stop(); if (disposed) return;
@@ -82,8 +81,9 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
             catch (Exception e) { if (!disposed) SetStatus("Recovery save failed: " + e.Message); }
         };
         KeyDown += HandleShortcuts;
-        BuildRibbon(); RefreshStructure(true); RefreshObjectProperties(); UpdateStatus();
+        BuildRibbon(); RefreshStructure(true); RefreshPropertyEditors(); UpdateStatus();
     }
+    private void ViewChanged() { SyncStatusZoom(); NotifyState(); }
     private void AddRoot(UIElement element, int row) { Grid.SetRow(element, row); root.Children.Add(element); }
     private Button Command(string id, string label, string icon, Action action, bool large = false, bool text = true)
     { var button = ControlTheme.Button(id, label, icon, () => Run(action), large, text); commands[id] = button; return button; }
@@ -94,7 +94,8 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private static StackPanel Horizontal(params UIElement[] children) { var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 }; foreach (var child in children) stack.Children.Add(child); return stack; }
     private void SetPreview(bool enabled)
     {
-        previewMode = enabled; DesignView.Visibility = enabled ? Visibility.Collapsed : Visibility.Visible; PreviewView.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed; UpdateStatus(); NotifyState();
+        previewMode = enabled; DesignView.Visibility = enabled ? Visibility.Collapsed : Visibility.Visible; PreviewView.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        UpdateStatus(); UpdateTabSelection(); NotifyState();
     }
     private void PreparePreview()
     {
@@ -123,7 +124,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private void TextAlignment(TextAlign alignment) => Session.UpdateSelection("Text alignment", i => i with { Style = i.Style with { Alignment = alignment } });
     private void ToggleStyle(string key)
     {
-        var first = Session.Selection.FirstOrDefault(); if (first is null) return;
+        var first = Session.Selection.FirstOrDefault(i => !i.Locked); if (first is null) return;
         Session.UpdateSelection("Toggle " + key, i => i with { Style = key switch { "bold" => i.Style with { Bold = !first.Style.Bold }, "italic" => i.Style with { Italic = !first.Style.Italic }, _ => i.Style with { Underline = !first.Style.Underline } } });
     }
     private void Insert(string kind)
@@ -131,7 +132,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         if (previewMode) { SetPreview(false); BuildRibbon(); }
         if (Session.SelectedBand is null) throw new InvalidOperationException("Select a band in the report tree before inserting an object.");
         var band = Session.SelectedBand; double top = Math.Max(0, Math.Min(band.Height - 22, 8)); string source = band.DataSource ?? Session.Document.Data.FirstOrDefault()?.Name ?? "Data";
-        var table = Session.Document.Data.FirstOrDefault(t => t.Name == source);
+        var table = Session.Document.Data.FirstOrDefault(t => t.Name.Equals(source, StringComparison.OrdinalIgnoreCase));
         ReportItem item = kind switch
         {
             "text" => new TextItem { Name = "Text", Text = "Text", Bounds = new(8, top, 140, 24) },
@@ -161,63 +162,25 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         if (change.SaveRecovery) { recovery.Request(); recoveryTimer.Stop(); recoveryTimer.Start(); }
         UpdateStatus(); NotifyState();
     }
+    private void RefreshPropertyEditors()
+    {
+        if (Session.HasActiveDrag) return;
+        var target = Operations.CaptureTarget();
+        properties.CommitGuard = () => Operations.EnsureCurrent(target);
+        using var deferred = properties.DeferRefresh();
+        RefreshObjectProperties(); SyncObjectSelection(); SyncRibbonSelection();
+    }
     private void SelectedChanged(object? sender, EventArgs args)
     {
         if (refreshingProperties) return; refreshingProperties = true;
         long queuedGeneration = statusGeneration;
         if (!DispatcherQueue.TryEnqueue(() =>
         {
-            refreshingProperties = false;
-            if (disposed) return;
-            RefreshObjectProperties();
-            // MarkSaved notifies selection before SaveCurrentAsync publishes its outcome.
-            // Refresh controls/title, but an older queued refresh must not erase a newer
-            // success/error message, particularly the warning that newer edits are unsaved.
-            UpdateStatus(preserveMessage: statusGeneration != queuedGeneration);
-            NotifyState();
+            refreshingProperties = false; if (disposed) return;
+            RefreshPropertyEditors();
+            // An older queued property refresh must not erase a newer save outcome or warning.
+            UpdateStatus(preserveMessage: statusGeneration != queuedGeneration); NotifyState();
         })) refreshingProperties = false;
-    }
-    private void RefreshStructure(bool force = false)
-    {
-        var key = Session.PageIndex + ":" + string.Join('|', Session.Document.Pages.Select(p => p.Name)) + ":" + string.Join('|', DocumentTree.AllBands(Session.Document).Select(b => b.Id + b.Name + string.Join(',', b.Items.Select(i => i.Id + i.Name)))) + ":" + string.Join('|', Session.Document.Data.Select(t => t.Name + t.Rows.Count + string.Join(',', t.Columns)));
-        if (!force && key == structuralKey) return; structuralKey = key;
-        foreach (var id in commands.Keys.Where(k => k.StartsWith("page-tab-", StringComparison.Ordinal)).ToArray()) commands.Remove(id);
-        pageTabs.Children.Clear();
-        for (int n = 0; n < Session.Document.Pages.Count; n++)
-        {
-            int index = n; var button = Command("page-tab-" + n, Session.Document.Pages[n].Name, "", () => { Session.SetPage(index); SetPreview(false); BuildRibbon(); RefreshStructure(true); });
-            button.Background = ControlTheme.Brush(n == Session.PageIndex ? "#FFFFFF" : "#E3E6E9"); button.Padding = new(14, 3, 14, 3); pageTabs.Children.Add(button);
-        }
-        pageTabs.Children.Add(Command("page-tab-add", "+", "", Session.AddPage)); RebuildTree();
-    }
-    private void RebuildTree()
-    {
-        tree.RootNodes.Clear(); treeActions.Clear();
-        TreeViewNode Node(string text, Action? action = null) { var node = new TreeViewNode { Content = text, IsExpanded = true }; if (action is not null) treeActions[node] = action; return node; }
-        if (activeTree == "Data")
-        {
-            foreach (var table in Session.Document.Data)
-            {
-                var rootNode = Node(table.Name + $" ({table.Rows.Count} rows)", () => Run(EditDataAsync));
-                foreach (var field in table.Columns) rootNode.Children.Add(Node(field, () => { Session.Add(new TextItem { Name = field.Replace(" ", ""), Text = $"[{table.Name}.{field}]", Bounds = new(8, 6, 150, 22) }); }));
-                tree.RootNodes.Add(rootNode);
-            }
-            var parametersNode = Node("Parameters", () => Run(ParametersAsync)); foreach (var p in Session.Document.Parameters) parametersNode.Children.Add(Node(p.Name, () => Session.Add(new TextItem { Name = p.Name, Text = $"[Parameters.{p.Name}]", Bounds = new(8, 6, 160, 22) }))); tree.RootNodes.Add(parametersNode);
-            var system = Node("System variables"); foreach (var name in new[] { "PageN", "TotalPages", "RowNumber", "Date", "Now" }) system.Children.Add(Node(name, () => Session.Add(new TextItem { Name = name, Text = "[" + name + "]" }))); tree.RootNodes.Add(system);
-        }
-        else
-        {
-            foreach (var page in Session.Document.Pages)
-            {
-                int index = Session.Document.Pages.IndexOf(page); var p = Node(page.Name, () => Session.SetPage(index));
-                foreach (var band in page.Bands.SelectMany(DocumentTree.Descendants))
-                {
-                    var b = Node(band.Name + " · " + band.Kind, () => { Session.SetPage(index); Session.SelectBand(band.Id); });
-                    foreach (var item in band.Items) b.Children.Add(Node(item.Name, () => { if (Session.PageIndex != index) Session.SetPage(index); Session.Select(item.Id); DesignView.ScrollToSelection(); })); p.Children.Add(b);
-                }
-                tree.RootNodes.Add(p);
-            }
-        }
     }
     private void UpdateStatus() => UpdateStatus(preserveMessage: false);
     private void UpdateStatus(bool preserveMessage)
@@ -226,9 +189,10 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         if (commands.TryGetValue("quick-undo", out var undo) && undo is Control u) u.IsEnabled = Session.CanUndo;
         if (commands.TryGetValue("quick-redo", out var redo) && redo is Control r) r.IsEnabled = Session.CanRedo;
         if (commands.TryGetValue("matrix-edit", out var matrix) && matrix is Control m) m.IsEnabled = Session.Selection.OfType<MatrixItem>().Any(i => !i.Locked);
+        SyncStatusZoom();
         if (preserveMessage) return;
         var count = Session.SelectedIds.Count;
-        status.Text = previewMode ? $"Preview · page {PreviewView.PageIndex + 1} of {PreviewView.Report?.Pages.Count ?? 0} · {PreviewView.Zoom:P0} · Uno / Skia" : $"{Session.Page.Name} · {(count == 0 ? Session.SelectedBand?.Name ?? "No selection" : count + " object(s) selected")} · {DesignView.Zoom:P0} · points (1/72 in) · Uno / Skia";
+        status.Text = previewMode ? $"Preview · page {PreviewView.PageIndex + 1} of {PreviewView.Report?.Pages.Count ?? 0} · Uno / Skia" : $"{Session.Page.Name} · {(count == 0 ? Session.SelectedBand?.Name ?? "No selection" : count + " object(s) selected")} · {DesignerGeometry.UnitLabel(displayUnit)} · Uno / Skia";
     }
     private void SetStatus(string text) { statusGeneration++; status.Text = text; NotifyState(); }
     private void ToggleMessages() => root.RowDefinitions[4].Height = new(root.RowDefinitions[4].Height.Value == 0 ? 105 : 0);
