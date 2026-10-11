@@ -31,12 +31,16 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private readonly Dictionary<string, FrameworkElement> commands = new(StringComparer.Ordinal);
     private readonly Dictionary<TreeViewNode, Action> treeActions = new();
     private readonly DispatcherTimer recoveryTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly RecoverySaveCoordinator recovery = new();
+    private readonly DesignerActivityTracker activity;
     private string activeRibbon = "Home", activeTree = "Data", structuralKey = "", clipboard = "";
-    private bool refreshingProperties, disposed, previewMode, savingRecovery;
+    private bool refreshingProperties, disposed, previewMode;
     private PreparedReport? prepared;
     private List<SearchHit> searchHits = [];
     private int searchIndex = -1;
     private string searchTerm = "";
+    private PreparedSearchSession? searchSession;
+    private ReportSearchOptions searchOptions = new();
     private readonly List<Diagnostic> diagnostics = [];
     public DesignerSession Session { get; }
     public ReportDesignView DesignView { get; }
@@ -49,7 +53,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     public ReportDesignerControl(IReportWorkspaceHost host, ReportDocument? document = null)
     {
         this.host = host;
-        Session = new(document ?? SampleReports.Invoice());
+        Session = new(document ?? SampleReports.Invoice()); activity = new(Session);
         DesignView = new(Session, renderer); PreviewView = new(renderer) { Visibility = Visibility.Collapsed };
         DesignView.EditRequested += item => Run(() => EditAnyObjectAsync(item));
         DesignView.Failed += ShowError; PreviewView.Failed += ShowError; properties.Failed += ShowError;
@@ -69,10 +73,12 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         tree.ItemInvoked += (_, args) => { if (args.InvokedItem is TreeViewNode node && treeActions.TryGetValue(node, out var action)) Run(action); };
         recoveryTimer.Tick += async (_, _) =>
         {
-            recoveryTimer.Stop(); if (savingRecovery) return; savingRecovery = true;
-            try { await host.SaveRecoveryAsync(ReportJson.Serialize(Session.Document)); }
-            catch (Exception e) { SetStatus("Recovery save failed: " + e.Message); }
-            finally { savingRecovery = false; }
+            recoveryTimer.Stop(); if (disposed) return;
+            try
+            {
+                await recovery.FlushAsync(() => ReportJson.Serialize(Session.Document), json => host.SaveRecoveryAsync(json));
+            }
+            catch (Exception e) { if (!disposed) SetStatus("Recovery save failed: " + e.Message); }
         };
         KeyDown += HandleShortcuts;
         BuildRibbon(); RefreshStructure(true); RefreshObjectProperties(); UpdateStatus();
@@ -91,7 +97,8 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     }
     private void PreparePreview()
     {
-        var report = Prepare(); prepared = report; PreviewView.Report = report; SetPreview(true); BuildRibbon(); SetStatus($"Prepared {report.Pages.Count} page(s) in {report.Elapsed.TotalMilliseconds:0} ms · Uno / Skia renderer");
+        var report = Prepare(); prepared = report; searchSession = null; searchHits.Clear(); searchIndex = -1;
+        PreviewView.Report = report; SetPreview(true); BuildRibbon(); SetStatus($"Prepared {report.Pages.Count} page(s) in {report.Elapsed.TotalMilliseconds:0} ms · Uno / Skia renderer");
     }
     private PreparedReport Prepare()
     {
@@ -100,12 +107,16 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         catch (ReportPreparationException e) { ShowDiagnostics(e.Diagnostics); throw; }
     }
     private void Validate() { var p = Prepare(); SetStatus($"Validation passed · {p.Pages.Count} prepared page(s) · {p.Pages.Sum(page => page.Items.Count)} drawing objects"); }
-    private void Find(string term)
+    private void Find(string term) => Find(term, false);
+    private void Find(string term, bool previous)
     {
         if (prepared is null) return;
-        if (term != searchTerm) { searchTerm = term; searchHits = prepared.Search(term).ToList(); searchIndex = -1; }
-        if (searchHits.Count == 0) { PreviewView.Highlight(null); SetStatus("No matches"); return; }
-        searchIndex = (searchIndex + 1) % searchHits.Count; PreviewView.Highlight(searchHits[searchIndex]); SetStatus($"Match {searchIndex + 1} of {searchHits.Count} · page {searchHits[searchIndex].Page}");
+        searchSession ??= new(prepared); searchSession.SetQuery(term, searchOptions); searchTerm = term;
+        var hit = previous ? searchSession.MovePrevious() : searchSession.MoveNext(); searchIndex = searchSession.CurrentIndex;
+        if (hit is null) { PreviewView.Highlight(null); SetStatus("No matches"); return; }
+        PreviewView.Highlight(hit);
+        if (commands.TryGetValue("preview-page", out var element) && element is TextBox page) page.Text = (PreviewView.PageIndex + 1).ToString();
+        SetStatus($"Match {searchIndex + 1} of {searchSession.Matches.Count} · page {hit.Page}");
     }
     private void ApplyStyle(ItemStyle style) => Session.UpdateSelection("Apply style", i => i with { Style = style });
     private void TextAlignment(TextAlign alignment) => Session.UpdateSelection("Text alignment", i => i with { Style = i.Style with { Alignment = alignment } });
@@ -138,7 +149,16 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     }
     private void SessionChanged(object? sender, EventArgs args)
     {
-        prepared = null; RefreshStructure(); UpdateStatus(); recoveryTimer.Stop(); recoveryTimer.Start(); NotifyState();
+        var change = activity.Observe(Session);
+        if (change.InvalidatePrepared)
+        {
+            prepared = null; searchSession = null; searchHits.Clear(); searchIndex = -1; PreviewView.Report = null;
+            if (previewMode) { SetPreview(false); BuildRibbon(); }
+        }
+        // Geometry-only drag notifications must not walk and concatenate the whole report tree.
+        if (change.RefreshStructure) RefreshStructure();
+        if (change.SaveRecovery) { recovery.Request(); recoveryTimer.Stop(); recoveryTimer.Start(); }
+        UpdateStatus(); NotifyState();
     }
     private void SelectedChanged(object? sender, EventArgs args)
     {
@@ -147,8 +167,9 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     }
     private void RefreshStructure(bool force = false)
     {
-        var key = string.Join('|', Session.Document.Pages.Select(p => p.Name)) + ":" + string.Join('|', DocumentTree.AllBands(Session.Document).Select(b => b.Id + b.Name + string.Join(',', b.Items.Select(i => i.Id + i.Name)))) + ":" + string.Join('|', Session.Document.Data.Select(t => t.Name + t.Rows.Count + string.Join(',', t.Columns)));
+        var key = Session.PageIndex + ":" + string.Join('|', Session.Document.Pages.Select(p => p.Name)) + ":" + string.Join('|', DocumentTree.AllBands(Session.Document).Select(b => b.Id + b.Name + string.Join(',', b.Items.Select(i => i.Id + i.Name)))) + ":" + string.Join('|', Session.Document.Data.Select(t => t.Name + t.Rows.Count + string.Join(',', t.Columns)));
         if (!force && key == structuralKey) return; structuralKey = key;
+        foreach (var id in commands.Keys.Where(k => k.StartsWith("page-tab-", StringComparison.Ordinal)).ToArray()) commands.Remove(id);
         pageTabs.Children.Clear();
         for (int n = 0; n < Session.Document.Pages.Count; n++)
         {
@@ -234,6 +255,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     }
     public new void Dispose()
     {
-        if (disposed) return; disposed = true; recoveryTimer.Stop(); Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectedChanged; DesignView.Dispose(); renderer.Dispose();
+        if (disposed) return; disposed = true; recoveryTimer.Stop(); Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectedChanged;
+        searchSession = null; prepared = null; PreviewView.Report = null; commands.Clear(); treeActions.Clear(); DesignView.Dispose(); renderer.Dispose();
     }
 }

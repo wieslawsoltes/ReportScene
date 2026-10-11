@@ -18,7 +18,11 @@ public sealed record EvaluationContext
 
     public Value Resolve(string name)
     {
-        if (name.StartsWith("Parameters.", StringComparison.OrdinalIgnoreCase)) name = name[11..];
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        // Explicit parameter qualification must not fall through to an unrelated row field
+        // or system variable when a binding is missing.
+        if (name.StartsWith("Parameters.", StringComparison.OrdinalIgnoreCase))
+            return Parameters.TryGetValue(name[11..], out var explicitParameter) ? explicitParameter : throw new ExpressionException($"Unknown parameter '{name[11..]}'.");
         if (Parameters.TryGetValue(name, out var parameter)) return parameter;
         switch (name.ToLowerInvariant())
         {
@@ -29,8 +33,7 @@ public sealed record EvaluationContext
             case "date": case "today": return Value.From(ReportDate.Date);
             case "now": case "reportdate": return Value.From(ReportDate);
         }
-        if (name.StartsWith("Parent.", StringComparison.OrdinalIgnoreCase))
-            return Parent?.Resolve(name[7..]) ?? Value.Null;
+        if (name.StartsWith("Parent.", StringComparison.OrdinalIgnoreCase)) return Parent?.Resolve(name[7..]) ?? Value.Null;
         var dot = name.IndexOf('.');
         if (dot >= 0)
         {
