@@ -11,7 +11,7 @@ public static class PackageConsumers
 {
     public static ReportDesignerControl CreateDesigner(IReportWorkspaceHost host, ReportDocument document) => new(host, document);
     public static ReportDesignView CreateDesignSurface(DesignerSession session, ReportRenderer renderer)
-        => new(session, renderer) { Unit = DesignerUnit.Millimeters, ShowRulers = true };
+        => new(session, renderer) { Unit = DesignerUnit.Millimeters, ShowRulers = true, ShowFullPage = false };
     public static ReportPreviewView CreatePreviewSurface(ReportRenderer renderer) => new(renderer);
     public static MatrixDefinitionEditor CreateMatrixEditor(MatrixItem matrix, IEnumerable<DataTable> tables) => new(matrix, tables);
     public static SubreportDefinitionEditor CreateSubreportEditor(SubreportItem subreport, IEnumerable<ReportPage> pages, string owner) => new(subreport, pages, owner);

@@ -91,7 +91,7 @@ public sealed class DesignerOutline
                 result.Add(new(key + "/field:" + c, key, table.Columns[c], OutlineKind.Field, Expression: "[" + table.Name + "." + table.Columns[c] + "]"));
         }
         result.Add(new("system", null, "System Variables", OutlineKind.Group));
-        foreach (var name in new[] { "PageN", "TotalPages", "RowNumber", "Column", "Date", "Now" }) result.Add(new("system:" + name, "system", name, OutlineKind.SystemVariable, Expression: "[" + name + "]"));
+        foreach (var name in new[] { "PageN", "TotalPages", "RowNumber", "ColumnNumber", "Date", "Now" }) result.Add(new("system:" + name, "system", name, OutlineKind.SystemVariable, Expression: "[" + name + "]"));
         result.Add(new("parameters", null, "Parameters", OutlineKind.Group));
         foreach (var parameter in document.Parameters) result.Add(new("parameter:" + parameter.Name, "parameters", parameter.Name, OutlineKind.Parameter, Expression: "[Parameters." + parameter.Name + "]"));
         return new(result);

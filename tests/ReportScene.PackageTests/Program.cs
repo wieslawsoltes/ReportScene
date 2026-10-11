@@ -54,4 +54,10 @@ batch.Select("a"); batch.BeginDrag(); batch.PreviewResize(8, 8, ResizeHandle.Bot
 Check(batch.Selection.Single().Bounds.Width == 128, "directional resize session");
 batch.SetSelectionLocked(true); batch.SetSelectionLocked(false); batch.Undo();
 Check(batch.Selection.Single().Locked, "reversible selection locking");
+batch.SelectPage(); double oldWidth = batch.Page.Width; batch.UpdatePageProperties(batch.Page with { Width = 700 }); batch.Undo();
+Check(batch.SelectedBand is null && batch.Page.Width == oldWidth, "validated page properties preserve page selection through undo");
+Check(DesignLayout.Create(batch.Page, false).Paper.Height < DesignLayout.Create(batch.Page).Paper.Height, "compact band paper extent");
+var layoutCache = new TextLayoutCache(new ApproximateTextMeasurer()); var style = new ItemStyle();
+string wrapped = layoutCache.GetWrappedText("Reusable cached text", 50, style);
+Check(wrapped == layoutCache.GetWrappedText("Reusable cached text", 50, style) && layoutCache.Hits == 1 && layoutCache.Misses == 1, "bounded authoring text cache");
 Console.WriteLine($"{passed}/{passed} isolated package-consumer checks passed.");

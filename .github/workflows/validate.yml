@@ -21,6 +21,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Record tested source revision
+        run: |
+          mkdir -p artifacts
+          git archive --format=zip HEAD -o artifacts/ReportScene-source.zip
+          git rev-parse HEAD HEAD^{tree} > artifacts/source-revision.txt
+          sha256sum artifacts/ReportScene-source.zip > artifacts/source.sha256
       - name: Build and run conformance suite
         run: |
           mkdir -p artifacts
