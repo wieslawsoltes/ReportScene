@@ -82,7 +82,14 @@ public sealed class ReportOutlineView : UserControl
         {
             if (!nodes.TryGetValue(entry.Key, out var node))
             { node = new TreeViewNode(); nodes.Add(entry.Key, node); keys.Add(node, entry.Key); CreatedNodeCount++; }
-            if (!Equals(node.Content, entry.Label)) node.Content = entry.Label;
+            if (!Equals(node.Content, entry.Label))
+            {
+                node.Content = entry.Label;
+                // Uno's node-mode TreeView copies Content when a row is realized.
+                // Refresh the existing presenter too; retaining the node must not
+                // leave the previous report's caption painted after a keyed update.
+                if (tree.ContainerFromNode(node) is TreeViewItem row) row.Content = entry.Label;
+            }
             desired[node] = [];
         }
         foreach (var entry in projection)

@@ -34,7 +34,7 @@ Wrapping compares a frozen reference with the new algorithm using the same curre
 
 ## Actual browser execution
 
-The workflow publishes WebAssembly once and uploads `browser-app`. Three isolated runners download that same artifact, serve it under `/ReportScene/`, and run `--shard=1/3`, `2/3`, or `3/3`. Each runner uses one Chromium/software-rendering worker, independent browser contexts and zero retries. A required aggregate job checks that all three blob reports exist, merges them, and rejects failures, retries, skips, flaky results or missing required scenarios. The gate requires at least 32 scenarios including actual WebAssembly, delayed-host and all nine designer families. `fail-fast: false` lets every shard finish collecting evidence; it never converts a failing shard into success.
+The workflow publishes WebAssembly once and uploads `browser-app`. Four isolated runners download that same artifact, serve it under `/ReportScene/`, and run `--shard=1/4`, `2/4`, `3/4`, or `4/4`. Each runner uses one Chromium/software-rendering worker, independent browser contexts and zero retries. A required aggregate job checks that all four blob reports exist, merges them, and rejects failures, retries, skips, flaky results or missing required scenarios. The gate requires at least 32 scenarios including actual WebAssembly, delayed-host and all nine designer families. `fail-fast: false` lets every shard finish collecting evidence; it never converts a failing shard into success.
 
 Native input scenarios cover editing, pointer transforms, history, save/export/search, matrix definitions and tiles, typed XML preview/import/rejection, ordinary/diagnostic startup, subreport creation/editing/navigation/bindings/lanes, cycle rejection and advanced search/lifecycle behavior. Six delayed-host scenarios exercise actual save bytes and dirty-state undo, Cut selection changes, Paste band changes, late file-picker results and Save-before-new with newer edits or cancellation.
 
@@ -44,7 +44,7 @@ The delayed-host wrapper only delays host I/O acknowledgements after real I/O st
 
 ## Artifacts and limitations
 
-`core-validation` contains conformance/benchmark logs and JSON, packages and sample exports. `uno-packages` contains all thirteen packages and its consumer log. `browser-evidence-1/2/3` retain raw per-shard state/screenshots and HTTP logs; `blob-report-1/2/3` retain mergeable results. `browser-validation` contains the merged report and JSON. The WebAssembly conformance summary is printed by the shard that ran that scenario; other shards must not infer a WASM result.
+`core-validation` contains conformance/benchmark logs and JSON, packages and sample exports. `uno-packages` contains all thirteen packages and its consumer log. `browser-evidence-1/2/3/4` retain raw per-shard state/screenshots and HTTP logs; `blob-report-1/2/3/4` retain mergeable results. `browser-validation` contains the merged report and JSON. The WebAssembly conformance summary is printed by the shard that ran that scenario; other shards must not infer a WASM result.
 
 Record final counts, commit/tree identities and merge/deployment outcomes only after the corresponding jobs complete. Hardware GPU throughput, native/peak memory, browser input latency, interactive desktop qualification across OSes, every external database driver, mobile/accessibility parity and exhaustive FastReport comparison remain unverified. Host-operation tests do not establish browser/filesystem durability guarantees.
 

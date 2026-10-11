@@ -96,7 +96,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -115,7 +115,7 @@ jobs:
         run: |
           python3 -m http.server 8000 --directory artifacts/testsite > artifacts/http.log 2>&1 &
           cd tests/browser
-          npx playwright test --shard=${{ matrix.shard }}/3
+          npx playwright test --shard=${{ matrix.shard }}/4
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -144,9 +144,9 @@ jobs:
           pattern: blob-report-*
           merge-multiple: true
           path: tests/browser/all-blob-reports
-      - name: Require all three shards and merge their results
+      - name: Require all four shards and merge their results
         run: |
-          test "$(find tests/browser/all-blob-reports -name '*.zip' | wc -l)" -eq 3
+          test "$(find tests/browser/all-blob-reports -name '*.zip' | wc -l)" -eq 4
           npm install --prefix tests/browser
           cd tests/browser
           npx playwright merge-reports --config=merge.config.mjs all-blob-reports

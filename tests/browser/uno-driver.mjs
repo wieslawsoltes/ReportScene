@@ -42,6 +42,18 @@ export async function choose(page, id, index) {
   await page.mouse.click(r.X + r.Width - 14, r.Y + r.Height - 15);
   const optionId = `${id}-option-${index}`;
   await fresh(page);
+  // Scroll the actual native popup until the requested row is inside its viewport.
+  // Diagnostics expose clipped hit rectangles, never an invisible off-paper row.
+  for (let step = 0; step < 40 && !(await state(page))?.Commands[optionId]; step++) {
+    const snapshot = await state(page), popup = snapshot?.Commands[`${id}-popup`];
+    if (!popup) { await fresh(page); continue; }
+    const visible = Object.keys(snapshot.Commands).filter(k => k.startsWith(`${id}-option-`))
+      .map(k => Number(k.slice(`${id}-option-`.length))).filter(Number.isFinite);
+    const direction = visible.length && index < Math.min(...visible) ? -1 : 1;
+    await page.mouse.move(popup.X + popup.Width / 2, popup.Y + popup.Height / 2);
+    await page.mouse.wheel(0, direction * Math.max(22, Math.min(120, popup.Height * .6)));
+    await fresh(page);
+  }
   // Realized ComboBox containers may be reported before the popup's opening animation
   // has settled. Require the same rectangle across three distinct published snapshots.
   let previous = '', previousSequence = -1, stable = 0;

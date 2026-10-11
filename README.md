@@ -69,7 +69,7 @@ npx playwright install chromium
 npx playwright test
 ```
 
-CI publishes one WebAssembly artifact, tests it across three isolated shards, and requires every shard plus merged evidence before deployment. Local `playwright test` runs the complete suite with one worker. No automatic retries are enabled. The benchmark records differential checks, work counts, allocations and timings in `artifacts/performance.json`; fixture measurements are not universal or hardware-GPU speed claims.
+CI publishes one WebAssembly artifact, tests it across four isolated shards, and requires every shard plus merged evidence before deployment. Local `playwright test` runs the complete suite with one worker. No automatic retries are enabled. The benchmark records differential checks, work counts, allocations and timings in `artifacts/performance.json`; fixture measurements are not universal or hardware-GPU speed claims.
 
 Open **View → Samples → Matrix sales**, **Subreport dashboard**, or **Subreport master-detail**. Use **Report → Import data** to bind CSV, JSON or scalar XML data. Double-click a matrix or subreport to edit its definition. The left toolbar includes **Insert subreport and page**, **Edit selected subreport**, and **Open subreport page**. Report page tabs expose the target's normal band/object editor. **View → Panels → Reset layout** restores closed tool panes; the search field above the explorer and the property filter operate independently.
 

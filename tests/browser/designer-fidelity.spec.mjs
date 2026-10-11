@@ -5,6 +5,8 @@ import { loadDesignerFixture, selectObject, typeProperty, propertyBounds, filter
 test('compact native tool windows resize, cancel, hide and restore without editing the report', async ({ page }, info) => {
   await page.setViewportSize({ width: 1280, height: 860 }); await ready(page); await loadDesignerFixture(page); await selectObject(page, 'a');
   const before = await state(page);
+  await expect.poll(async () => (await state(page)).Inputs['outline-table:0']).toBe('Sales (1 rows)');
+  await expect.poll(async () => (await state(page)).Inputs['outline-table:0/field:0']).toBe('Name');
   const search = await bounds(page, 'outline-filter'), tabs = await bounds(page, 'tree-report'), selector = await bounds(page, 'object-selector');
   expect(tabs.Y).toBeGreaterThan(search.Y); expect(selector.Y).toBeGreaterThan(tabs.Y);
   expect((await propertyBounds(page, 'name')).Height).toBeLessThanOrEqual(24);
@@ -44,6 +46,8 @@ test('report explorer filters nested paths, preserves collapsed state and reuses
   await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'c')?.Name).toBe('RenamedNote');
   expect((await state(page)).OutlineCreatedNodes).toBe(before.OutlineCreatedNodes);
   await expect.poll(async () => (await state(page)).OutlineUpdates).toBeGreaterThan(before.OutlineUpdates);
+  await fill(page, 'outline-filter', 'RenamedNote');
+  await expect.poll(async () => (await state(page)).Inputs['outline-item:c']).toBe('RenamedNote');
   await click(page, 'quick-undo'); await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'c')?.Name).toBe('NestedNote');
   await fill(page, 'outline-filter', 'NestedNote'); await click(page, 'outline-item:c'); expect((await state(page)).SelectedCount).toBe(1);
   await click(page, 'tree-data'); await fill(page, 'outline-filter', 'RowNumber'); await click(page, 'outline-table:0/field:1');
@@ -67,6 +71,9 @@ test('formatting controls track single and mixed selections and undo without inv
   await selectObject(page, 'a'); await choose(page, 'font-size', 6); await expect.poll(async () => (await state(page)).Inputs['font-size-value']).toBe('16');
   await click(page, 'quick-undo'); await expect.poll(async () => (await state(page)).Inputs['font-size-value']).toBe('14');
   await click(page, 'quick-redo'); await expect.poll(async () => (await state(page)).Inputs['font-size-value']).toBe('16');
+  // The last font-size row starts outside a compact popup's visible scroll viewport.
+  await choose(page, 'font-size', 12); await expect.poll(async () => (await state(page)).Inputs['font-size-value']).toBe('48');
+  await click(page, 'quick-undo'); await expect.poll(async () => (await state(page)).Inputs['font-size-value']).toBe('16');
   await screenshot(page, info.outputPath('synchronized-formatting.png')); expect((await state(page)).Diagnostics).toEqual([]);
   await artifact(info, 'formatting-state.json', await state(page));
 });
