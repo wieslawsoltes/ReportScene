@@ -22,10 +22,7 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
     private static string Invoke(string expression) => WebAssemblyRuntime.InvokeJS(expression);
     public void Attach(ReportDesignerControl designer)
     {
-        // The window is activated before asynchronous font initialization replaces its loading
-        // content. Uno's one-shot bootstrap observer may already have retained the Skia splash.
-        // Complete the framework's normal splash handoff only after this real designer has drawn.
-        // This runs in ordinary application mode too, not only when diagnostics/tests are enabled.
+        // Complete the framework's splash handoff only after this real designer has drawn.
         var firstFrame = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         firstFrame.Tick += (_, _) =>
         {
@@ -48,10 +45,10 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
         if (SelfTest)
         {
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(750) };
-            timer.Tick += (_, _) =>
+            timer.Tick += async (_, _) =>
             {
                 timer.Stop();
-                try { var results = ConformanceSuite.Run(); Invoke("window.reportScene.tests=" + JsonSerializer.Serialize(results, ValidationJsonContext.Default.ListTestResult) + ";"); }
+                try { var results = await ConformanceSuite.RunAsync(); Invoke("window.reportScene.tests=" + JsonSerializer.Serialize(results, ValidationJsonContext.Default.ListTestResult) + ";"); }
                 catch (Exception e) { Invoke("window.reportScene.testFatal=" + J(e.ToString()) + ";"); }
             };
             timer.Start();

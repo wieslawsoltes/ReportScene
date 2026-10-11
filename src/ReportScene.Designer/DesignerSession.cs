@@ -32,10 +32,6 @@ public sealed partial class DesignerSession
     public IEnumerable<ReportItem> Selection => DocumentTree.AllItems(Document).Where(i => selected.Contains(i.Id));
     public Band? SelectedBand => DocumentTree.AllBands(Document).FirstOrDefault(b => b.Id == BandId);
     public DesignerSession(ReportDocument document) { Document = document; SelectDefaultBand(); }
-    public void Load(ReportDocument document)
-    {
-        CancelDrag(); Document = document; PageIndex = 0; history.Clear(); position = 0; revision = savedRevision = ++sequence; selected.Clear(); SelectDefaultBand(); Notify();
-    }
     private void SelectDefaultBand() => BandId = Page.Bands.FirstOrDefault(b => b.Kind == BandKind.Data)?.Id ?? Page.Bands.FirstOrDefault()?.Id;
     public void SetPage(int index)
     {

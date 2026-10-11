@@ -5,7 +5,7 @@ using ReportScene.Export;
 using ReportScene.Serialization;
 using ReportScene.Rendering.Skia;
 
-var results = ConformanceSuite.Run();
+var results = await ConformanceSuite.RunAsync();
 foreach (var result in results) Console.WriteLine($"{(result.Passed ? "PASS" : "FAIL")} {result.Name}{(result.Error is null ? "" : "\n" + result.Error)}");
 Console.WriteLine($"{results.Count(r => r.Passed)}/{results.Count} tests passed.");
 if (results.Any(r => !r.Passed)) return 1;

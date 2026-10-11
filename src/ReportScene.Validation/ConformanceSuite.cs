@@ -1,6 +1,6 @@
 namespace ReportScene.Validation;
 
-/// <summary>The single validation entry point used by both console and WebAssembly hosts.</summary>
+/// <summary>The shared validation entry points. Async hosts should use RunAsync to include delayed-operation contracts.</summary>
 public static class ConformanceSuite
 {
     public static List<TestResult> Run() => Conformance.Run().Concat(ImportDefaultTests.Run())
@@ -12,4 +12,9 @@ public static class ConformanceSuite
         .Concat(PreparedPageIndexTests.Run()).Concat(DesignerActivityTests.Run()).Concat(PreparedSearchTests.Run()).Concat(ParameterScopeTests.Run())
         .Concat(PaginationPerformanceTests.Run()).Concat(PreparationCancellationTests.Run()).Concat(RecoveryReadinessTests.Run()).Concat(ExportVisibilityTests.Run())
         .Concat(ImplicitSubreportRowTests.Run()).ToList();
+
+    public static async Task<List<TestResult>> RunAsync()
+    {
+        var results = Run(); results.AddRange(await DesignerOperationTests.RunAsync()); return results;
+    }
 }
