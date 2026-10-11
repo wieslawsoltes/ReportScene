@@ -33,8 +33,17 @@ public sealed partial class DesignerSession
     }
     private void ReplaceDocument(string name, ReportDocument updated, string[]? selection = null)
     {
-        var old = Document;
-        Execute(name, () => Document = updated, () => Document = old, selection);
+        var old = Document; int pageIndex = PageIndex; string? bandId = BandId;
+        void Restore(ReportDocument document)
+        {
+            Document = document; PageIndex = Math.Min(pageIndex, document.Pages.Count - 1);
+            // Structural history returns to its editing location. Merely clamping a page
+            // index after target-page navigation can select an unrelated surviving page and
+            // leave BandId pointing to a removed band, making the next insertion fail.
+            BandId = bandId;
+            if (!Page.Bands.SelectMany(DocumentTree.Descendants).Any(b => b.Id == BandId)) SelectDefaultBand();
+        }
+        Execute(name, () => Restore(updated), () => Restore(old), selection);
     }
     private static void ValidateReferences(ReportDocument document)
     {
