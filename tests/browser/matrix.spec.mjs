@@ -1,41 +1,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs/promises';
+import { state, ready, fresh, bounds, click, fill, choose, save, artifact } from './uno-driver.mjs';
 
-const state = page => page.evaluate(() => window.reportScene?.state);
-async function ready(page) {
-  await page.goto('?diagnostics=1');
-  await page.waitForFunction(() => window.reportScene?.ready || window.reportSceneFatal, { timeout: 180_000 });
-  expect(await page.evaluate(() => window.reportSceneFatal)).toBeFalsy();
-  await expect.poll(async () => (await state(page))?.RenderCount ?? 0).toBeGreaterThan(0);
-}
-async function bounds(page, id) {
-  await expect.poll(async () => Boolean((await state(page))?.Commands[id]), { message: `Visible Uno control ${id}` }).toBeTruthy();
-  return (await state(page)).Commands[id];
-}
-async function click(page, id) {
-  const r = await bounds(page, id); await page.mouse.click(r.X + r.Width / 2, r.Y + r.Height / 2);
-}
-async function fill(page, id, text) {
-  const r = await bounds(page, id);
-  // Headered XAML text boxes include the label in their bounds; target the input below it.
-  await page.mouse.click(r.X + Math.min(24, r.Width / 2), r.Y + r.Height - 15);
-  await page.keyboard.press('Control+a'); await page.keyboard.insertText(text); await page.keyboard.press('Tab');
-}
-async function choose(page, id, index) {
-  const r = await bounds(page, id);
-  await page.mouse.click(r.X + r.Width - 14, r.Y + r.Height - 15);
-  await page.keyboard.press('Home');
-  for (let n = 0; n < index; n++) await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('Enter');
-}
-async function save(page) {
-  const waiting = page.waitForEvent('download'); await click(page, 'quick-save');
-  const download = await waiting; return JSON.parse(await fs.readFile(await download.path(), 'utf8'));
-}
-async function artifact(info, name, value) {
-  await fs.writeFile(info.outputPath(name), JSON.stringify(value, null, 2));
-  await info.attach(name, { path: info.outputPath(name), contentType: 'application/json' });
-}
 function fixture() {
   const rows = [];
   for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) rows.push({ Row: `R0${r}`, Column: `Q${c + 1}`, Value: 100 + 10 * r + c });
@@ -50,14 +16,16 @@ function fixture() {
 }
 async function openFixture(page) {
   await click(page, 'tab-report');
-  const waiting = page.waitForEvent('filechooser'); await click(page, 'open');
+  const r = await bounds(page, 'open');
+  const waiting = page.waitForEvent('filechooser');
+  await page.mouse.click(r.X + r.Width / 2, r.Y + r.Height / 2);
   await (await waiting).setFiles({ name: 'matrix.report.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(fixture())) });
   await expect.poll(async () => (await state(page)).Document).toBe('Matrix browser contract');
   await click(page, 'tab-home');
   await expect.poll(async () => (await state(page)).Objects.find(o => o.Id === 'matrix')?.Screen).toBeTruthy();
-  const r = (await state(page)).Objects.find(o => o.Id === 'matrix').Screen;
-  await page.mouse.click(r.X + 35, r.Y + 30);
-  await expect.poll(async () => (await state(page)).SelectedCount).toBe(1);
+  const item = (await state(page)).Objects.find(o => o.Id === 'matrix').Screen;
+  await page.mouse.click(item.X + 35, item.Y + 30);
+  await expect.poll(async () => (await state(page)).SelectedCount).toBe(1); await fresh(page);
 }
 
 test('matrix editor uses real inputs, validates, applies one transaction and cancels cleanly', async ({ page }, info) => {
@@ -66,8 +34,7 @@ test('matrix editor uses real inputs, validates, applies one transaction and can
     await ready(page); await openFixture(page);
     expect((await state(page)).Diagnostics).toEqual([]);
     const initialHistory = (await state(page)).HistoryCount;
-    await click(page, 'matrix-edit');
-    await bounds(page, 'matrix-dialog-apply');
+    await click(page, 'matrix-edit'); await bounds(page, 'matrix-dialog-apply');
     await click(page, 'matrix-rows-add');
     await fill(page, 'matrix-rows-item-1-expression', 'Sales.Column');
     await fill(page, 'matrix-rows-item-1-title', 'Quarter');
@@ -78,8 +45,7 @@ test('matrix editor uses real inputs, validates, applies one transaction and can
     await choose(page, 'matrix-measures-item-0-aggregate', 0);
     await click(page, 'matrix-tab-options');
     await fill(page, 'matrix-row-height', '0');
-    await click(page, 'matrix-dialog-apply');
-    await bounds(page, 'matrix-dialog-apply');
+    await click(page, 'matrix-dialog-apply'); await bounds(page, 'matrix-dialog-apply');
     expect((await state(page)).HistoryCount).toBe(initialHistory);
     await fill(page, 'matrix-row-height', '28');
     await page.screenshot({ path: info.outputPath('matrix-editor.png'), fullPage: true });
@@ -94,15 +60,13 @@ test('matrix editor uses real inputs, validates, applies one transaction and can
     await click(page, 'quick-undo');
     const undone = await save(page); expect(undone.pages[0].bands[0].items[0].rowDimensions.length).toBe(1);
     expect(undone.pages[0].bands[0].items[0].rowHeight).toBe(24);
-    await click(page, 'quick-redo');
-    expect((await save(page)).pages[0].bands[0].items[0].rowHeight).toBe(28);
+    await click(page, 'quick-redo'); expect((await save(page)).pages[0].bands[0].items[0].rowHeight).toBe(28);
     await click(page, 'matrix-edit'); await click(page, 'matrix-tab-options');
     await fill(page, 'matrix-row-height', '99'); await click(page, 'matrix-dialog-cancel');
     await expect.poll(async () => Boolean((await state(page)).Commands['matrix-dialog-apply'])).toBe(false);
     const cancelled = await save(page); expect(cancelled.pages[0].bands[0].items[0].rowHeight).toBe(28);
     expect((await state(page)).HistoryCount).toBe(initialHistory + 1);
-    await click(page, 'preview');
-    await expect.poll(async () => (await state(page)).Preview).toBe(true);
+    await click(page, 'preview'); await expect.poll(async () => (await state(page)).Preview).toBe(true);
     expect((await state(page)).Diagnostics).toEqual([]);
     const pdfWaiting = page.waitForEvent('download'); await click(page, 'export-pdf');
     const pdf = await pdfWaiting; const bytes = await fs.readFile(await pdf.path());
@@ -110,8 +74,7 @@ test('matrix editor uses real inputs, validates, applies one transaction and can
     expect(bytes.toString('latin1').trimEnd().endsWith('%%EOF')).toBe(true);
     await fs.writeFile(info.outputPath('matrix.pdf'), bytes);
     await page.screenshot({ path: info.outputPath('matrix-preview.png'), fullPage: true });
-    await artifact(info, 'matrix-saved.json', edited);
-    expect(errors).toEqual([]);
+    await artifact(info, 'matrix-saved.json', edited); expect(errors).toEqual([]);
   } finally {
     await artifact(info, 'matrix-final-state.json', await state(page));
     await artifact(info, 'matrix-errors.json', errors);
@@ -121,14 +84,10 @@ test('matrix editor uses real inputs, validates, applies one transaction and can
 test('matrix insertion qualifies reserved fields and supports undo and redo', async ({ page }, info) => {
   await ready(page); await openFixture(page);
   const initial = (await state(page)).ObjectCount;
-  await click(page, 'insert-matrix');
-  await expect.poll(async () => (await state(page)).ObjectCount).toBe(initial + 1);
-  const document = await save(page);
-  const added = document.pages[0].bands[0].items.find(i => i.id !== 'matrix');
-  expect(added.$type).toBe('matrix');
-  expect(added.rowDimensions[0].expression).toBe('[Sales.Row]');
-  expect(added.columnDimensions[0].expression).toBe('[Sales.Column]');
-  expect(added.measures[0].expression).toBe('[Sales.Value]');
+  await click(page, 'insert-matrix'); await expect.poll(async () => (await state(page)).ObjectCount).toBe(initial + 1);
+  const document = await save(page); const added = document.pages[0].bands[0].items.find(i => i.id !== 'matrix');
+  expect(added.$type).toBe('matrix'); expect(added.rowDimensions[0].expression).toBe('[Sales.Row]');
+  expect(added.columnDimensions[0].expression).toBe('[Sales.Column]'); expect(added.measures[0].expression).toBe('[Sales.Value]');
   expect((await state(page)).Diagnostics).toEqual([]);
   await click(page, 'quick-undo'); await expect.poll(async () => (await state(page)).ObjectCount).toBe(initial);
   await click(page, 'quick-redo'); await expect.poll(async () => (await state(page)).ObjectCount).toBe(initial + 1);
@@ -136,9 +95,7 @@ test('matrix insertion qualifies reserved fields and supports undo and redo', as
 });
 
 test('matrix sample renders through the real Uno preview and exports all tiles', async ({ page }, info) => {
-  await ready(page); await click(page, 'tab-view');
-  const r = await bounds(page, 'samples'); await page.mouse.click(r.X + r.Width - 15, r.Y + r.Height / 2);
-  await page.keyboard.press('End'); await page.keyboard.press('Enter');
+  await ready(page); await click(page, 'tab-view'); await choose(page, 'samples', 5);
   await expect.poll(async () => (await state(page)).Document).toBe('Matrix sales');
   expect((await state(page)).Objects.some(o => o.Kind === 'MatrixItem')).toBe(true);
   await page.screenshot({ path: info.outputPath('matrix-sample-designer.png'), fullPage: true });
