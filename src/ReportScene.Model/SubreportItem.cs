@@ -23,7 +23,7 @@ public static class SubreportGraph
     public static IReadOnlyList<ReportPage> PrintablePages(ReportDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
-        var targets = References(document).Select(p => p.Item.PageName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var targets = References(document).Select(p => p.Item.PageName).Where(n => !string.IsNullOrWhiteSpace(n)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return document.Pages.Where(p => !targets.Contains(p.Name)).ToArray();
     }
     public static IReadOnlyList<Diagnostic> Validate(ReportDocument document)
@@ -48,24 +48,28 @@ public static class SubreportGraph
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var parameter in item.ParameterBindings)
             {
-                if (parameter is null || string.IsNullOrWhiteSpace(parameter.Name) || !names.Add(parameter.Name) ||
+                if (parameter is null || string.IsNullOrWhiteSpace(parameter.Name) || parameter.Name.Length > 256 || !names.Add(parameter.Name) ||
                     string.IsNullOrWhiteSpace(parameter.Expression) || parameter.Expression.Length > 8192)
-                    Error("Subreport parameter names must be nonempty and unique, with valid bounded expressions.", item.Id);
+                    Error("Subreport parameter names must be nonempty and unique, with valid bounded names and expressions.", item.Id);
             }
         }
-        var edges = references.Where(r => pages.ContainsKey(r.Item.PageName)).GroupBy(r => r.Page.Name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.OrdinalIgnoreCase);
-        var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase); var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void Visit(string name, int depth)
+        var edges = references.Where(r => !string.IsNullOrWhiteSpace(r.Item.PageName) && pages.ContainsKey(r.Item.PageName)).GroupBy(r => r.Page.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(r => r.Item.PageName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), StringComparer.OrdinalIgnoreCase);
+        var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var depths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        int Depth(string name)
         {
-            if (visiting.Contains(name)) { Error($"Subreport reference cycle reaches page '{name}'."); return; }
-            if (visited.Contains(name)) return;
-            if (depth > 32) { Error("Subreport reference nesting exceeds 32 pages."); return; }
-            visiting.Add(name);
-            if (edges.TryGetValue(name, out var children)) foreach (var child in children) Visit(child.Item.PageName, depth + 1);
-            visiting.Remove(name); visited.Add(name);
+            if (depths.TryGetValue(name, out int cached)) return cached;
+            if (!visiting.Add(name)) { Error($"Subreport reference cycle reaches page '{name}'."); return 0; }
+            if (visiting.Count > 33) { Error("Subreport reference nesting exceeds 32 pages."); visiting.Remove(name); return 33; }
+            int depth = 0;
+            if (edges.TryGetValue(name, out var children)) foreach (var child in children) depth = Math.Max(depth, 1 + Depth(child));
+            visiting.Remove(name); depths[name] = depth;
+            return depth;
         }
-        foreach (var page in pages.Keys) Visit(page, 0);
+        // Cache longest suffix lengths, not just 'visited'. A shared target may be reached
+        // through a much deeper path than the first traversal of the graph.
+        if (pages.Keys.Any(name => Depth(name) > 32)) Error("Subreport reference nesting exceeds 32 pages.");
         if (PrintablePages(document).Count == 0) Error("A report must have at least one page that is not a subreport target.");
         return errors;
     }
@@ -73,8 +77,7 @@ public static class SubreportGraph
     {
         foreach (var page in document.Pages)
         {
-            var pending = new Stack<Band>(page.Bands.AsEnumerable().Reverse());
-            var seen = new HashSet<Band>(ReferenceEqualityComparer.Instance);
+            var pending = new Stack<Band>(page.Bands.AsEnumerable().Reverse()); var seen = new HashSet<Band>(ReferenceEqualityComparer.Instance);
             while (pending.Count > 0)
             {
                 var band = pending.Pop(); if (!seen.Add(band)) continue;

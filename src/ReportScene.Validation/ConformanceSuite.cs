@@ -7,5 +7,5 @@ public static class ConformanceSuite
         .Concat(AggregateRegressionTests.Run()).Concat(MatrixTests.Run()).Concat(MatrixReportingTests.Run())
         .Concat(MatrixRenderingTests.Run()).Concat(XmlDataTests.Run()).Concat(AdoDataTests.Run())
         .Concat(DataImportEdgeTests.Run()).Concat(DataBudgetRegressionTests.Run()).Concat(SubreportTests.Run())
-        .Concat(SubreportDesignerTests.Run()).Concat(SubreportRenderingTests.Run()).ToList();
+        .Concat(SubreportDesignerTests.Run()).Concat(SubreportRenderingTests.Run()).Concat(SubreportGraphTests.Run()).ToList();
 }
