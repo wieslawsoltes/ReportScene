@@ -12,6 +12,12 @@ Uno's `ComboBox.custom.cs`, `DropDownLayouter.Measure`, caps the managed popup b
 
 Read-only popup diagnostics intersect realized item rectangles with the popup's scroll presenter, border and screen. Fully clipped rows are no longer advertised as clickable. The browser driver delivers real wheel input inside the popup until the requested item is visible, then requires stable published geometry and clicks once. It does not set selection through diagnostics or retry failed assertions. The formatting test preserves its original 16/14-point checks and additionally selects the last 48-point entry through actual scrolling, then checks undo.
 
+## Selected text in narrow controls
+
+The same screenshot review found a blank font-size field despite a valid selected index/value. The native Fluent ComboBox template gives the arrow its own 38-pixel column, then applies the control's padding only to the remaining content column. The previous extra 20–22-pixel right padding reserved arrow space a second time and left a 62-pixel font-size control without room to paint its number. Compact selector factories now use zero right content padding, retaining the native arrow column. This preserves the base control's padding contract instead of replacing its template or forcing a larger width.
+
+A real-screenshot assertion checks ink inside the selected-number area, excluding the border and arrow; checking `SelectedItem` metadata alone would have missed the bug. [Official native template](https://github.com/unoplatform/uno/blob/7172ed4c937708e6a68770ef7435ee8f3b62ec82/src/Uno.UI.FluentTheme/Resources/PriorityDefault/ComboBox_themeresources.xaml).
+
 ## Retaining nodes without retaining obsolete labels
 
 Review of an actual compact-workspace screenshot also found old invoice data captions still painted after loading the new fixture. Metadata and node identities were current, but the realized native row content was stale. Keyed outline updates now refresh an existing `TreeViewItem.Content` when its node label changes, without discarding the node or its expansion/selection state. Newly realized rows continue to use the updated node content.

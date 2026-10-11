@@ -74,10 +74,10 @@ public sealed partial class ReportDesignerControl
         {
             case "Home":
                 Group("Clipboard", AsyncCommand("paste", "Paste", "paste", PasteAsync, true), Vertical(AsyncCommand("cut", "Cut", "cut", CutAsync), AsyncCommand("copy", "Copy", "copy", CopyAsync)));
-                var font = new ReportComboBox { Width = 151, Height = 25, MinHeight = 0, FontSize = 11, Padding = new(5, 0, 22, 0), CornerRadius = new(0) };
+                var font = new ReportComboBox { Width = 151, Height = 25, MinHeight = 0, FontSize = 11, Padding = new(5, 0, 0, 0), CornerRadius = new(0) };
                 foreach (var family in new[] { "Arial", "Calibri", "Times New Roman", "Courier New", "Open Sans" }) font.Items.Add(family);
                 font.SelectionChanged += (_, _) => { if (!updatingRibbon && font.SelectedItem is string family) Run(() => Session.UpdateSelection("Font family", i => i with { Style = i.Style with { FontFamily = family } })); };
-                var size = new ReportComboBox { Width = 62, Height = 25, MinHeight = 0, FontSize = 11, Padding = new(5, 0, 20, 0), CornerRadius = new(0) };
+                var size = new ReportComboBox { Width = 62, Height = 25, MinHeight = 0, FontSize = 11, Padding = new(5, 0, 0, 0), CornerRadius = new(0) };
                 foreach (var value in new[] { "8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "36", "48" }) size.Items.Add(value);
                 size.SelectionChanged += (_, _) => { if (!updatingRibbon && size.SelectedItem is string text && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var n)) Run(() => Session.UpdateSelection("Font size", i => i with { Style = i.Style with { FontSize = n } })); };
                 commands["font-family"] = ControlTheme.Identify(font, "font-family", "Font family"); commands["font-size"] = ControlTheme.Identify(size, "font-size", "Font size in points");
@@ -107,7 +107,7 @@ public sealed partial class ReportDesignerControl
                 commands["show-grid"] = ControlTheme.Identify(grid, "show-grid", "Show grid"); commands["snap-grid"] = ControlTheme.Identify(snap, "snap-grid", "Snap to grid");
                 var rulers = new CheckBox { Content = "Rulers", IsChecked = DesignView.ShowRulers, FontSize = 11, MinHeight = 26 }; rulers.Checked += (_, _) => DesignView.ShowRulers = true; rulers.Unchecked += (_, _) => DesignView.ShowRulers = false;
                 commands["show-rulers"] = ControlTheme.Identify(rulers, "show-rulers", "Show rulers");
-                var units = new ReportComboBox { Width = 122, MinHeight = 0, Height = 25, FontSize = 11, Padding = new(5, 0, 22, 0), CornerRadius = new(0), ItemsSource = Enum.GetNames<DesignerUnit>(), SelectedIndex = (int)displayUnit };
+                var units = new ReportComboBox { Width = 122, MinHeight = 0, Height = 25, FontSize = 11, Padding = new(5, 0, 0, 0), CornerRadius = new(0), ItemsSource = Enum.GetNames<DesignerUnit>(), SelectedIndex = (int)displayUnit };
                 units.SelectionChanged += (_, _) => { if (units.SelectedItem is string name) { displayUnit = Enum.Parse<DesignerUnit>(name); DesignView.Unit = displayUnit; RefreshPropertyEditors(); UpdateStatus(); } };
                 commands["display-units"] = ControlTheme.Identify(units, "display-units", "Display units; report geometry is stored in points");
                 var fullPage = new CheckBox { Content = "Full paper", IsChecked = DesignView.ShowFullPage, FontSize = 11, MinHeight = 26 };
@@ -122,7 +122,7 @@ public sealed partial class ReportDesignerControl
     }
     private UIElement ZoomChoice(bool preview)
     {
-        var choice = new ReportComboBox { Width = 88, MinHeight = 0, Height = 25, Padding = new(5, 0, 22, 0), FontSize = 11, CornerRadius = new(0) };
+        var choice = new ReportComboBox { Width = 88, MinHeight = 0, Height = 25, Padding = new(5, 0, 0, 0), FontSize = 11, CornerRadius = new(0) };
         foreach (var n in new[] { 25, 50, 75, 85, 100, 125, 150, 200, 300, 400 }) choice.Items.Add(n + "%");
         choice.SelectedItem = Math.Round((preview ? PreviewView.Zoom : DesignView.Zoom) * 100).ToString(CultureInfo.InvariantCulture) + "%";
         choice.SelectionChanged += (_, _) => { if (choice.SelectedItem is string text && double.TryParse(text.TrimEnd('%'), NumberStyles.Float, CultureInfo.InvariantCulture, out var n)) { if (preview) PreviewView.Zoom = n / 100; else DesignView.Zoom = n / 100; UpdateStatus(); } };
@@ -130,7 +130,7 @@ public sealed partial class ReportDesignerControl
     }
     private UIElement SamplesChoice()
     {
-        var choice = new ReportComboBox { Width = 174, MinHeight = 0, Height = 25, Padding = new(5, 0, 22, 0), FontSize = 11, CornerRadius = new(0), PlaceholderText = "Open sample…" };
+        var choice = new ReportComboBox { Width = 174, MinHeight = 0, Height = 25, Padding = new(5, 0, 0, 0), FontSize = 11, CornerRadius = new(0), PlaceholderText = "Open sample…" };
         foreach (var name in AllSampleNames) choice.Items.Add(name);
         choice.SelectionChanged += (_, _) => { if (choice.SelectedItem is string name) Run(() => LoadAnySampleAsync(name)); }; commands["samples"] = choice; return choice;
     }

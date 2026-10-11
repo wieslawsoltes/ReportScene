@@ -135,7 +135,7 @@ public sealed class PropertySheet : StackPanel
     public ComboBox Choice(string name, IEnumerable<string> choices, string value, Action<string> commit, string? id = null)
     {
         int epoch = generation; var guard = CommitGuard; bool suppress = false;
-        var input = new ReportComboBox { FontSize = 11, MinHeight = 0, Height = 22, Padding = new(4, 0, 20, 0), BorderThickness = new(0), CornerRadius = new(0), HorizontalAlignment = HorizontalAlignment.Stretch };
+        var input = new ReportComboBox { FontSize = 11, MinHeight = 0, Height = 22, Padding = new(4, 0, 0, 0), BorderThickness = new(0), CornerRadius = new(0), HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var choice in choices) input.Items.Add(choice);
         input.SelectedItem = value;
         input.SelectionChanged += (_, _) =>
