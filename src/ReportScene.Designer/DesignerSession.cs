@@ -80,80 +80,91 @@ public sealed partial class DesignerSession
     }
     private void Replace(string id, ReportItem item)
     {
-        foreach (var b in DocumentTree.AllBands(Document))
-        { int index = b.Items.FindIndex(i => i.Id == id); if (index >= 0) { b.Items[index] = item; return; } }
-        throw new InvalidOperationException($"Object '{id}' no longer exists.");
+        if (item.Id != id) throw new ArgumentException("Object edits must retain their identifiers.");
+        ReplaceItems([item]);
     }
     public void UpdateSelection(string description, Func<ReportItem, ReportItem> change)
     {
+        ArgumentNullException.ThrowIfNull(change);
         var before = Selection.Where(i => !i.Locked).ToArray(); if (before.Length == 0) return;
         var after = before.Select(change).ToArray();
-        foreach (var item in after)
-            if (!double.IsFinite(item.Bounds.X) || !double.IsFinite(item.Bounds.Y) || !double.IsFinite(item.Bounds.Width) || !double.IsFinite(item.Bounds.Height) || item.Bounds.X < 0 || item.Bounds.Y < 0 || item.Bounds.Width <= 0 || item.Bounds.Height <= 0)
-                throw new ArgumentException("Invalid object bounds.");
+        for (int n = 0; n < after.Length; n++)
+        {
+            if (after[n] is null || before[n].Id != after[n].Id) throw new ArgumentException("Object edits must retain their identifiers.");
+            DesignerGeometry.ValidateBounds(after[n].Bounds);
+        }
         if (before.SequenceEqual(after)) return;
+        ValidateRenames(before, after);
         if (after.Any(i => i is SubreportItem))
         {
             var replacements = after.ToDictionary(i => i.Id);
             ValidateReferences(MapDocument(Document, b => b with { Items = b.Items.Select(i => replacements.GetValueOrDefault(i.Id, i)).ToList() }));
         }
-        Execute(description, () => { foreach (var i in after) Replace(i.Id, i); }, () => { foreach (var i in before) Replace(i.Id, i); });
+        Execute(description, () => ReplaceItems(after), () => ReplaceItems(before));
     }
     public ReportItem Add(ReportItem item, string? bandId = null)
     {
+        ArgumentNullException.ThrowIfNull(item); DesignerGeometry.ValidateBounds(item.Bounds);
         var band = DocumentTree.AllBands(Document).FirstOrDefault(b => b.Id == (bandId ?? BandId)) ?? throw new InvalidOperationException("Select a band before inserting an object.");
         var added = item with { Id = Guid.NewGuid().ToString("N"), Name = UniqueName(item.Name) };
         if (added is SubreportItem) ValidateReferences(MapDocument(Document, b => b.Id == band.Id ? b with { Items = [.. b.Items, added] } : b));
         Execute("Insert " + added.Name, () => band.Items.Add(added), () => band.Items.RemoveAll(i => i.Id == added.Id), [added.Id]); return added;
     }
-    private string UniqueName(string prefix)
-    {
-        var names = DocumentTree.AllItems(Document).Select(i => i.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!names.Contains(prefix)) return prefix;
-        int n = 1; while (names.Contains(prefix + n)) n++; return prefix + n;
-    }
+    private string UniqueName(string prefix) => ReserveName(prefix, DocumentTree.AllItems(Document).Select(i => i.Name).ToHashSet(StringComparer.OrdinalIgnoreCase));
     public void DeleteSelection()
     {
         var entries = DocumentTree.AllBands(Document).SelectMany(b => b.Items.Select((item, index) => (Band: b, Item: item, Index: index))).Where(e => selected.Contains(e.Item.Id) && !e.Item.Locked).ToArray();
         if (entries.Length == 0) return;
-        Execute("Delete objects", () => { foreach (var e in entries) e.Band.Items.RemoveAll(i => i.Id == e.Item.Id); }, () => { foreach (var e in entries.OrderBy(e => e.Index)) e.Band.Items.Insert(e.Index, e.Item); }, []);
+        var ids = entries.Select(e => e.Item.Id).ToHashSet(StringComparer.Ordinal);
+        var bands = entries.Select(e => e.Band).DistinctBy(b => b.Id).ToArray();
+        Execute("Delete objects", () => { foreach (var b in bands) b.Items.RemoveAll(i => ids.Contains(i.Id)); }, () => { foreach (var e in entries) e.Band.Items.Insert(e.Index, e.Item); }, []);
     }
     public string Copy() => ReportJson.SerializeItems(Selection);
     public void Paste(string json)
     {
         var band = SelectedBand ?? throw new InvalidOperationException("Select a band before pasting.");
         var source = ReportJson.DeserializeItems(json); if (source.Count == 0) return;
-        var added = source.Select(i => i with { Id = Guid.NewGuid().ToString("N"), Name = UniqueName(i.Name + "Copy"), Bounds = i.Bounds.Offset(8, 8), Locked = false }).ToArray();
+        var names = DocumentTree.AllItems(Document).Select(i => i.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var added = source.Select(i => i with { Id = Guid.NewGuid().ToString("N"), Name = ReserveName(i.Name + "Copy", names), Bounds = i.Bounds.Offset(8, 8), Locked = false }).ToArray();
+        foreach (var item in added) DesignerGeometry.ValidateBounds(item.Bounds);
         if (added.Any(i => i is SubreportItem)) ValidateReferences(MapDocument(Document, b => b.Id == band.Id ? b with { Items = [.. b.Items, .. added] } : b));
-        Execute("Paste objects", () => band.Items.AddRange(added), () => band.Items.RemoveAll(i => added.Any(a => a.Id == i.Id)), added.Select(i => i.Id).ToArray());
+        var ids = added.Select(i => i.Id).ToHashSet(StringComparer.Ordinal);
+        Execute("Paste objects", () => band.Items.AddRange(added), () => band.Items.RemoveAll(i => ids.Contains(i.Id)), added.Select(i => i.Id).ToArray());
     }
     public void Move(double dx, double dy)
     {
         var items = Selection.Where(i => !i.Locked).ToArray(); if (items.Length == 0) return;
         dx = Math.Max(dx, -items.Min(i => i.Bounds.X)); dy = Math.Max(dy, -items.Min(i => i.Bounds.Y)); UpdateSelection("Move objects", i => i with { Bounds = i.Bounds.Offset(dx, dy) });
     }
-    public void BeginDrag() { if (dragOriginal is not null) CancelDrag(); dragOriginal = Selection.Where(i => !i.Locked).ToDictionary(i => i.Id); }
+    public void BeginDrag()
+    {
+        if (dragOriginal is not null) CancelDrag();
+        var originals = Selection.Where(i => !i.Locked).ToDictionary(i => i.Id); dragOriginal = originals.Count == 0 ? null : originals;
+    }
     public void PreviewDrag(double dx, double dy, bool resize = false)
     {
-        if (dragOriginal is null || dragOriginal.Count == 0) return;
-        if (SnapToGrid && GridSize > 0) { dx = Math.Round(dx / GridSize) * GridSize; dy = Math.Round(dy / GridSize) * GridSize; }
-        if (!resize) { dx = Math.Max(dx, -dragOriginal.Values.Min(i => i.Bounds.X)); dy = Math.Max(dy, -dragOriginal.Values.Min(i => i.Bounds.Y)); }
-        foreach (var item in dragOriginal.Values)
-        {
-            var b = item.Bounds;
-            Replace(item.Id, item with { Bounds = resize ? b with { Width = Math.Max(4, b.Width + dx), Height = Math.Max(4, b.Height + dy) } : b.Offset(dx, dy) });
-        }
-        Changed?.Invoke(this, EventArgs.Empty);
+        if (resize) { PreviewResize(dx, dy, ResizeHandle.BottomRight); return; }
+        if (dragOriginal is null) return; (dx, dy) = SnapDeltas(dx, dy);
+        dx = Math.Max(dx, -dragOriginal.Values.Min(i => i.Bounds.X)); dy = Math.Max(dy, -dragOriginal.Values.Min(i => i.Bounds.Y));
+        var after = dragOriginal.Values.Select(i => i with { Bounds = i.Bounds.Offset(dx, dy) }).ToArray();
+        if (ReplaceItems(after)) Changed?.Invoke(this, EventArgs.Empty);
+    }
+    public void PreviewResize(double dx, double dy, ResizeHandle handle)
+    {
+        if (dragOriginal is null) return; (dx, dy) = SnapDeltas(dx, dy);
+        var after = dragOriginal.Values.Select(i => i with { Bounds = DesignerGeometry.Resize(i.Bounds, dx, dy, handle) }).ToArray();
+        if (ReplaceItems(after)) Changed?.Invoke(this, EventArgs.Empty);
     }
     public void CommitDrag()
     {
         if (dragOriginal is null) return;
-        var before = dragOriginal.Values.ToArray(); var after = Selection.Where(i => dragOriginal.ContainsKey(i.Id)).ToArray(); dragOriginal = null;
+        var before = dragOriginal.Values.ToArray(); var current = DocumentTree.AllItems(Document).Where(i => dragOriginal.ContainsKey(i.Id)).ToDictionary(i => i.Id);
+        var after = before.Select(i => current[i.Id]).ToArray(); dragOriginal = null;
         if (before.SequenceEqual(after)) return;
-        Execute("Transform objects", () => { foreach (var i in after) Replace(i.Id, i); }, () => { foreach (var i in before) Replace(i.Id, i); });
+        Execute("Transform objects", () => ReplaceItems(after), () => ReplaceItems(before));
     }
     public void CancelDrag()
-    { if (dragOriginal is null) return; foreach (var i in dragOriginal.Values) Replace(i.Id, i); dragOriginal = null; Changed?.Invoke(this, EventArgs.Empty); }
+    { if (dragOriginal is null) return; ReplaceItems(dragOriginal.Values.ToArray()); dragOriginal = null; Changed?.Invoke(this, EventArgs.Empty); }
     public void Align(AlignmentCommand command)
     {
         var items = Selection.Where(i => !i.Locked).ToArray(); if (items.Length < 2) return;
@@ -181,10 +192,18 @@ public sealed partial class DesignerSession
     }
     public void Reorder(bool front)
     {
-        var bands = DocumentTree.AllBands(Document).Where(b => b.Items.Any(i => selected.Contains(i.Id))).ToArray();
+        var movable = Selection.Where(i => !i.Locked).Select(i => i.Id).ToHashSet(StringComparer.Ordinal); if (movable.Count == 0) return;
+        var bands = DocumentTree.AllBands(Document).Where(b => b.Items.Any(i => movable.Contains(i.Id))).ToArray();
         var before = bands.ToDictionary(b => b.Id, b => b.Items.ToArray());
-        var after = bands.ToDictionary(b => b.Id, b => (front ? b.Items.Where(i => !selected.Contains(i.Id)).Concat(b.Items.Where(i => selected.Contains(i.Id))) : b.Items.Where(i => selected.Contains(i.Id)).Concat(b.Items.Where(i => !selected.Contains(i.Id)))).ToArray());
+        var after = bands.ToDictionary(b => b.Id, b => (front ? b.Items.Where(i => !movable.Contains(i.Id)).Concat(b.Items.Where(i => movable.Contains(i.Id))) : b.Items.Where(i => movable.Contains(i.Id)).Concat(b.Items.Where(i => !movable.Contains(i.Id)))).ToArray());
+        if (bands.All(b => before[b.Id].SequenceEqual(after[b.Id]))) return;
         Execute(front ? "Bring to front" : "Send to back", () => { foreach (var b in bands) { b.Items.Clear(); b.Items.AddRange(after[b.Id]); } }, () => { foreach (var b in bands) { b.Items.Clear(); b.Items.AddRange(before[b.Id]); } });
+    }
+    public void SetSelectionLocked(bool locked)
+    {
+        var before = Selection.Where(i => i.Locked != locked).ToArray(); if (before.Length == 0) return;
+        var after = before.Select(i => i with { Locked = locked }).ToArray();
+        Execute(locked ? "Lock objects" : "Unlock objects", () => ReplaceItems(after), () => ReplaceItems(before));
     }
     public void UpdateBand(Band band)
     {
