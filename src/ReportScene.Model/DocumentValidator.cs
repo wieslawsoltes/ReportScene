@@ -37,6 +37,11 @@ public static partial class DocumentValidator
                 if (!Positive(s.FontSize) || !Positive(s.LineHeight) || !Nonnegative(s.Padding) || !Nonnegative(s.BorderWidth)) Error("Invalid text/border metrics.", item.Id);
                 if (!ColorPattern().IsMatch(s.Foreground) || !ColorPattern().IsMatch(s.Fill) || !ColorPattern().IsMatch(s.BorderColor)) Error("Colors must be #RRGGBB or #AARRGGBB.", item.Id);
                 if (item is TableItem table && (!Positive(table.RowHeight) || table.Columns.Count == 0 || table.Columns.Any(c => !Positive(c.Width)))) Error("A table needs positive row heights and column widths.", item.Id);
+                if (item is MatrixItem matrix)
+                {
+                    errors.AddRange(MatrixDefinitionValidator.Validate(matrix));
+                    if (!document.Data.Any(t => t.Name.Equals(matrix.DataSource, StringComparison.OrdinalIgnoreCase))) Error($"Matrix data source '{matrix.DataSource}' is not bound.", item.Id);
+                }
                 if (item is ImageItem image && image.Data.Length > 16_000_000) Error("Embedded image exceeds 16 MB.", item.Id);
             }
             if (band.Header is not null) BandCheck(band.Header, depth + 1);

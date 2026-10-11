@@ -46,6 +46,7 @@ public sealed record ItemStyle
 [JsonDerivedType(typeof(BarcodeItem), "barcode")]
 [JsonDerivedType(typeof(ChartItem), "chart")]
 [JsonDerivedType(typeof(TableItem), "table")]
+[JsonDerivedType(typeof(MatrixItem), "matrix")]
 public abstract record ReportItem
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("N");

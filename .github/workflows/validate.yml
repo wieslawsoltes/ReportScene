@@ -25,17 +25,16 @@ jobs:
         run: |
           mkdir -p artifacts
           dotnet run --project tests/ReportScene.Tests -c Release 2>&1 | tee artifacts/conformance.log
-      - name: Build reusable core packages
-        run: |
-          for project in src/ReportScene.Model src/ReportScene.Expressions src/ReportScene.Data src/ReportScene.Engine src/ReportScene.Serialization src/ReportScene.Designer src/ReportScene.Rendering.Skia src/ReportScene.Export src/ReportScene.Samples; do
-            dotnet pack "$project" -c Release -o artifacts/packages
-          done
+      - name: Build and consume reusable core packages
+        run: bash scripts/pack-core.sh 2>&1 | tee artifacts/packages.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: core-validation
           path: artifacts
+          if-no-files-found: error
   desktop:
+    needs: core
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -43,16 +42,21 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-validation
+          path: artifacts/core-input
       - name: Build desktop application and reusable Uno controls
         run: dotnet build apps/ReportScene.App -c Release -f net10.0-desktop -p:ReportSceneTargetFramework=net10.0-desktop
-      - name: Pack Uno libraries
-        run: |
-          dotnet pack src/ReportScene.Controls.Uno -c Release -o artifacts/packages
-          dotnet pack src/ReportScene.Designer.Uno -c Release -o artifacts/packages
+      - name: Pack and consume Uno libraries
+        run: bash scripts/pack-uno.sh 2>&1 | tee artifacts/uno-packages.log
       - uses: actions/upload-artifact@v4
         with:
           name: uno-packages
-          path: artifacts/packages
+          path: |
+            artifacts/packages
+            artifacts/uno-packages.log
+          if-no-files-found: error
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -92,6 +96,7 @@ jobs:
         with:
           name: browser-app
           path: artifacts/site
+          if-no-files-found: error
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request'
         with:

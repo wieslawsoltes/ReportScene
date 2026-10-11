@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Description>Provider-independent ADO.NET report data adapters with typed scalar conversion, parameter binding, cancellation and bounded materialization.</Description>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../ReportScene.Data/ReportScene.Data.csproj" /></ItemGroup>
+</Project>
