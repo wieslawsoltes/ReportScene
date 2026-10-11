@@ -1,5 +1,11 @@
 <Project Sdk="Uno.Sdk">
-  <PropertyGroup><TargetFramework>net10.0</TargetFramework><UnoFeatures>Skia;</UnoFeatures><Description>Reusable GPU report design surface, preview surface, property sheet and vector icon controls for Uno Platform.</Description></PropertyGroup>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <IsPackable>true</IsPackable>
+    <UnoFeatures>Skia;</UnoFeatures>
+    <Description>Reusable Skia report design and preview surfaces, property sheets, matrix definition editor and bounded data preview for Uno Platform.</Description>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../ReportScene.Designer/ReportScene.Designer.csproj" />
     <ProjectReference Include="../ReportScene.Rendering.Skia/ReportScene.Rendering.Skia.csproj" />
