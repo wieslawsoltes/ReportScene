@@ -38,7 +38,7 @@ public sealed partial class ReportDesignerControl
     private async Task EditSubreportAsync(SubreportItem item)
     {
         if (item.Locked) throw new InvalidOperationException("The selected subreport is locked.");
-        Session.Select(item.Id);
+        Session.Select(item.Id); var target = Operations.CaptureTarget();
         var editor = new SubreportDefinitionEditor(item, Session.Document.Pages, Session.Page.Name);
         var error = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, AcceptsReturn = true, BorderThickness = new(0), Foreground = ControlTheme.Brush("#AD362C"), Visibility = Visibility.Collapsed };
         var panel = new StackPanel { Spacing = 8, Width = Math.Clamp(ActualWidth - 140, 300, 760) };
@@ -74,6 +74,7 @@ public sealed partial class ReportDesignerControl
         {
             try
             {
+                Operations.EnsureCurrent(target);
                 var changed = editor.GetDefinition();
                 Session.UpdateSelection("Edit subreport", source => source.Id == item.Id ? changed : source);
             }
@@ -81,7 +82,7 @@ public sealed partial class ReportDesignerControl
         };
         Register();
         try { await dialog.ShowAsync(); }
-        finally { editor.EditorsChanged -= Register; foreach (var key in registered) commands.Remove(key); NotifyState(); }
+        finally { editor.EditorsChanged -= Register; foreach (var key in registered) commands.Remove(key); if (!disposed) NotifyState(); }
     }
     private void RefreshSubreportProperties(SubreportItem item)
     {

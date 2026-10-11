@@ -11,7 +11,9 @@ public sealed partial class ReportDesignerControl
 {
     private async Task ImportDataWithXmlAsync()
     {
+        var requested = Operations.CaptureRevision();
         var file = await host.OpenFileAsync([".csv", ".json", ".xml"]); if (file is null) return;
+        Operations.EnsureCurrent(requested);
         bool xml = file.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
         var name = new TextBox { Header = "Data table name", Text = Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_'), Width = 270 };
         var infer = new CheckBox { Content = "Infer numbers in untyped fields (may convert codes such as 001)", IsChecked = file.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) };
@@ -55,12 +57,13 @@ public sealed partial class ReportDesignerControl
         {
             try
             {
+                Operations.EnsureCurrent(requested);
                 var table = Read(); Session.ReplaceData(table);
                 SetStatus($"Imported {table.Rows.Count:N0} rows and {table.Columns.Count:N0} columns into {table.Name}");
             }
             catch (Exception e) { error.Text = e.Message; error.Visibility = Visibility.Visible; args.Cancel = true; }
         };
         try { await dialog.ShowAsync(); }
-        finally { foreach (string id in ids) commands.Remove(id); NotifyState(); }
+        finally { foreach (string id in ids) commands.Remove(id); if (!disposed) NotifyState(); }
     }
 }

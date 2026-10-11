@@ -6,7 +6,11 @@ namespace ReportScene.Engine;
 
 public sealed record PreparationOptions(int MaximumPages = 10_000, int MaximumItems = 1_000_000,
     int MaximumBandInstances = 1_000_000, int MaximumPasses = 5, DateTime? ReportDate = null,
-    int MaximumSubreportDepth = 16, int MaximumSubreportInvocations = 10_000);
+    int MaximumSubreportDepth = 16, int MaximumSubreportInvocations = 10_000)
+{
+    /// <summary>Disable to retain the reference linear relation path for diagnosis/differential measurements.</summary>
+    public bool EnableRelationIndexes { get; init; } = true;
+}
 public sealed class ReportPreparationException(IReadOnlyList<Diagnostic> diagnostics) : Exception(string.Join("\n", diagnostics.Select(d => d.Message)))
 { public IReadOnlyList<Diagnostic> Diagnostics { get; } = diagnostics; }
 
@@ -46,9 +50,6 @@ public sealed class ReportPreparer(ITextMeasurer? textMeasurer = null, Expressio
             Parameters = values, Tables = document.Data.ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase),
             ReportDate = options.ReportDate ?? DateTime.UtcNow
         };
-        // All text paths (including table/matrix cells and nested subreports) share this
-        // per-invocation guard. Cancellation is observed between native shaping calls;
-        // a single synchronous native call itself cannot be interrupted by the token.
         ITextMeasurer runMeasurer = cancellationToken.CanBeCanceled ? new CancellableMeasurer(measurer, cancellationToken) : measurer;
         var watch = Stopwatch.StartNew(); int totalPages = 1;
         for (int pass = 0; pass < options.MaximumPasses; pass++)

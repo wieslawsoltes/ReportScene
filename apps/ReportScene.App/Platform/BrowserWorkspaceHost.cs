@@ -22,10 +22,6 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
     private static string Invoke(string expression) => WebAssemblyRuntime.InvokeJS(expression);
     public void Attach(ReportDesignerControl designer)
     {
-        // The window is activated before asynchronous font initialization replaces its loading
-        // content. Uno's one-shot bootstrap observer may already have retained the Skia splash.
-        // Complete the framework's normal splash handoff only after this real designer has drawn.
-        // This runs in ordinary application mode too, not only when diagnostics/tests are enabled.
         var firstFrame = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         firstFrame.Tick += (_, _) =>
         {
@@ -48,10 +44,10 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
         if (SelfTest)
         {
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(750) };
-            timer.Tick += (_, _) =>
+            timer.Tick += async (_, _) =>
             {
                 timer.Stop();
-                try { var results = ConformanceSuite.Run(); Invoke("window.reportScene.tests=" + JsonSerializer.Serialize(results, ValidationJsonContext.Default.ListTestResult) + ";"); }
+                try { var results = await ConformanceSuite.RunAsync(); Invoke("window.reportScene.tests=" + JsonSerializer.Serialize(results, ValidationJsonContext.Default.ListTestResult) + ";"); }
                 catch (Exception e) { Invoke("window.reportScene.testFatal=" + J(e.ToString()) + ";"); }
             };
             timer.Start();
@@ -63,8 +59,14 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
         var result = await ResultAsync(id); if (result.Cancelled) return null;
         return new(result.Name ?? "report.json", Convert.FromBase64String(result.Data ?? ""));
     }
-    public Task SaveFileAsync(ExportFile file)
-    { Invoke($"window.reportSceneHost.download({J(file.Name)},{J(file.MediaType)},{J(Convert.ToBase64String(file.Content))})"); return Task.CompletedTask; }
+    public async Task SaveFileAsync(ExportFile file)
+    {
+        // Acknowledgement follows the same async bridge contract as file/clipboard reads.
+        // This acknowledges acceptance of a download, not browser disk-write durability.
+        string id = Guid.NewGuid().ToString("N");
+        Invoke($"window.reportSceneHost.saveFile({J(id)},{J(file.Name)},{J(file.MediaType)},{J(Convert.ToBase64String(file.Content))})");
+        if ((await ResultAsync(id)).Cancelled) throw new OperationCanceledException("Save cancelled.");
+    }
     public Task PrintAsync(ExportFile html)
     {
         string result = Invoke($"window.reportSceneHost.print({J(System.Text.Encoding.UTF8.GetString(html.Content))})");

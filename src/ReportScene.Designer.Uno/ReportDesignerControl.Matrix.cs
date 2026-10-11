@@ -10,22 +10,22 @@ namespace ReportScene.Designer.Uno;
 public sealed partial class ReportDesignerControl
 {
     private static IEnumerable<string> AllSampleNames => SampleReports.Names.Concat(["Matrix sales", "Subreport dashboard", "Subreport master-detail"]);
-    private async Task LoadAnySampleAsync(string name)
+    private Task LoadAnySampleAsync(string name) => Operations.ReadAndApplyAsync<ReportDocument>(async () =>
     {
-        ReportDocument? sample = name switch
+        if (!await DiscardAsync()) return null;
+        return name switch
         {
             "Matrix sales" => MatrixSampleReports.Sales(), "Subreport dashboard" => SubreportSampleReports.Dashboard(),
-            "Subreport master-detail" => SubreportSampleReports.MasterDetail(), _ => null
+            "Subreport master-detail" => SubreportSampleReports.MasterDetail(), _ => SampleReports.Create(name)
         };
-        if (sample is not null) { if (await DiscardAsync()) Load(sample); }
-        else await LoadSampleAsync(name);
-    }
+    }, Load);
     private async Task EditAnyObjectAsync(ReportItem item)
     {
         if (item is SubreportItem subreport) { await EditSubreportAsync(subreport); return; }
         if (item is not MatrixItem matrix) { await EditObjectAsync(item); return; }
         Session.Select(item.Id);
         if (item.Locked) throw new InvalidOperationException("The selected object is locked.");
+        var target = Operations.CaptureTarget();
         var editor = new MatrixDefinitionEditor(matrix, Session.Document.Data);
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = ControlTheme.Brush("#AD362C"), FontSize = 12 };
         var content = new StackPanel { Spacing = 8, Width = Math.Clamp(ActualWidth - 120, 300, 820) };
@@ -54,7 +54,7 @@ public sealed partial class ReportDesignerControl
         dialog.Opened += (_, _) => RegisterEditors();
         dialog.PrimaryButtonClick += (_, args) =>
         {
-            try { var updated = editor.GetDefinition(); Session.UpdateSelection("Edit matrix", i => i.Id == matrix.Id ? updated : i); }
+            try { Operations.EnsureCurrent(target); var updated = editor.GetDefinition(); Session.UpdateSelection("Edit matrix", i => i.Id == matrix.Id ? updated : i); }
             catch (Exception e) { error.Text = e.Message; args.Cancel = true; }
         };
         RegisterEditors(); editor.EditorsChanged += RegisterEditors;
@@ -63,7 +63,7 @@ public sealed partial class ReportDesignerControl
         {
             editor.EditorsChanged -= RegisterEditors;
             foreach (var key in registered) commands.Remove(key);
-            UpdateStatus(); NotifyState();
+            if (!disposed) { UpdateStatus(); NotifyState(); }
         }
     }
     private Task EditSelectedMatrixAsync()
