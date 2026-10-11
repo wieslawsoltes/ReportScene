@@ -5,5 +5,5 @@ public static class ConformanceSuite
 {
     public static List<TestResult> Run() => Conformance.Run().Concat(ImportDefaultTests.Run())
         .Concat(AggregateRegressionTests.Run()).Concat(MatrixTests.Run()).Concat(MatrixReportingTests.Run())
-        .Concat(MatrixRenderingTests.Run()).ToList();
+        .Concat(MatrixRenderingTests.Run()).Concat(XmlDataTests.Run()).Concat(AdoDataTests.Run()).ToList();
 }
