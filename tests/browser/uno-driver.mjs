@@ -25,18 +25,17 @@ export async function click(page, id) {
 export async function fill(page, id, text) {
   const r = await bounds(page, id);
   await page.mouse.click(r.X + Math.min(24, r.Width / 2), r.Y + r.Height - 15);
-  await fresh(page);
-  await page.keyboard.press('Control+a');
-  await page.keyboard.insertText(text);
+  await fresh(page); await page.keyboard.press('Control+a'); await page.keyboard.insertText(text);
   await expect.poll(async () => (await state(page))?.Inputs[id], { message: `Native TextBox ${id} receives keyboard input` }).toBe(text);
   await page.keyboard.press('Tab'); await fresh(page);
 }
 export async function choose(page, id, index) {
   const r = await bounds(page, id);
   await page.mouse.click(r.X + r.Width - 14, r.Y + r.Height - 15);
-  // Wait for a realized native popup item, not a fixed delay followed by early key events.
   await click(page, `${id}-option-${index}`);
-  await expect.poll(async () => (await state(page))?.Inputs[id]).toBe(String(index));
+  // Selection can replace the ribbon itself (e.g. opening a sample). The caller verifies the
+  // resulting document/serialized value instead of polling a newly-created placeholder control.
+  await expect.poll(async () => Boolean((await state(page))?.Commands[`${id}-option-${index}`])).toBe(false);
 }
 export async function save(page) {
   await bounds(page, 'quick-save');

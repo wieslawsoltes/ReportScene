@@ -39,7 +39,7 @@ public sealed partial class ReportDesignerControl
                 break;
             case "Report":
                 Group("Prepare", Command("preview-report", "Preview", "preview", PreparePreview, true), Command("validate-report", "Validate", "checkbox", Validate, true));
-                Group("Data", AsyncCommand("import-data", "Import data", "data", ImportDataAsync, true), Vertical(AsyncCommand("parameters", "Parameters…", "settings", ParametersAsync), AsyncCommand("data-editor", "Data editor…", "table", EditDataAsync)));
+                Group("Data", AsyncCommand("import-data", "Import data", "data", ImportDataWithXmlAsync, true), Vertical(AsyncCommand("parameters", "Parameters…", "settings", ParametersAsync), AsyncCommand("data-editor", "Data editor…", "table", EditDataAsync)));
                 Group("Report pages", AsyncCommand("page-setup", "Page setup", "settings", PageSetupAsync, true), Vertical(Command("new-page", "New page", "new", Session.AddPage), AsyncCommand("add-band", "Add band…", "band", AddBandAsync)));
                 Group("Bands", Vertical(AsyncCommand("group-wizard", "Group data…", "band", GroupAsync), Command("delete-band", "Delete band", "delete", Session.DeleteBand)));
                 Group("Document", AsyncCommand("native-editor", "Edit JSON", "report", EditNativeAsync, true), AsyncCommand("open", "Open", "open", OpenAsync, true));
