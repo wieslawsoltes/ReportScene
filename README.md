@@ -2,7 +2,7 @@
 
 A modular .NET reporting engine and Uno Platform designer for desktop and WebAssembly. ReportScene is an independent implementation developed against publicly documented reporting concepts, not an official Fast Reports product or a drop-in FastReport replacement.
 
-[Browser application](https://wieslawsoltes.github.io/ReportScene/) · [Compatibility](docs/compatibility.md) · [Subreports](docs/subreports.md) · [Data providers](docs/data-providers.md) · [Performance review](docs/performance-review.md) · [Workspace operations and relations](docs/host-operations-and-relations.md) · [Validation](docs/validation.md)
+[Browser application](https://wieslawsoltes.github.io/ReportScene/) · [Compatibility](docs/compatibility.md) · [Designer and authoring review](docs/designer-fidelity.md) · [Subreports](docs/subreports.md) · [Data providers](docs/data-providers.md) · [Performance review](docs/performance-review.md) · [Workspace operations and relations](docs/host-operations-and-relations.md) · [Validation](docs/validation.md)
 
 ## Reporting and authoring
 
@@ -12,11 +12,15 @@ Subreports reference reusable pages inside the document. Independent mode suppor
 
 The designer offers report/data trees, property editors, drag/resize/snap, alignment, clipboard operations, transactional undo/redo, local recovery, native matrix and subreport editors, target-page navigation, reference-safe page renaming, and CSV/JSON/XML import with a bounded typed preview. Creating a subreport and its target page is one undoable operation.
 
+The compact workspace adds searchable hierarchical trees, an object selector, categorized/alphabetical property filtering, descriptions, resizable/closable tool panes, live formatting state and status-bar zoom. Eight resize handles and reversible locking use the shared authoring session. Display units can be changed without rewriting point-based report geometry. The [designer review](docs/designer-fidelity.md) documents implemented behavior, public references and remaining differences from the original designer.
+
 Preview search supports next/previous, Shift+Enter, match case and whole word through a reusable `PreparedSearchSession`. Search and outline bounds respect clipping. Prepared-page indexes are reused while zooming; saving or changing a selection does not discard prepared content. Revision-aware activity tracking avoids report-tree reconstruction and recovery serialization on every drag frame, while recovery coordination retains edits committed during an awaited write.
 
 `DesignerOperations` provides revision-safe asynchronous save, clipboard and read/apply contracts independently of Uno. The designer uses it for file operations and captured editor targets. A delayed save records the revision actually written without clearing newer changes; delayed Cut/Paste/Open operations cannot silently affect a different target. Cancellation preserves unsaved content. [The host-operation guide](docs/host-operations-and-relations.md) specifies ownership, disposal and persistence guarantees.
 
 Text wrapping segments each paragraph once and probes line-sized prefixes. Font-width cache storage is bounded by entries and retained characters. Large band slices and prepared viewports use immutable ordered indexes, and table/matrix row-boundary lookup uses binary search. A reusable `DataKeyIndex` accelerates compatible master/detail lookups while preserving coercing/mixed-value scan semantics and source ordinals. Engine caches are bounded and shared across nested invocations within one pass; `PreparationOptions.EnableRelationIndexes` enables differential diagnosis against the scan path.
+
+Authoring batches resolve edited objects in one document traversal rather than restarting a scan for every selected item. New geometry/identity validation precedes mutation, unchanged snapped drag frames do not send duplicate notifications, and selection/save/zoom reuse authoring layouts. Keyed native tree nodes survive nonstructural edits; metadata construction remains a documented traversal cost.
 
 PDF, SVG, PNG, printable HTML, text, CSV and native prepared JSON use the common prepared-page representation. Native report JSON is the lossless interchange format for implemented objects. FRX is an explicitly diagnosed subset and does not yet translate subreport or matrix objects; FPX is not supported. Clipping corrects visible geometry and link annotations; it is **not secure redaction**.
 
@@ -33,10 +37,10 @@ Uno controls and report drawing use Skia; text metrics/shaping use HarfBuzz. Bro
 | `ReportScene.Matrix` | Independent typed cross-tab aggregation |
 | `ReportScene.Engine` | Band, table, matrix and nested subreport preparation/pagination |
 | `ReportScene.Serialization` | Source-generated native JSON and diagnosed FRX subset |
-| `ReportScene.Designer` | Headless authoring, history, captured revisions/targets, asynchronous operations and recovery coordination |
+| `ReportScene.Designer` | Headless authoring, batch history, resize geometry, units, outline snapshots, asynchronous operations and recovery |
 | `ReportScene.Rendering.Skia` | Common report drawing, indexed rendering and font-backed metrics |
 | `ReportScene.Export` | Prepared-report exporters |
-| `ReportScene.Controls.Uno` | Reusable design/preview surfaces, property sheets, matrix/subreport editors and data preview |
+| `ReportScene.Controls.Uno` | Reusable design/preview surfaces, property grid, searchable tree, pane splitter, matrix/subreport editors and data preview |
 | `ReportScene.Designer.Uno` | Embeddable designer with host-supplied file/clipboard/print services |
 | `ReportScene.Samples` | Executable example reports |
 
@@ -67,10 +71,10 @@ npx playwright test
 
 CI publishes one WebAssembly artifact, tests it across three isolated shards, and requires every shard plus merged evidence before deployment. Local `playwright test` runs the complete suite with one worker. No automatic retries are enabled. The benchmark records differential checks, work counts, allocations and timings in `artifacts/performance.json`; fixture measurements are not universal or hardware-GPU speed claims.
 
-Open **View → Samples → Matrix sales**, **Subreport dashboard**, or **Subreport master-detail**. Use **Report → Import data** to bind CSV, JSON or scalar XML data. Double-click a matrix or subreport to edit its definition. The left toolbar includes **Insert subreport and page**, **Edit selected subreport**, and **Open subreport page**. Report page tabs expose the target's normal band/object editor.
+Open **View → Samples → Matrix sales**, **Subreport dashboard**, or **Subreport master-detail**. Use **Report → Import data** to bind CSV, JSON or scalar XML data. Double-click a matrix or subreport to edit its definition. The left toolbar includes **Insert subreport and page**, **Edit selected subreport**, and **Open subreport page**. Report page tabs expose the target's normal band/object editor. **View → Panels → Reset layout** restores closed tool panes; the search field above the explorer and the property filter operate independently.
 
 ## Scope
 
-This is active development, not complete FastReport .NET parity or production certification. Rich-text/HTML objects, report inheritance, arbitrary C#/VB.NET scripts/events, dialog pages, native FPX, the full provider/export catalog, advanced subreport presentation options, and complete original-designer visual/behavioral matching remain outstanding. Further aggregate/lookahead profiling, large multi-selection performance and committed structural-tree rebuilds also need work. See the compatibility and review documents for narrower boundaries within implemented areas.
+This is active development, not complete FastReport .NET parity or production certification. Rich-text/HTML objects, report inheritance, arbitrary C#/VB.NET scripts/events, dialog pages, native FPX, the full provider/export catalog, advanced subreport presentation options, and complete original-designer visual/behavioral matching remain outstanding. True docking/floating windows, toolbox drag placement, aggregate/lookahead profiling, large native selection controls and fully incremental structural metadata also need work. See the compatibility and review documents for narrower boundaries within implemented areas.
 
 FastReport is a trademark of its respective owner. No proprietary FastReport source, artwork or binaries are included. See [LICENSE](LICENSE).

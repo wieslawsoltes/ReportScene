@@ -43,4 +43,15 @@ Check(!session.MarkSaved(written) && session.IsDirty, "captured save revision pr
 Check((await operations.SaveAsync((snapshot, _) => Task.FromResult(snapshot.Json.Contains("Factor")))).Current && !session.IsDirty, "awaited operations packaged API");
 var captured = session.CaptureTarget(); session.SetPage(0);
 Check(!session.IsCurrent(captured), "awaited target invalidation");
+var geometry = DesignerGeometry.Resize(new(20, 30, 100, 80), 10, 15, ResizeHandle.TopLeft);
+Check(geometry == new RectD(30, 45, 90, 65) && DesignerGeometry.PointsPerUnit(DesignerUnit.Inches) == 72, "resize geometry and display units");
+var outline = DesignerOutline.Report(session.Document); var filtered = outline.Filter("ChildValue");
+Check(filtered.Count == 3 && ReferenceEquals(filtered, outline.Filter("ChildValue")) && outline.QueryScanCount == 1, "cached hierarchical outline filtering");
+var batch = new DesignerSession(new() { Pages = [new() { Bands = [new() { Items = [new TextItem { Id = "a" }, new TextItem { Id = "b" }] }] }] });
+batch.SelectAll(); batch.Move(10, 10); int scan = batch.LastReplacementScanCount; batch.Undo();
+Check(scan == 2 && batch.Selection.All(i => i.Bounds.X == 0), "atomic batch geometry and undo");
+batch.Select("a"); batch.BeginDrag(); batch.PreviewResize(8, 8, ResizeHandle.BottomRight); batch.CommitDrag();
+Check(batch.Selection.Single().Bounds.Width == 128, "directional resize session");
+batch.SetSelectionLocked(true); batch.SetSelectionLocked(false); batch.Undo();
+Check(batch.Selection.Single().Locked, "reversible selection locking");
 Console.WriteLine($"{passed}/{passed} isolated package-consumer checks passed.");
