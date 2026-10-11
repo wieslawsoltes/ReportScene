@@ -6,8 +6,7 @@ using ReportScene.Model;
 using ReportScene.Rendering.Skia;
 using ReportScene.Validation;
 
-// Reproducible evidence, not a noisy wall-clock CI gate. Correctness and deterministic
-// work bounds are asserted by conformance tests; timings/allocations are recorded here.
+// Timings are evidence, not noisy CI thresholds; differential correctness remains mandatory.
 var records = new List<object>();
 var style = new ItemStyle { FontSize = 10 };
 foreach (int size in new[] { 8192, 32768 })
@@ -61,6 +60,7 @@ records.Add(new { name = "search-api-rescan-vs-session", matchCount = search.Mat
     rescanMeasure = Measure(() => Enumerable.Range(0, 100).Sum(_ => report.Search("Row 999").Count())),
     cachedNavigationMeasure = Measure(() => { int found = 0; for (int n = 0; n < 100; n++) { search.SetQuery("Row 999"); if (search.MoveNext() is not null) found++; } return found; }),
     search.QueryScanCount });
+records.AddRange(RelationBenchmarks.Run());
 var evidence = new { schema = 1, framework = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
     processors = Environment.ProcessorCount, timestampUtc = DateTime.UtcNow, note = "Median of three in-process repetitions after one warmup; index build cost recorded separately. No hardware GPU, FPS or browser latency claim.", results = records };
 string json = JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true });
