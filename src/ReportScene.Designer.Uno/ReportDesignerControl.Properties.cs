@@ -20,7 +20,7 @@ public sealed partial class ReportDesignerControl
         if (items.Length == 0)
         {
             var band = Session.SelectedBand;
-            if (band is null) { objectName.Text = "Report properties"; properties.ReadOnly("Name", Session.Document.Name); properties.ReadOnly("Pages", Session.Document.Pages.Count.ToString()); properties.ReadOnly("Units", DesignerGeometry.UnitLabel(displayUnit)); return; }
+            if (band is null) { RefreshPageProperties(); return; }
             objectName.Text = band.Name + " · " + band.Kind;
             void EditBand(Func<Band, Band> change) { var current = Session.SelectedBand ?? throw new InvalidOperationException("No band selected."); Session.UpdateBand(change(current)); }
             properties.Category("Band");

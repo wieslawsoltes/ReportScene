@@ -39,6 +39,12 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public bool TreeShown { get; init; }
     public bool PropertiesShown { get; init; }
     public bool ActiveDrag { get; init; }
+    public bool FullPaper { get; init; }
+    public double DesignPaperHeight { get; init; }
+    public double SourcePaperHeight { get; init; }
+    public long TextLayoutCacheHits { get; init; }
+    public long TextLayoutCacheMisses { get; init; }
+    public int TextLayoutCacheCharacters { get; init; }
 }
 [JsonSerializable(typeof(DesignerSnapshot))]
 public partial class DesignerSnapshotJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
@@ -98,7 +104,10 @@ public sealed partial class ReportDesignerControl
             OutlineVisibleRows = tree.VisibleRowCount, OutlineFilter = tree.FilterText, ActiveTree = activeTree,
             PropertyFilter = propertyFilter.Text, PropertyProjection = properties.VisiblePropertyIds.ToArray(), PropertiesAlphabetical = properties.Alphabetical,
             PropertyValidation = properties.ValidationMessage, DisplayUnit = displayUnit.ToString(), SidebarWidth = sidebarWidth,
-            TreePaneHeight = treeHeight, TreeShown = showTree, PropertiesShown = showProperties, ActiveDrag = Session.HasActiveDrag
+            TreePaneHeight = treeHeight, TreeShown = showTree, PropertiesShown = showProperties, ActiveDrag = Session.HasActiveDrag,
+            FullPaper = DesignView.ShowFullPage, DesignPaperHeight = DesignView.Layout.Paper.Height, SourcePaperHeight = Session.Page.Height,
+            TextLayoutCacheHits = DesignView.TextLayouts.Hits, TextLayoutCacheMisses = DesignView.TextLayouts.Misses,
+            TextLayoutCacheCharacters = DesignView.TextLayouts.RetainedCharacters
         };
     }
 }

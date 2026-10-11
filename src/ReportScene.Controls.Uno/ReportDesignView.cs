@@ -39,6 +39,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public double PointScale => Zoom * 96 / 72;
     public DesignLayout Layout => surface.Layout;
     public long RenderCount => surface.RenderCount;
+    public TextLayoutCache TextLayouts => surface.TextLayouts;
     public long LayoutBuildCount { get; private set; } = 1;
     public FrameworkElement CanvasElement => surface;
     public event Action<ReportItem>? EditRequested;
@@ -162,11 +163,12 @@ public sealed class ReportDesignView : UserControl, IDisposable
     {
         if (disposed) return; disposed = true;
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectionChanged;
-        surface.ReleasePointerCaptures(); base.Dispose();
+        surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); base.Dispose();
     }
     private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer) : SKCanvasElement
     {
         public DesignLayout Layout { get; set; } = DesignLayout.Create(session.Page, false);
+        public TextLayoutCache TextLayouts { get; } = new(renderer.Metrics);
         public double PointScale { get; set; } = 1;
         public bool ShowGrid { get; set; } = true;
         public bool ShowRulers { get; set; } = true;
@@ -209,7 +211,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
                 {
                     double tolerance = 6 / PointScale;
                     if (entry.Bounds.Bottom + tolerance < viewport.Top || entry.Bounds.Y - tolerance > viewport.Bottom || entry.Bounds.Right + tolerance < viewport.Left || entry.Bounds.X - tolerance > viewport.Right) continue;
-                    string text = entry.Item switch { TextItem t => string.Join('\n', TextLayout.Wrap(t.Text, entry.Bounds.Width - t.Style.Padding * 2, t.Style, renderer.Metrics)), BarcodeItem b => b.Text, CheckBoxItem c => c.Expression, _ => "" };
+                    string text = entry.Item switch { TextItem t => TextLayouts.GetWrappedText(t.Text, entry.Bounds.Width - t.Style.Padding * 2, t.Style), BarcodeItem b => b.Text, CheckBoxItem c => c.Expression, _ => "" };
                     try { renderer.DrawItem(canvas, new(entry.Item, entry.Bounds, text), true); }
                     catch (ReportRenderException error)
                     {

@@ -78,7 +78,7 @@ public sealed partial class ReportDesignerControl
             if (previewMode) { SetPreview(false); BuildRibbon(); }
             if (entry.ObjectId is { } item) { Session.Select(item); DesignView.ScrollToSelection(); }
             else if (entry.BandId is { } band) Session.SelectBand(band);
-            else Session.SetPage(entry.PageIndex);
+            else Session.SelectPage();
             return;
         }
         if (entry.Expression is { } expression)

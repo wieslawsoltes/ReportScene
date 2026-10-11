@@ -110,7 +110,10 @@ public sealed partial class ReportDesignerControl
                 var units = new ComboBox { Width = 122, MinHeight = 0, Height = 25, FontSize = 11, Padding = new(5, 0, 22, 0), CornerRadius = new(0), ItemsSource = Enum.GetNames<DesignerUnit>(), SelectedIndex = (int)displayUnit };
                 units.SelectionChanged += (_, _) => { if (units.SelectedItem is string name) { displayUnit = Enum.Parse<DesignerUnit>(name); DesignView.Unit = displayUnit; RefreshPropertyEditors(); UpdateStatus(); } };
                 commands["display-units"] = ControlTheme.Identify(units, "display-units", "Display units; report geometry is stored in points");
-                Group("Grid", Vertical(grid, snap)); Group("Rulers", Vertical(rulers, units)); Group("Zoom", ZoomChoice(false), Command("fit-width", "Fit width", "zoom", DesignView.FitWidth, true));
+                var fullPage = new CheckBox { Content = "Full paper", IsChecked = DesignView.ShowFullPage, FontSize = 11, MinHeight = 26 };
+                fullPage.Checked += (_, _) => DesignView.ShowFullPage = true; fullPage.Unchecked += (_, _) => DesignView.ShowFullPage = false;
+                commands["show-full-paper"] = ControlTheme.Identify(fullPage, "show-full-paper", "Show full paper height instead of compact bands");
+                Group("Grid", Vertical(grid, snap)); Group("Rulers", Vertical(rulers, fullPage), units); Group("Zoom", ZoomChoice(false), Command("fit-width", "Fit width", "zoom", DesignView.FitWidth, true));
                 Group("Panels", Vertical(Command("toggle-tree", "Data / Report Tree", "data", () => { showTree = !showTree; ApplyPaneLayout(); }), Command("toggle-properties", "Properties", "settings", () => { showProperties = !showProperties; ApplyPaneLayout(); })), Vertical(Command("toggle-sidebar", "Tool windows", "table", ToggleSidebar), Command("toggle-messages", "Messages", "report", ToggleMessages)), Command("reset-layout", "Reset layout", "report", ResetPaneLayout, true));
                 Group("Samples", SamplesChoice()); Group("Help", AsyncCommand("compatibility", "Compatibility", "report", ShowCurrentCompatibilityAsync, true));
                 break;
