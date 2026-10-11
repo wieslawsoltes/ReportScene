@@ -35,7 +35,8 @@ internal sealed partial class PreparationRun
         void Place(Layout layout, double x, double at, double consumed = 0, double? sliceHeight = null)
         {
             var slice = new RectD(x, at, template.ColumnWidth, sliceHeight ?? layout.Height);
-            foreach (var item in layout.Items)
+            var candidates = sliceHeight is { } amount ? SliceCandidates(layout, consumed, amount) : layout.Items;
+            foreach (var item in candidates)
             {
                 cancellation.ThrowIfCancellationRequested();
                 var bounds = item.Bounds.Offset(x, at - consumed); var clip = item.Clip?.Offset(x, at - consumed);
@@ -242,11 +243,9 @@ internal sealed partial class PreparationRun
             foreach (var flow in layout.Flows)
             {
                 if (cut <= flow.Top + .001 || cut >= flow.Bottom - .001) continue;
-                double boundary = flow.Top >= consumed - .001 ? flow.Top : consumed;
-                foreach (var rowEnd in flow.RowEnds) { if (rowEnd > cut + .001) break; if (rowEnd > consumed + .001) boundary = rowEnd; }
-                cut = Math.Min(cut, boundary);
+                cut = Math.Min(cut, RowBoundary(flow, consumed, cut));
             }
-            foreach (var item in layout.Items)
+            foreach (var item in CutCandidates(layout, cut))
                 if (item.Source is TextItem && item.Bounds.Y > consumed + .01 && item.Bounds.Y < cut - .001 && item.Bounds.Bottom > cut + .001) cut = Math.Min(cut, item.Bounds.Y);
             if (previous - cut < .001) return cut;
         }

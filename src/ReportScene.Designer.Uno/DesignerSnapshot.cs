@@ -9,7 +9,15 @@ namespace ReportScene.Designer.Uno;
 
 public sealed record ElementBounds(double X, double Y, double Width, double Height);
 public sealed record ObjectSnapshot(string Id, string Name, string Kind, RectD Bounds, string? Text, bool Selected, ElementBounds? Screen);
-public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview, int TemplatePages, int PreparedPages, int PreviewPage, int ObjectCount, int SelectedCount, bool CanUndo, bool CanRedo, int HistoryCount, double Zoom, long RenderCount, string Status, IReadOnlyList<Diagnostic> Diagnostics, Dictionary<string, ElementBounds> Commands, Dictionary<string, ElementBounds> Properties, IReadOnlyList<ObjectSnapshot> Objects, Dictionary<string, string> Inputs, long SnapshotSequence);
+public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview, int TemplatePages, int PreparedPages, int PreviewPage, int ObjectCount, int SelectedCount, bool CanUndo, bool CanRedo, int HistoryCount, double Zoom, long RenderCount, string Status, IReadOnlyList<Diagnostic> Diagnostics, Dictionary<string, ElementBounds> Commands, Dictionary<string, ElementBounds> Properties, IReadOnlyList<ObjectSnapshot> Objects, Dictionary<string, string> Inputs, long SnapshotSequence)
+{
+    public long ContentRevision { get; init; }
+    public long PreviewIndexBuilds { get; init; }
+    public int PreviewCandidatesExamined { get; init; }
+    public int SearchQueryScans { get; init; }
+    public int SearchMatches { get; init; }
+    public bool RecoveryPending { get; init; }
+}
 [JsonSerializable(typeof(DesignerSnapshot))]
 public partial class DesignerSnapshotJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
 
@@ -54,6 +62,11 @@ public sealed partial class ReportDesignerControl
         foreach (var pair in properties.Editors) if (Bounds(pair.Value) is { } bounds) propertyBounds[pair.Key] = bounds;
         var origin = Bounds(DesignView.CanvasElement);
         var objects = DesignView.Layout.Objects.Select(entry => new ObjectSnapshot(entry.Item.Id, entry.Item.Name, entry.Item.GetType().Name, entry.Item.Bounds, entry.Item is TextItem text ? text.Text : null, Session.SelectedIds.Contains(entry.Item.Id), origin is null ? null : new(origin.X + entry.Bounds.X * DesignView.PointScale, origin.Y + entry.Bounds.Y * DesignView.PointScale, entry.Bounds.Width * DesignView.PointScale, entry.Bounds.Height * DesignView.PointScale))).ToArray();
-        return new(Session.Document.Name, Session.IsDirty, previewMode, Session.Document.Pages.Count, PreviewView.Report?.Pages.Count ?? 0, PreviewView.PageIndex + 1, DocumentTree.AllItems(Session.Document).Count(), Session.SelectedIds.Count, Session.CanUndo, Session.CanRedo, Session.HistoryCount, previewMode ? PreviewView.Zoom : DesignView.Zoom, previewMode ? PreviewView.RenderCount : DesignView.RenderCount, status.Text, diagnostics.ToArray(), commandBounds, propertyBounds, objects, inputs, ++snapshotSequence);
+        return new(Session.Document.Name, Session.IsDirty, previewMode, Session.Document.Pages.Count, PreviewView.Report?.Pages.Count ?? 0, PreviewView.PageIndex + 1, DocumentTree.AllItems(Session.Document).Count(), Session.SelectedIds.Count, Session.CanUndo, Session.CanRedo, Session.HistoryCount, previewMode ? PreviewView.Zoom : DesignView.Zoom, previewMode ? PreviewView.RenderCount : DesignView.RenderCount, status.Text, diagnostics.ToArray(), commandBounds, propertyBounds, objects, inputs, ++snapshotSequence)
+        {
+            ContentRevision = Session.Revision, PreviewIndexBuilds = PreviewView.IndexBuildCount,
+            PreviewCandidatesExamined = PreviewView.LastCandidatesExamined, SearchQueryScans = searchSession?.QueryScanCount ?? 0,
+            SearchMatches = searchSession?.Matches.Count ?? 0, RecoveryPending = recovery.HasPending
+        };
     }
 }

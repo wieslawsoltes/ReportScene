@@ -1,6 +1,6 @@
 # Validation and reproducibility
 
-The `Validate` workflow gates Pages deployment on core conformance/package consumption, Uno desktop compilation/package consumption, and the actual Uno WebAssembly application with browser interaction tests. It does not deploy a failed build.
+The `Validate` workflow gates Pages deployment on core conformance, performance evidence, isolated package consumption, Uno desktop compilation and the actual Uno WebAssembly application with browser interaction tests. It does not deploy a failed build.
 
 ## Core and package checks
 
@@ -8,19 +8,25 @@ The `Validate` workflow gates Pages deployment on core conformance/package consu
 
 Subreport regressions cover independent lane row preservation and page counts, mismatched row heights, empty/finished lanes, page and column numbering, target headers/footers, nested references, master/detail scope, parameter isolation, on-parent growth/shrink/clipping, following objects, caller immutability, rejected cycles/targets/layouts, bounded work and cancellation. Structural tests exercise atomic page+reference creation, page renaming, nested-band settings, history interoperation, navigation and safe clipboard handling.
 
-Database query contract tests use instrumented connections/commands and real DataTableReader objects. Browser tests run the supported adapter checks and assert rejection of direct database queries before connection creation. Therefore native and WebAssembly test counts differ; neither platform's result is inferred from the other.
+Performance/correctness regressions cover differential grapheme wrapping, measured-character work bounds, bounded font cache retention, indexed-query equivalence and painter order, index snapshot ownership, pixel equality for full versus indexed rendering, large table/text pagination, cancellation during metrics callbacks, explicit parameter scope, clipped search results, Unicode whole-word search, cached bidirectional navigation, activity revisions and recovery request coordination. These supplement rather than replace the earlier reporting tests.
 
-`scripts/pack-core.sh` builds eleven core nupkgs, including Matrix and Data.AdoNet. A separate package-only consumer restores from the generated local feed with a fresh package cache. It executes eight checks, including scoped subreport preparation and reference-safe page renaming.
+Database query contract tests use instrumented connections/commands and real DataTableReader objects. Browser tests run supported adapter checks and assert rejection of direct database queries before connection creation. Therefore native and WebAssembly test counts differ; neither platform's result is inferred from the other.
+
+`scripts/pack-core.sh` builds eleven core nupkgs, including Matrix and Data.AdoNet. A separate package-only consumer restores from the generated local feed with a fresh package cache. It executes twelve checks, including scoped subreport preparation, reference-safe page renaming, immutable page/interval indexes, advanced prepared search and revision-aware activity.
 
 The desktop job downloads those core packages, compiles the application and runs `scripts/pack-uno.sh`. Both Uno libraries explicitly opt into packing. The script requires thirteen nupkgs, checks both Uno library assemblies and compiles a separate consumer without source ProjectReferences. NuGet source mapping pins all `ReportScene.*` packages to the local build while external sources supply framework dependencies only. The consumer exercises public designer/surface/property/matrix/subreport/data-preview APIs. This compile check is not interactive package-only desktop execution.
 
 To run the Uno package check locally after `scripts/pack-core.sh`, copy `artifacts/packages` to `artifacts/core-input/packages`, then run `bash scripts/pack-uno.sh`.
 
+## Performance evidence
+
+`dotnet run --project tests/ReportScene.Benchmarks -c Release` records reproducible inputs, differential checks, work/candidate counts, median in-process time and per-thread allocation in `artifacts/performance.json`. Wall-clock speed ratios are observations, not thresholds that can waive correctness failures. Index construction is reported separately. The search comparison contrasts repeated use of the lazy Search API with cached session navigation; it does not pretend the old designer rescanned on every Find-next. See [Performance review](performance-review.md) for exact methodology, ownership and limitations.
+
 ## Browser checks
 
-Playwright serves the published .NET WebAssembly output under `/ReportScene/`. It uses actual pointer/keyboard/file-chooser input; no diagnostic command mutates the application. Read-only diagnostics provide state, geometry, native TextBox values and realized ComboBox popup bounds. The driver waits for observed state, not guessed popup delays.
+Playwright serves the published .NET WebAssembly output under `/ReportScene/`. It uses actual pointer/keyboard/file-chooser input; no diagnostic command mutates the application. Read-only diagnostics provide state, geometry, native TextBox values, realized ComboBox popup bounds, content revisions, index builds, search scans and recovery pending state. The driver waits for observed state, not guessed popup delays.
 
-Scenarios cover the original editing/dragging/history/save/export/search flow, matrix editing and samples, XML preview/import/rejection/cancel, ordinary/diagnostic startup presentation, subreport-and-page insertion and navigation, binding validation/apply/undo/cancel, searching bound child output, independent parallel samples, PDF exports, and preserving the current document when cyclic subreport JSON is rejected.
+Scenarios cover the original editing/dragging/history/save/export/search flow, matrix editing and samples, XML preview/import/rejection/cancel, ordinary/diagnostic startup presentation, subreport-and-page insertion and navigation, binding validation/apply/undo/cancel, searching bound child output, independent parallel samples, PDF exports, and preserving the current document when cyclic subreport JSON is rejected. Advanced-search tests operate actual case/whole-word controls, previous/next and Shift+Enter; lifecycle tests verify that save and zoom retain the prepared/index state and a content edit refreshes results for an unchanged query.
 
 Presentation tests assert that the bootstrap loader is absent and inspect colors in actual screenshot pixels. A loaded-but-covered window cannot pass based only on internal state. Screenshot decoding uses a detached image/canvas and never changes the application DOM. Screenshots remain evidence artifacts for review; these checks do not certify pixel-identical FastReport UI parity.
 
@@ -28,8 +34,8 @@ The suite has zero automatic retries and does not waive failing assertions. Boun
 
 ## Evidence and limits
 
-Successful runs publish `core-validation` (core packages, logs, sample exports), `uno-packages` (all thirteen packages and consumer log), `browser-validation` (test evidence and summaries), and `browser-app`. Each run's commit identifies the source. Concrete run IDs, counts and merge/deployment outcomes are recorded in the PR only after the corresponding job completes.
+Successful runs publish `core-validation` (packages, logs, performance JSON, sample exports), `uno-packages` (all thirteen packages and consumer log), `browser-validation` (test evidence and summaries), and `browser-app`. Each run's commit identifies the source. Concrete run IDs, counts and merge/deployment outcomes are recorded in the PR only after the corresponding job completes.
 
-Hardware GPU throughput, interactive desktop qualification on every OS, all external database drivers, mobile/accessibility parity, and exhaustive FastReport functional/visual comparison are not certified by these checks.
+Hardware GPU throughput, interactive desktop qualification on every OS, all external database drivers, mobile/accessibility parity, and exhaustive FastReport functional/visual comparison are not certified by these checks. Recovery tests validate coordination contracts, not the durability guarantees of every host filesystem or browser-storage provider.
 
 References: [NuGet source mapping](https://learn.microsoft.com/en-us/nuget/consume-packages/package-source-mapping#package-pattern-precedence), [Playwright global teardown](https://playwright.dev/docs/test-global-setup-teardown).

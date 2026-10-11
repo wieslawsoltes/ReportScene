@@ -25,12 +25,12 @@ public sealed class ReportExporter : IReportExporter
     public IReadOnlyList<ExportFormat> Formats { get; } = Enum.GetValues<ExportFormat>();
     public ExportFile Export(PreparedReport report, ExportFormat format, ExportOptions? options = null, ReportDocument? document = null, CancellationToken cancellationToken = default)
     {
-        options ??= new();
-        if (!double.IsFinite(options.Dpi) || options.Dpi < 36 || options.Dpi > 1200 || options.FirstPage < 1 || options.LastPage < options.FirstPage || options.MaximumPixels < 1) throw new ArgumentOutOfRangeException(nameof(options));
+        ArgumentNullException.ThrowIfNull(report); options ??= new(); ValidateOptions(options);
         var pages = report.Pages.Where(p => p.Number >= options.FirstPage && p.Number <= options.LastPage).ToArray();
         if (pages.Length == 0 && format != ExportFormat.Csv) throw new ArgumentException("The selected page range is empty.");
         if (report.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error)) throw new InvalidOperationException("Reports containing errors cannot be exported.");
         cancellationToken.ThrowIfCancellationRequested();
+        if (format != ExportFormat.Csv) foreach (var page in pages) ValidatePage(page);
         var safeName = string.Concat(report.Name.Select(c => char.IsLetterOrDigit(c) || c is ' ' or '-' or '_' ? c : '_')).Trim();
         if (safeName.Length == 0) safeName = "Report";
         using var renderer = new ReportRenderer();
@@ -42,7 +42,7 @@ public sealed class ReportExporter : IReportExporter
                 {
                     using (var pdf = SKDocument.CreatePdf(output, new SKDocumentPdfMetadata { Title = report.Name, Creator = "ReportScene", Producer = "ReportScene / Skia", RasterDpi = (float)options.Dpi }) ?? throw new NotSupportedException("The current Skia build does not provide a PDF backend."))
                     {
-                        foreach (var page in pages) { cancellationToken.ThrowIfCancellationRequested(); var canvas = pdf.BeginPage((float)page.Width, (float)page.Height); renderer.DrawPage(canvas, page); AddLinks(canvas, page); pdf.EndPage(); }
+                        foreach (var page in pages) { cancellationToken.ThrowIfCancellationRequested(); var canvas = pdf.BeginPage((float)page.Width, (float)page.Height); renderer.DrawPage(canvas, page); AddLinks(canvas, page, cancellationToken); pdf.EndPage(); }
                         pdf.Close();
                     }
                     return new(safeName + ".pdf", "application/pdf", output.ToArray());
@@ -58,13 +58,13 @@ public sealed class ReportExporter : IReportExporter
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     html.Append("<section class=\"page\" aria-label=\"Page ").Append(page.Number).Append("\" style=\"width:").Append(N(page.Width)).Append("pt;height:").Append(N(page.Height)).Append("pt\">").Append(Svg(renderer, page));
-                    foreach (var item in page.Items.Where(i => SafeLink(i.Source.Hyperlink)))
-                        html.Append("<a class=\"link\" rel=\"noopener noreferrer\" href=\"").Append(WebUtility.HtmlEncode(item.Source.Hyperlink)).Append("\" aria-label=\"").Append(WebUtility.HtmlEncode(item.Text)).Append("\" style=\"left:").Append(N(item.Bounds.X)).Append("pt;top:").Append(N(item.Bounds.Y)).Append("pt;width:").Append(N(item.Bounds.Width)).Append("pt;height:").Append(N(item.Bounds.Height)).Append("pt\"></a>");
+                    foreach (var (item, bounds) in VisibleItems(page, cancellationToken).Where(v => SafeLink(v.Item.Source.Hyperlink)))
+                        html.Append("<a class=\"link\" rel=\"noopener noreferrer\" href=\"").Append(WebUtility.HtmlEncode(item.Source.Hyperlink)).Append("\" aria-label=\"").Append(WebUtility.HtmlEncode(item.Text)).Append("\" style=\"left:").Append(N(bounds.X)).Append("pt;top:").Append(N(bounds.Y)).Append("pt;width:").Append(N(bounds.Width)).Append("pt;height:").Append(N(bounds.Height)).Append("pt\"></a>");
                     html.Append("</section>");
                 }
                 html.Append("</main></body></html>"); return TextFile(".html", "text/html", html.ToString());
             case ExportFormat.Text:
-                return TextFile(".txt", "text/plain", string.Join("\n\f\n", pages.Select(p => string.Join('\n', p.Items.Where(i => i.Source is TextItem).OrderBy(i => i.Bounds.Y).ThenBy(i => i.Bounds.X).Select(i => i.Text)))));
+                return TextFile(".txt", "text/plain", string.Join("\n\f\n", pages.Select(p => string.Join('\n', VisibleItems(p, cancellationToken).Where(v => v.Item.Source is TextItem).OrderBy(v => v.Item.Bounds.Y).ThenBy(v => v.Item.Bounds.X).Select(v => v.Item.Text)))));
             case ExportFormat.PreparedJson:
                 return TextFile(".prepared.json", "application/json", JsonSerializer.Serialize(report with { Pages = pages }, ReportJsonContext.Default.PreparedReport));
             case ExportFormat.Csv:
@@ -81,9 +81,10 @@ public sealed class ReportExporter : IReportExporter
     }
     public static byte[] Png(ReportRenderer renderer, PreparedPage page, ExportOptions options)
     {
+        ArgumentNullException.ThrowIfNull(renderer); ArgumentNullException.ThrowIfNull(options); ValidatePage(page); ValidateOptions(options);
         double scale = options.Dpi / 72;
         double w = Math.Ceiling(page.Width * scale), h = Math.Ceiling(page.Height * scale);
-        if (w <= 0 || h <= 0 || w * h > options.MaximumPixels || w > int.MaxValue || h > int.MaxValue) throw new InvalidOperationException("The requested raster exceeds the configured pixel limit.");
+        if (!double.IsFinite(w) || !double.IsFinite(h) || w <= 0 || h <= 0 || w * h > options.MaximumPixels || w > int.MaxValue || h > int.MaxValue) throw new InvalidOperationException("The requested raster exceeds the configured pixel limit.");
         using var surface = SKSurface.Create(new SKImageInfo((int)w, (int)h, SKColorType.Rgba8888, SKAlphaType.Premul)) ?? throw new InvalidOperationException("Raster surface allocation failed.");
         surface.Canvas.Clear(SKColors.White); surface.Canvas.Scale((float)scale); renderer.DrawPage(surface.Canvas, page);
         using var image = surface.Snapshot(); using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
@@ -91,16 +92,35 @@ public sealed class ReportExporter : IReportExporter
     }
     public static string Svg(ReportRenderer renderer, PreparedPage page)
     {
+        ArgumentNullException.ThrowIfNull(renderer); ValidatePage(page);
         using var stream = new MemoryStream();
         using (var canvas = SKSvgCanvas.Create(SKRect.Create((float)page.Width, (float)page.Height), stream) ?? throw new NotSupportedException("The current Skia build does not provide an SVG backend.")) renderer.DrawPage(canvas, page);
         var svg = Encoding.UTF8.GetString(stream.ToArray());
         int start = svg.IndexOf("<svg", StringComparison.Ordinal); return start >= 0 ? svg[start..] : throw new InvalidOperationException("SVG output is invalid.");
     }
-    private static bool SafeLink(string? text) => Uri.TryCreate(text, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http" or "mailto";
-    private static void AddLinks(SKCanvas canvas, PreparedPage page)
+    private static void ValidateOptions(ExportOptions options)
     {
-        foreach (var item in page.Items.Where(i => SafeLink(i.Source.Hyperlink)))
-        { using var data = SKData.CreateCopy(Encoding.UTF8.GetBytes(item.Source.Hyperlink + "\0")); canvas.DrawAnnotation(ReportRenderer.Rect(item.Bounds), "URL", data); }
+        if (!double.IsFinite(options.Dpi) || options.Dpi < 36 || options.Dpi > 1200 || options.FirstPage < 1 || options.LastPage < options.FirstPage || options.MaximumPixels < 1) throw new ArgumentOutOfRangeException(nameof(options));
+    }
+    private static void ValidatePage(PreparedPage page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        if (!double.IsFinite(page.Width) || !double.IsFinite(page.Height) || page.Width <= 0 || page.Height <= 0 || page.Width > float.MaxValue || page.Height > float.MaxValue)
+            throw new ArgumentException("Prepared page dimensions must be positive and representable by the drawing backend.", nameof(page));
+    }
+    private static IEnumerable<(PreparedItem Item, RectD Bounds)> VisibleItems(PreparedPage page, CancellationToken cancellationToken)
+    {
+        foreach (var item in page.Items)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (PreparedVisibility.VisibleBounds(page, item) is { } bounds) yield return (item, bounds);
+        }
+    }
+    private static bool SafeLink(string? text) => Uri.TryCreate(text, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http" or "mailto";
+    private static void AddLinks(SKCanvas canvas, PreparedPage page, CancellationToken cancellationToken)
+    {
+        foreach (var (item, bounds) in VisibleItems(page, cancellationToken).Where(v => SafeLink(v.Item.Source.Hyperlink)))
+        { using var data = SKData.CreateCopy(Encoding.UTF8.GetBytes(item.Source.Hyperlink + "\0")); canvas.DrawAnnotation(ReportRenderer.Rect(bounds), "URL", data); }
     }
     private static ExportFile Zip(string name, IEnumerable<ExportFile> files)
     {

@@ -2,7 +2,7 @@
 
 A modular .NET reporting engine and Uno Platform designer for desktop and WebAssembly. ReportScene is an independent implementation developed against publicly documented reporting concepts, not an official Fast Reports product or a drop-in FastReport replacement.
 
-[Browser application](https://wieslawsoltes.github.io/ReportScene/) · [Compatibility](docs/compatibility.md) · [Subreports](docs/subreports.md) · [Data providers](docs/data-providers.md) · [Validation](docs/validation.md)
+[Browser application](https://wieslawsoltes.github.io/ReportScene/) · [Compatibility](docs/compatibility.md) · [Subreports](docs/subreports.md) · [Data providers](docs/data-providers.md) · [Performance review](docs/performance-review.md) · [Validation](docs/validation.md)
 
 ## Reporting and authoring
 
@@ -12,6 +12,10 @@ Subreports reference reusable pages inside the document. Independent mode suppor
 
 The designer offers report/data trees, property editors, drag/resize/snap, alignment, clipboard operations, transactional undo/redo, local recovery, native matrix and subreport editors, target-page navigation, reference-safe page renaming, and CSV/JSON/XML import with a bounded typed preview. Creating a subreport and its target page is one undoable operation.
 
+Preview search supports next/previous, Shift+Enter, match case and whole word through a reusable `PreparedSearchSession`. Search and outline bounds respect clipping. Prepared-page indexes are reused while zooming; saving or changing a selection does not discard prepared content. Revision-aware activity tracking avoids report-tree reconstruction and recovery serialization on every drag frame, while recovery coordination retains edits committed during an awaited write.
+
+Text wrapping segments each paragraph once and probes line-sized prefixes. Font-width cache storage is bounded by both entries and retained characters. Large band slices and prepared viewports use immutable ordered indexes, and table/matrix row-boundary lookup uses binary search. [The performance review](docs/performance-review.md) explains the algorithms, correctness checks, measurements, index construction costs and remaining hotspots without implying universal or hardware-GPU speedups.
+
 PDF, SVG, PNG, printable HTML, text, CSV and native prepared JSON use the common prepared-page representation. Native report JSON is the lossless interchange format for implemented objects. FRX is an explicitly diagnosed subset and does not yet translate subreport or matrix objects; FPX is not supported.
 
 Uno controls and report drawing use Skia; text metrics/shaping use HarfBuzz. Browser validation runs the actual .NET WebAssembly application rather than a separate JavaScript mock. CI uses software WebGL, not evidence of hardware GPU performance.
@@ -20,15 +24,15 @@ Uno controls and report drawing use Skia; text metrics/shaping use HarfBuzz. Bro
 
 | Package | Responsibility |
 | --- | --- |
-| `ReportScene.Model` | Report objects, typed scalar data, validation and subreport reference graph |
+| `ReportScene.Model` | Report objects, typed scalar data, validation, reference graph, interval/page indexes and prepared search |
 | `ReportScene.Expressions` | Bounded expression parsing and aggregate evaluation |
 | `ReportScene.Data` | CSV/JSON/XML readers, file dispatch and provider contract |
 | `ReportScene.Data.AdoNet` | CLR/DataTable/DataSet/DbDataReader adapters and explicit parameterized query providers |
 | `ReportScene.Matrix` | Independent typed cross-tab aggregation |
 | `ReportScene.Engine` | Band, table, matrix and nested subreport preparation/pagination |
 | `ReportScene.Serialization` | Source-generated native JSON and diagnosed FRX subset |
-| `ReportScene.Designer` | Headless authoring state, reference-aware structural editing and transactional history |
-| `ReportScene.Rendering.Skia` | Common report drawing and font-backed metrics |
+| `ReportScene.Designer` | Headless authoring state, reference-aware history, revision tracking and recovery coordination |
+| `ReportScene.Rendering.Skia` | Common report drawing, indexed rendering and font-backed metrics |
 | `ReportScene.Export` | Prepared-report exporters |
 | `ReportScene.Controls.Uno` | Reusable design/preview surfaces, property sheets, matrix/subreport editors and data preview |
 | `ReportScene.Designer.Uno` | Embeddable designer with host-supplied file/clipboard/print services |
@@ -42,6 +46,7 @@ Install the .NET SDK specified by `global.json`. From the repository root:
 
 ```sh
 dotnet run --project tests/ReportScene.Tests -c Release
+dotnet run --project tests/ReportScene.Benchmarks -c Release
 bash scripts/pack-core.sh
 dotnet build apps/ReportScene.App -c Release -f net10.0-desktop -p:ReportSceneTargetFramework=net10.0-desktop
 

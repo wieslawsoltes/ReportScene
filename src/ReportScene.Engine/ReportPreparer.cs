@@ -15,6 +15,19 @@ public sealed class ReportPreparer(ITextMeasurer? textMeasurer = null, Expressio
 {
     private readonly ITextMeasurer measurer = textMeasurer ?? new ApproximateTextMeasurer();
     private readonly ExpressionEngine expressions = expressions ?? new();
+    private sealed class CancellableMeasurer(ITextMeasurer inner, CancellationToken cancellation) : ITextMeasurer
+    {
+        public double MeasureWidth(string text, ItemStyle style)
+        {
+            cancellation.ThrowIfCancellationRequested(); double width = inner.MeasureWidth(text, style);
+            cancellation.ThrowIfCancellationRequested(); return width;
+        }
+        public double LineHeight(ItemStyle style)
+        {
+            cancellation.ThrowIfCancellationRequested(); double height = inner.LineHeight(style);
+            cancellation.ThrowIfCancellationRequested(); return height;
+        }
+    }
     public PreparedReport Prepare(ReportDocument document, IReadOnlyDictionary<string, Value>? parameters = null, PreparationOptions? options = null, CancellationToken cancellationToken = default)
     {
         options ??= new();
@@ -33,11 +46,15 @@ public sealed class ReportPreparer(ITextMeasurer? textMeasurer = null, Expressio
             Parameters = values, Tables = document.Data.ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase),
             ReportDate = options.ReportDate ?? DateTime.UtcNow
         };
+        // All text paths (including table/matrix cells and nested subreports) share this
+        // per-invocation guard. Cancellation is observed between native shaping calls;
+        // a single synchronous native call itself cannot be interrupted by the token.
+        ITextMeasurer runMeasurer = cancellationToken.CanBeCanceled ? new CancellableMeasurer(measurer, cancellationToken) : measurer;
         var watch = Stopwatch.StartNew(); int totalPages = 1;
         for (int pass = 0; pass < options.MaximumPasses; pass++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var run = new PreparationRun(document, context with { TotalPages = totalPages }, options, expressions, measurer, cancellationToken);
+            var run = new PreparationRun(document, context with { TotalPages = totalPages }, options, expressions, runMeasurer, cancellationToken);
             var pages = run.Prepare();
             if (pages.Count == totalPages) return new(document.Name, pages, [], watch.Elapsed);
             totalPages = pages.Count;
