@@ -36,6 +36,9 @@ public sealed partial class ReportDesignerControl
         tools.Children.Add(Command("tool-select", "Select objects", "pointer", () => { DesignView.Focus(FocusState.Programmatic); }, text: false));
         foreach (var (kind, label, icon) in new[] { ("text", "Text", "text"), ("line", "Line", "line"), ("rectangle", "Rectangle", "rectangle"), ("ellipse", "Ellipse", "ellipse"), ("image", "Picture", "image"), ("checkbox", "Check box", "checkbox"), ("barcode", "Barcode", "barcode"), ("chart", "Chart", "chart"), ("table", "Table", "table"), ("matrix", "Matrix", "table") })
             tools.Children.Add(Command("insert-" + kind, "Insert " + label, icon, () => Insert(kind), text: false));
+        tools.Children.Add(Command("insert-subreport", "Insert subreport and page", "report", InsertSubreport, text: false));
+        tools.Children.Add(AsyncCommand("subreport-edit", "Edit selected subreport", "settings", EditSelectedSubreportAsync, text: false));
+        tools.Children.Add(Command("subreport-open", "Open subreport page", "open", OpenSelectedSubreport, text: false));
         tools.Children.Add(Command("insert-band", "Insert band", "band", () => Run(AddBandAsync), text: false)); workspace.Children.Add(tools);
         var center = new Grid(); center.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) }); center.RowDefinitions.Add(new() { Height = new(28) });
         center.Children.Add(DesignView); center.Children.Add(PreviewView);
@@ -49,7 +52,9 @@ public sealed partial class ReportDesignerControl
         sidebar.Child = right; sidebar.BorderThickness = new(1, 0, 0, 0); sidebar.BorderBrush = ControlTheme.Brush("#BFC7CF"); Grid.SetColumn(sidebar, 2); workspace.Children.Add(sidebar);
         DesignView.RightTapped += (_, e) =>
         {
-            var menu = new MenuFlyout(); Menu(menu, "Edit object…", () => { if (Session.Selection.FirstOrDefault() is { } item) Run(() => EditAnyObjectAsync(item)); }); Menu(menu, "Cut", () => Run(CutAsync)); Menu(menu, "Copy", () => Run(CopyAsync)); Menu(menu, "Paste", () => Run(PasteAsync)); Menu(menu, "Delete", Session.DeleteSelection); menu.Items.Add(new MenuFlyoutSeparator()); Menu(menu, "Bring to front", () => Session.Reorder(true)); Menu(menu, "Send to back", () => Session.Reorder(false)); menu.ShowAt(DesignView, e.GetPosition(DesignView)); e.Handled = true;
+            var menu = new MenuFlyout(); Menu(menu, "Edit object…", () => { if (Session.Selection.FirstOrDefault() is { } item) Run(() => EditAnyObjectAsync(item)); });
+            Menu(menu, "Open subreport page", OpenSelectedSubreport); Menu(menu, "Cut", () => Run(CutAsync)); Menu(menu, "Copy", () => Run(CopyAsync)); Menu(menu, "Paste", () => Run(PasteAsync)); Menu(menu, "Delete", Session.DeleteSelection);
+            menu.Items.Add(new MenuFlyoutSeparator()); Menu(menu, "Bring to front", () => Session.Reorder(true)); Menu(menu, "Send to back", () => Session.Reorder(false)); menu.ShowAt(DesignView, e.GetPosition(DesignView)); e.Handled = true;
         };
     }
 }
