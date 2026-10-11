@@ -11,7 +11,7 @@ public sealed partial class ReportDesignerControl
     private string[] pageNames = [];
     private readonly Dictionary<string, int> objectIndices = new(StringComparer.Ordinal);
     private bool selectingObject;
-    private readonly ComboBox objectSelector = new() { FontSize = 11, MinHeight = 0, Height = 24, Padding = new(5, 0, 22, 0), CornerRadius = new(0), HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Select an object" };
+    private readonly ReportComboBox objectSelector = new() { FontSize = 11, MinHeight = 0, Height = 24, Padding = new(5, 0, 22, 0), CornerRadius = new(0), HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Select an object" };
     private void RefreshStructure(bool force = false)
     {
         var report = DesignerOutline.Report(Session.Document); var data = DesignerOutline.Data(Session.Document);

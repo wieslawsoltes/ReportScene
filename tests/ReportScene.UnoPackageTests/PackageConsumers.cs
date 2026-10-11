@@ -17,6 +17,7 @@ public static class PackageConsumers
     public static SubreportDefinitionEditor CreateSubreportEditor(SubreportItem subreport, IEnumerable<ReportPage> pages, string owner) => new(subreport, pages, owner);
     public static DataTablePreview CreateDataPreview(DataTable table)
     { var preview = new DataTablePreview(); preview.SetTable(table); return preview; }
+    public static ReportComboBox CreateCompactChoice() => new();
     public static PropertySheet CreatePropertySheet()
     {
         var sheet = new PropertySheet { FilterText = "Width", Alphabetical = true, CommitGuard = () => { } };
