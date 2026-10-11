@@ -73,10 +73,12 @@ internal sealed partial class PreparationRun
         void StartPage(IReadOnlyList<Instance> repeated)
         {
             cancellation.ThrowIfCancellationRequested();
-            if (pages.Count >= options.MaximumPages) throw Failure("RS2007", "Maximum page count exceeded.");
-            output = []; column = 0;
             var geometry = Geometry(pages.Count);
+            // Child fragments are parent-column viewports, not necessarily physical pages.
+            // Apply the public page budget to the final physical page number in both modes.
+            if (geometry.PageNumber > options.MaximumPages) throw Failure("RS2007", "Maximum page count exceeded.");
             if (!double.IsFinite(geometry.Height) || geometry.Height <= 0) throw Failure("RS1507", "A subreport has no positive printable viewport.");
+            output = []; column = 0;
             pages.Add(new(geometry.PageNumber, template.Width, geometry.Height, output));
             var c = Context(root); pageTop = template.Margins.Top;
             foreach (var overlay in overlays) Place(Fixed(overlay, c, template.ContentWidth), template.Margins.Left, pageTop);
@@ -88,6 +90,20 @@ internal sealed partial class PreparationRun
         }
         void NextColumn(IReadOnlyList<Instance> repeated, bool forcePage = false)
         {
+            if (forcePage && embeddedViewport is not null)
+            {
+                int physicalPage = Geometry(pages.Count - 1).PageNumber, skipped = 0;
+                // Keep an empty fragment for each unused parent column in this lane. Other
+                // parallel lanes can still use that column; the explicit break affects only
+                // this child flow. Nested children inherit the same physical-page schedule.
+                while (Geometry(pages.Count).PageNumber == physicalPage)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    if (++skipped > 64) throw Failure("RS1508", "The subreport viewport schedule did not advance to another physical page.");
+                    var gap = Geometry(pages.Count);
+                    pages.Add(new(gap.PageNumber, template.Width, gap.Height, []));
+                }
+            }
             if (forcePage || column + 1 >= template.Columns) StartPage(repeated);
             else { column++; StartColumn(repeated); }
         }
@@ -107,8 +123,6 @@ internal sealed partial class PreparationRun
         {
             if (layout.Subreports.Count == 0) return;
             if (bottom - y < .01) NextColumn(instance.Repeat);
-            // Each lane is independently paginated against the same immutable parent viewport
-            // schedule. A 24pt row in one lane never forces a 31pt row in another to split.
             double anchor = y, firstBottom = bottom; int firstPage = pages.Count - 1, firstColumn = column;
             var firstContext = Context(instance.Context);
             var continuation = new Dictionary<int, (double Top, double Bottom, FragmentViewport Geometry)>();
@@ -119,12 +133,10 @@ internal sealed partial class PreparationRun
                 var result = MeasureBody(firstPage + absolute / template.Columns, absolute % template.Columns, instance.Repeat);
                 continuation.Add(slot, result); return result;
             }
-            var lanes = new List<(SubreportItem Item, double Gap, EmbeddedResult Report)>();
-            long generated = 0;
+            var lanes = new List<(SubreportItem Item, double Gap, EmbeddedResult Report)>(); long generated = 0;
             foreach (var item in layout.Subreports)
             {
-                double gap = item.Bounds.Y - layout.Height;
-                double firstHeight = firstBottom - anchor - gap;
+                double gap = item.Bounds.Y - layout.Height; double firstHeight = firstBottom - anchor - gap;
                 if (firstHeight <= .001) throw Failure("RS1507", "Subreport anchors must fit in the current printable band. Align parallel subreports at the lower band edge.", item.Id);
                 FragmentViewport Viewport(int slot)
                 {
@@ -139,8 +151,7 @@ internal sealed partial class PreparationRun
             int count = lanes.Max(l => l.Report.Pages.Count);
             for (int slot = 0; slot < count; slot++)
             {
-                cancellation.ThrowIfCancellationRequested();
-                if (slot > 0) NextColumn(instance.Repeat);
+                cancellation.ThrowIfCancellationRequested(); if (slot > 0) NextColumn(instance.Repeat);
                 double start = slot == 0 ? anchor : y, last = start;
                 foreach (var lane in lanes)
                 {
