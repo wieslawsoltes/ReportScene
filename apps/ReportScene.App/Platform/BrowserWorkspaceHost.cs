@@ -22,7 +22,6 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
     private static string Invoke(string expression) => WebAssemblyRuntime.InvokeJS(expression);
     public void Attach(ReportDesignerControl designer)
     {
-        // Complete the framework's splash handoff only after this real designer has drawn.
         var firstFrame = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         firstFrame.Tick += (_, _) =>
         {
@@ -60,8 +59,14 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
         var result = await ResultAsync(id); if (result.Cancelled) return null;
         return new(result.Name ?? "report.json", Convert.FromBase64String(result.Data ?? ""));
     }
-    public Task SaveFileAsync(ExportFile file)
-    { Invoke($"window.reportSceneHost.download({J(file.Name)},{J(file.MediaType)},{J(Convert.ToBase64String(file.Content))})"); return Task.CompletedTask; }
+    public async Task SaveFileAsync(ExportFile file)
+    {
+        // Acknowledgement follows the same async bridge contract as file/clipboard reads.
+        // This acknowledges acceptance of a download, not browser disk-write durability.
+        string id = Guid.NewGuid().ToString("N");
+        Invoke($"window.reportSceneHost.saveFile({J(id)},{J(file.Name)},{J(file.MediaType)},{J(Convert.ToBase64String(file.Content))})");
+        if ((await ResultAsync(id)).Cancelled) throw new OperationCanceledException("Save cancelled.");
+    }
     public Task PrintAsync(ExportFile html)
     {
         string result = Invoke($"window.reportSceneHost.print({J(System.Text.Encoding.UTF8.GetString(html.Content))})");

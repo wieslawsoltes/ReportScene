@@ -38,6 +38,10 @@
       }, { once: true });
       input.click();
     },
+    saveFile(id, name, mediaType, base64) {
+      try { this.download(name, mediaType, base64); complete(id, {}); }
+      catch (error) { fail(id, error); }
+    },
     download(name, mediaType, base64) {
       const raw = atob(base64); const bytes = new Uint8Array(raw.length);
       for (let n = 0; n < raw.length; n++) bytes[n] = raw.charCodeAt(n);
