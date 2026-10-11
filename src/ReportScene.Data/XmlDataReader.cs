@@ -16,14 +16,24 @@ public static class XmlDataReader
         cancellationToken.ThrowIfCancellationRequested();
         if (xml.Length > options.MaximumCharacters) throw new FormatException("XML input exceeds its character limit.");
         using var input = new StringReader(xml); using var reader = XmlReader.Create(input, Settings(options));
-        return new XmlTableParser(reader, name, options, cancellationToken).Read();
+        return Parse(reader, name, options, cancellationToken);
     }
     /// <summary>Honors XML declaration/BOM encoding. The caller retains ownership of input.</summary>
     public static DataTable Read(Stream input, string name = "Data", XmlDataOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(input); options ??= new(); ValidateOptions(options, name);
         cancellationToken.ThrowIfCancellationRequested(); using var reader = XmlReader.Create(input, Settings(options));
-        return new XmlTableParser(reader, name, options, cancellationToken).Read();
+        return Parse(reader, name, options, cancellationToken);
+    }
+    private static DataTable Parse(XmlReader reader, string name, XmlDataOptions options, CancellationToken cancellation)
+    {
+        try { return new XmlTableParser(reader, name, options, cancellation).Read(); }
+        catch (FormatException error) when (error.InnerException is XmlException xml && xml.Message.StartsWith("Xml_DtdIsProhibited", StringComparison.Ordinal))
+        {
+            // Trimmed WebAssembly BCL builds may expose a resource key rather than its localized
+            // message. Keep the parser's prohibition intact, but show actionable application text.
+            throw new FormatException("DTD declarations are prohibited. Remove the document type and entity definitions from the XML data file.", error);
+        }
     }
     private static XmlReaderSettings Settings(XmlDataOptions options) => new()
     {
