@@ -25,6 +25,8 @@ jobs:
         run: |
           mkdir -p artifacts
           dotnet run --project tests/ReportScene.Tests -c Release 2>&1 | tee artifacts/conformance.log
+      - name: Record differential performance evidence
+        run: dotnet run --project tests/ReportScene.Benchmarks -c Release 2>&1 | tee artifacts/performance.log
       - name: Build and consume reusable core packages
         run: bash scripts/pack-core.sh 2>&1 | tee artifacts/packages.log
       - uses: actions/upload-artifact@v4
