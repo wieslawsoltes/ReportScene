@@ -76,7 +76,11 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
             recoveryTimer.Stop(); if (disposed) return;
             try
             {
-                await recovery.FlushAsync(() => ReportJson.Serialize(Session.Document), json => host.SaveRecoveryAsync(json));
+                await recovery.FlushWhenReadyAsync(() => !disposed && !Session.HasActiveDrag,
+                    () => ReportJson.Serialize(Session.Document), json => host.SaveRecoveryAsync(json));
+                // A request queued before a drag must not capture intermediate geometry.
+                // Check again after each awaited write; retry deferred work after the drag.
+                if (!disposed && recovery.HasPending) recoveryTimer.Start();
             }
             catch (Exception e) { if (!disposed) SetStatus("Recovery save failed: " + e.Message); }
         };

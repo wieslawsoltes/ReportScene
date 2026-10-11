@@ -28,7 +28,7 @@ public sealed class DesignerActivityTracker
 /// <summary>
 /// Serializes recovery writes and drains edits requested during an awaited save. Revisions
 /// are request generations (not undo positions), so undo/redo cannot hide a pending save.
-/// A failed save remains pending and can be retried explicitly by the host.
+/// A failed or deferred save remains pending and can be retried explicitly by the host.
 /// </summary>
 public sealed class RecoverySaveCoordinator
 {
@@ -36,15 +36,25 @@ public sealed class RecoverySaveCoordinator
     private long requested, completed;
     public bool HasPending => Interlocked.Read(ref requested) != Interlocked.Read(ref completed);
     public void Request() => Interlocked.Increment(ref requested);
-    public async Task FlushAsync(Func<string> snapshot, Func<string, Task> save, CancellationToken cancellationToken = default)
+    public Task FlushAsync(Func<string> snapshot, Func<string, Task> save, CancellationToken cancellationToken = default)
+        => FlushWhenReadyAsync(static () => true, snapshot, save, cancellationToken);
+
+    /// <summary>
+    /// The host's synchronous readiness check runs immediately before each snapshot, also
+    /// after an awaited write. Returning false defers remaining requests without capturing
+    /// transient drag state. Call again after the host is ready. Callbacks retain the caller's
+    /// synchronization context; hosts must synchronize concurrent edits with snapshotting.
+    /// </summary>
+    public async Task FlushWhenReadyAsync(Func<bool> canSnapshot, Func<string> snapshot, Func<string, Task> save, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(snapshot); ArgumentNullException.ThrowIfNull(save);
+        ArgumentNullException.ThrowIfNull(canSnapshot); ArgumentNullException.ThrowIfNull(snapshot); ArgumentNullException.ThrowIfNull(save);
         await gate.WaitAsync(cancellationToken);
         try
         {
             while (HasPending)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (!canSnapshot()) return;
                 long generation = Interlocked.Read(ref requested); string json = snapshot();
                 await save(json); Interlocked.Exchange(ref completed, generation);
             }
