@@ -10,5 +10,6 @@ public static class ConformanceSuite
         .Concat(SubreportDesignerTests.Run()).Concat(SubreportRenderingTests.Run()).Concat(SubreportGraphTests.Run())
         .Concat(SubreportPhysicalPageTests.Run()).Concat(SubreportNavigationTests.Run()).Concat(TextLayoutPerformanceTests.Run())
         .Concat(PreparedPageIndexTests.Run()).Concat(DesignerActivityTests.Run()).Concat(PreparedSearchTests.Run()).Concat(ParameterScopeTests.Run())
-        .Concat(PaginationPerformanceTests.Run()).Concat(PreparationCancellationTests.Run()).Concat(RecoveryReadinessTests.Run()).Concat(ExportVisibilityTests.Run()).ToList();
+        .Concat(PaginationPerformanceTests.Run()).Concat(PreparationCancellationTests.Run()).Concat(RecoveryReadinessTests.Run()).Concat(ExportVisibilityTests.Run())
+        .Concat(ImplicitSubreportRowTests.Run()).ToList();
 }
