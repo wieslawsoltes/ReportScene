@@ -8,6 +8,11 @@ namespace ReportScene.Designer.Uno;
 
 public sealed partial class ReportDesignerControl
 {
+    private void Measurement(string name, double points, Action<double> commit, string id)
+    {
+        double scale = DesignerGeometry.PointsPerUnit(displayUnit);
+        properties.Number(name, points / scale, value => commit(value * scale), id);
+    }
     private void RefreshProperties()
     {
         properties.Clear();
@@ -15,13 +20,13 @@ public sealed partial class ReportDesignerControl
         if (items.Length == 0)
         {
             var band = Session.SelectedBand;
-            if (band is null) { objectName.Text = "Report properties"; properties.ReadOnly("Name", Session.Document.Name); properties.ReadOnly("Pages", Session.Document.Pages.Count.ToString()); properties.ReadOnly("Units", "Points (1/72 inch)"); return; }
+            if (band is null) { RefreshPageProperties(); return; }
             objectName.Text = band.Name + " · " + band.Kind;
             void EditBand(Func<Band, Band> change) { var current = Session.SelectedBand ?? throw new InvalidOperationException("No band selected."); Session.UpdateBand(change(current)); }
             properties.Category("Band");
             properties.Text("Name", band.Name, text => EditBand(b => b with { Name = RequireName(text) }), "band-name");
             properties.ReadOnly("Kind", band.Kind.ToString(), "band-kind");
-            properties.Number("Height", band.Height, n => EditBand(b => b with { Height = Positive(n, "Height", true) }), "band-height");
+            Measurement("Height (" + DesignerGeometry.UnitLabel(displayUnit) + ")", band.Height, n => EditBand(b => b with { Height = Positive(n, "Height", true) }), "band-height");
             if (band.Kind == BandKind.Data)
             {
                 properties.Category("Data");
@@ -41,11 +46,16 @@ public sealed partial class ReportDesignerControl
             properties.Text("Alternate fill", band.AlternateFill ?? "", value => EditBand(b => b with { AlternateFill = value.Length == 0 ? null : ValidColor(value) }), "band-alternate-fill");
             return;
         }
-        var first = items[0];
+        var first = items.FirstOrDefault(i => !i.Locked) ?? items[0];
         objectName.Text = items.Length == 1 ? first.Name + " · " + first.GetType().Name.Replace("Item", "") : items.Length + " selected objects";
-        void Edit(string name, Func<ReportItem, ReportItem> change) => Session.UpdateSelection(name, change);
+        void Edit(string name, Func<ReportItem, ReportItem> change)
+        {
+            if (!Session.Selection.Any(i => !i.Locked)) throw new InvalidOperationException("The selected objects are locked. Unlock them before editing their properties.");
+            Session.UpdateSelection(name, change);
+        }
         properties.Category("Object");
-        properties.Text("Name", first.Name, text => Edit("Object name", i => i with { Name = RequireName(text) }), "name");
+        if (items.Length == 1) properties.Text("Name", first.Name, text => Edit("Object name", i => i with { Name = RequireName(text) }), "name");
+        else properties.ReadOnly("Selection", items.Length + " objects; displayed values are from the first editable object", "selection-info");
         if (first is TextItem textItem)
         {
             properties.Text("Text", textItem.Text, text => Edit("Text", i => i is TextItem t ? t with { Text = text } : i), "text", true);
@@ -61,7 +71,7 @@ public sealed partial class ReportDesignerControl
         if (first is ShapeItem shape)
         {
             properties.Choice("Shape", Enum.GetNames<ShapeKind>(), shape.Shape.ToString(), value => Edit("Shape", i => i is ShapeItem s ? s with { Shape = Enum.Parse<ShapeKind>(value) } : i), "shape-kind");
-            properties.Number("Radius", shape.Radius, value => Edit("Corner radius", i => i is ShapeItem s ? s with { Radius = Positive(value, "Radius", true) } : i), "shape-radius");
+            Measurement("Radius", shape.Radius, value => Edit("Corner radius", i => i is ShapeItem s ? s with { Radius = Positive(value, "Radius", true) } : i), "shape-radius");
         }
         if (first is ChartItem chart)
         {
@@ -74,7 +84,7 @@ public sealed partial class ReportDesignerControl
         if (first is TableItem table)
         {
             properties.Choice("Data source", Session.Document.Data.Select(t => t.Name), table.DataSource, text => Edit("Table data source", i => i is TableItem t ? t with { DataSource = text } : i), "table-source");
-            properties.Number("Row height", table.RowHeight, value => Edit("Table row height", i => i is TableItem t ? t with { RowHeight = Positive(value, "Row height") } : i), "table-row-height");
+            Measurement("Row height", table.RowHeight, value => Edit("Table row height", i => i is TableItem t ? t with { RowHeight = Positive(value, "Row height") } : i), "table-row-height");
             properties.Boolean("Show header", table.ShowHeader, value => Edit("Table header", i => i is TableItem t ? t with { ShowHeader = value } : i), "table-header");
             properties.ReadOnly("Columns", table.Columns.Count + " · double-click to edit");
         }
@@ -83,30 +93,31 @@ public sealed partial class ReportDesignerControl
             properties.ReadOnly("Image", image.Data.Length == 0 ? "Double-click to load" : (image.Data.Length / 1024d).ToString("0.0") + " KB");
             properties.Boolean("Keep aspect", image.PreserveAspect, value => Edit("Image fit", i => i is ImageItem p ? p with { PreserveAspect = value } : i), "image-aspect");
         }
-        properties.Category("Position · points");
-        properties.Number("Left", first.Bounds.X, n => Edit("Left", i => i with { Bounds = i.Bounds with { X = Positive(n, "Left", true) } }), "left");
-        properties.Number("Top", first.Bounds.Y, n => Edit("Top", i => i with { Bounds = i.Bounds with { Y = Positive(n, "Top", true) } }), "top");
-        properties.Number("Width", first.Bounds.Width, n => Edit("Width", i => i with { Bounds = i.Bounds with { Width = Positive(n, "Width") } }), "width");
-        properties.Number("Height", first.Bounds.Height, n => Edit("Height", i => i with { Bounds = i.Bounds with { Height = Positive(n, "Height") } }), "height");
+        properties.Category("Position · " + DesignerGeometry.UnitLabel(displayUnit));
+        Measurement("Left", first.Bounds.X, n => Edit("Left", i => i with { Bounds = i.Bounds with { X = Positive(n, "Left", true) } }), "left");
+        Measurement("Top", first.Bounds.Y, n => Edit("Top", i => i with { Bounds = i.Bounds with { Y = Positive(n, "Top", true) } }), "top");
+        Measurement("Width", first.Bounds.Width, n => Edit("Width", i => i with { Bounds = i.Bounds with { Width = Positive(n, "Width") } }), "width");
+        Measurement("Height", first.Bounds.Height, n => Edit("Height", i => i with { Bounds = i.Bounds with { Height = Positive(n, "Height") } }), "height");
         properties.Category("Appearance");
         properties.Text("Font", first.Style.FontFamily, text => Edit("Font family", i => i with { Style = i.Style with { FontFamily = RequireName(text) } }), "font");
-        properties.Number("Font size", first.Style.FontSize, n => Edit("Font size", i => i with { Style = i.Style with { FontSize = Positive(n, "Font size") } }), "font-size");
+        properties.Number("Font size (pt)", first.Style.FontSize, n => Edit("Font size", i => i with { Style = i.Style with { FontSize = Positive(n, "Font size") } }), "font-size");
         properties.Boolean("Bold", first.Style.Bold, value => Edit("Bold", i => i with { Style = i.Style with { Bold = value } }), "bold");
         properties.Boolean("Italic", first.Style.Italic, value => Edit("Italic", i => i with { Style = i.Style with { Italic = value } }), "italic");
         properties.Boolean("Underline", first.Style.Underline, value => Edit("Underline", i => i with { Style = i.Style with { Underline = value } }), "underline");
         properties.Text("Text color", first.Style.Foreground, value => Edit("Text color", i => i with { Style = i.Style with { Foreground = ValidColor(value) } }), "foreground");
         properties.Text("Fill", first.Style.Fill, value => Edit("Fill", i => i with { Style = i.Style with { Fill = ValidColor(value) } }), "fill");
         properties.Text("Border color", first.Style.BorderColor, value => Edit("Border color", i => i with { Style = i.Style with { BorderColor = ValidColor(value) } }), "border-color");
-        properties.Number("Border width", first.Style.BorderWidth, n => Edit("Border width", i => i with { Style = i.Style with { BorderWidth = Positive(n, "Border width", true) } }), "border-width");
+        properties.Number("Border width (pt)", first.Style.BorderWidth, n => Edit("Border width", i => i with { Style = i.Style with { BorderWidth = Positive(n, "Border width", true) } }), "border-width");
         properties.Choice("Alignment", Enum.GetNames<TextAlign>(), first.Style.Alignment.ToString(), value => Edit("Alignment", i => i with { Style = i.Style with { Alignment = Enum.Parse<TextAlign>(value) } }), "alignment");
         properties.Choice("Vertical", Enum.GetNames<VerticalAlign>(), first.Style.VerticalAlignment.ToString(), value => Edit("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Enum.Parse<VerticalAlign>(value) } }), "vertical-alignment");
-        properties.Number("Padding", first.Style.Padding, n => Edit("Padding", i => i with { Style = i.Style with { Padding = Positive(n, "Padding", true) } }), "padding");
+        Measurement("Padding", first.Style.Padding, n => Edit("Padding", i => i with { Style = i.Style with { Padding = Positive(n, "Padding", true) } }), "padding");
         properties.Category("Behavior");
         properties.Boolean("Can grow", first.CanGrow, value => Edit("Can grow", i => i with { CanGrow = value }), "can-grow");
         properties.Boolean("Can shrink", first.CanShrink, value => Edit("Can shrink", i => i with { CanShrink = value }), "can-shrink");
         properties.Text("Visible when", first.VisibleExpression ?? "", value => Edit("Visibility expression", i => i with { VisibleExpression = EmptyNull(value) }), "visible");
         properties.Text("Hyperlink", first.Hyperlink ?? "", value => Edit("Hyperlink", i => i with { Hyperlink = EmptyNull(value) }), "hyperlink");
         properties.Text("Bookmark", first.Bookmark ?? "", value => Edit("Bookmark", i => i with { Bookmark = EmptyNull(value) }), "bookmark");
+        properties.Boolean("Locked", items.All(i => i.Locked), Session.SetSelectionLocked, "locked");
     }
     private static List<Model.SortKey> ParseSort(string text) => text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(s =>
     {

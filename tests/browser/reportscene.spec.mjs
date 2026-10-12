@@ -1,19 +1,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs/promises';
+import { state, ready, click, fresh, screenshot } from './uno-driver.mjs';
 
-const state = page => page.evaluate(() => window.reportScene?.state);
-async function ready(page, selftest = false) {
-  await page.goto(`?${selftest ? 'selftest=1' : 'diagnostics=1'}`);
-  await page.waitForFunction(() => window.reportScene?.ready || window.reportSceneFatal || window.reportScene?.testFatal, { timeout: 180_000 });
-  const fatal = await page.evaluate(() => window.reportSceneFatal || window.reportScene?.testFatal);
-  expect(fatal, 'Uno startup must not fail').toBeFalsy();
-  await expect.poll(async () => (await state(page))?.RenderCount ?? 0).toBeGreaterThan(0);
-}
-async function click(page, id) {
-  await expect.poll(async () => Boolean((await state(page))?.Commands[id]), { message: `Visible Uno command ${id}` }).toBeTruthy();
-  const r = (await state(page)).Commands[id];
-  await page.mouse.click(r.X + r.Width / 2, r.Y + r.Height / 2);
-}
 async function property(page, id, text) {
   await expect.poll(async () => Boolean((await state(page))?.Properties[id])).toBeTruthy();
   const r = (await state(page)).Properties[id];
@@ -21,6 +9,7 @@ async function property(page, id, text) {
   await page.keyboard.press('Control+a');
   await page.keyboard.insertText(text);
   await page.keyboard.press('Tab');
+  await fresh(page);
 }
 async function artifact(info, name, content, contentType = 'application/json') {
   await fs.writeFile(info.outputPath(name), typeof content === 'string' || Buffer.isBuffer(content) ? content : JSON.stringify(content, null, 2));
@@ -33,7 +22,7 @@ test('actual .NET WebAssembly conformance suite and rendered Uno shell', async (
   page.on('pageerror', e => errors.push(e.message));
   try {
     await ready(page, true);
-    await page.waitForFunction(() => Array.isArray(window.reportScene?.tests) || window.reportScene?.testFatal, { timeout: 120_000 });
+    await page.waitForFunction(() => Array.isArray(window.reportScene?.tests) || window.reportScene?.testFatal, null, { timeout: 120_000 });
     const result = await page.evaluate(() => ({ tests: window.reportScene.tests, fatal: window.reportScene.testFatal, state: window.reportScene.state }));
     await artifact(info, 'wasm-conformance.json', result);
     expect(result.fatal).toBeFalsy();
@@ -41,12 +30,12 @@ test('actual .NET WebAssembly conformance suite and rendered Uno shell', async (
     expect(result.tests.filter(t => !t.Passed), 'All native tests must also pass in real .NET WebAssembly').toEqual([]);
     expect(result.state.ObjectCount).toBeGreaterThan(20);
     expect(result.state.Diagnostics).toEqual([]);
-    await page.screenshot({ path: info.outputPath('designer.png'), fullPage: true });
+    await screenshot(page, info.outputPath('designer.png'));
     expect(errors).toEqual([]);
   } finally {
     await artifact(info, 'browser-console.txt', consoleLog.join('\n'), 'text/plain');
     await artifact(info, 'browser-errors.json', errors);
-    await artifact(info, 'startup-state.json', await page.evaluate(() => ({ state: window.reportScene?.state, fatal: window.reportSceneFatal, html: document.body.innerText })));
+    await artifact(info, 'startup-state.json', await page.evaluate(() => ({ state: window.reportScene?.state, fatal: window.reportSceneFatal, diagnosticError: window.reportScene?.diagnosticError, presented: window.reportScene?.presented, html: document.body.innerText })));
   }
 });
 
@@ -86,7 +75,7 @@ test('real pointer and keyboard edits, transactional undo, save and PDF export',
   await expect.poll(async () => (await state(page)).Preview).toBe(true);
   await expect.poll(async () => (await state(page)).PreparedPages).toBeGreaterThan(0);
   expect((await state(page)).Diagnostics).toEqual([]);
-  await page.screenshot({ path: info.outputPath('preview.png'), fullPage: true });
+  await screenshot(page, info.outputPath('preview.png'));
   const pdfPromise = page.waitForEvent('download');
   await click(page, 'export-pdf');
   const pdf = await pdfPromise;
@@ -128,6 +117,6 @@ test('opening an actual local report, finding text and changing prepared pages',
   await expect.poll(async () => (await state(page)).Status).toContain('Match 1 of 1');
   await expect.poll(async () => (await state(page)).PreviewPage).toBeGreaterThan(2);
   expect((await state(page)).Diagnostics).toEqual([]);
-  await page.screenshot({ path: info.outputPath('multipage-search.png'), fullPage: true });
+  await screenshot(page, info.outputPath('multipage-search.png'));
   await artifact(info, 'multipage-state.json', await state(page));
 });

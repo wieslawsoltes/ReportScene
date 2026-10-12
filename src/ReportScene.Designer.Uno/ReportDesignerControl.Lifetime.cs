@@ -43,6 +43,8 @@ public sealed partial class ReportDesignerControl
     {
         if (disposed) return; disposed = true; recoveryTimer.Stop(); workspaceOperations?.Dispose();
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectedChanged; KeyDown -= HandleShortcuts;
-        searchSession = null; prepared = null; PreviewView.Report = null; commands.Clear(); treeActions.Clear(); DesignView.Dispose(); renderer.Dispose();
+        DesignView.ViewChanged -= ViewChanged; PreviewView.ViewChanged -= ViewChanged;
+        searchSession = null; prepared = null; PreviewView.Report = null; commands.Clear(); objectIndices.Clear();
+        DesignView.Dispose(); PreviewView.Dispose(); renderer.Dispose(); base.Dispose();
     }
 }
