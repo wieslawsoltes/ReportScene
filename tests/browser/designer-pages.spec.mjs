@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 import { state, ready, fresh, bounds, click, choose, save, artifact, screenshot } from './uno-driver.mjs';
 import { loadDesignerFixture, selectObject, typeProperty, filterProperties } from './designer-fixture.mjs';
 
-async function paperPixel(page) {
-  const bytes = await screenshot(page);
+async function paperPixel(page, path) {
+  const bytes = await screenshot(page, path);
   return page.evaluate(async base64 => {
     const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
     const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
@@ -12,15 +12,39 @@ async function paperPixel(page) {
   }, bytes.toString('base64'));
 }
 
+async function expectPaperPixel(page, info, full, name) {
+  let lastPixel;
+  // Desired .NET layout can be published before its WebGL frame is presented.
+  // Observe real screenshots until the original strict pixel condition is met;
+  // do not replay input, alter application state, or extend the assertion deadline.
+  const observation = expect.poll(async () => {
+    lastPixel = await paperPixel(page, info.outputPath(name + '.png'));
+    return full ? Math.min(...lastPixel.slice(0, 3)) : Math.max(...lastPixel.slice(0, 3));
+  }, { message: full ? 'The full-paper frame must paint white at (700,800)' : 'Compact paper must expose gray workspace at (700,800)' });
+  if (full) await observation.toBeGreaterThan(245);
+  else await observation.toBeLessThan(230);
+  return lastPixel;
+}
+
 test('page property selection edits paper and margins and compact paper changes only the authoring view', async ({ page }, info) => {
   await ready(page); await loadDesignerFixture(page); const initial = await state(page);
   expect(initial.FullPaper).toBe(false); expect(initial.DesignPaperHeight).toBeLessThan(initial.SourcePaperHeight);
-  const compactPixel = await paperPixel(page); expect(Math.max(...compactPixel.slice(0, 3))).toBeLessThan(230);
-  await click(page, 'tab-view'); await click(page, 'show-full-paper');
-  await expect.poll(async () => (await state(page)).FullPaper).toBe(true);
-  expect((await state(page)).DesignPaperHeight).toBe((await state(page)).SourcePaperHeight);
-  const fullPixel = await paperPixel(page); expect(Math.min(...fullPixel.slice(0, 3))).toBeGreaterThan(245);
-  await click(page, 'show-full-paper'); expect((await state(page)).HistoryCount).toBe(initial.HistoryCount);
+  const pixels = { initial: await expectPaperPixel(page, info, false, 'compact-paper-initial'), transitions: [] };
+  await click(page, 'tab-view');
+  for (let cycle = 0; cycle < 2; cycle++) {
+    await click(page, 'show-full-paper');
+    await expect.poll(async () => (await state(page)).FullPaper).toBe(true);
+    expect((await state(page)).DesignPaperHeight).toBe((await state(page)).SourcePaperHeight);
+    const full = await expectPaperPixel(page, info, true, `full-paper-${cycle}`);
+    await click(page, 'show-full-paper');
+    await expect.poll(async () => (await state(page)).FullPaper).toBe(false);
+    const compact = await expectPaperPixel(page, info, false, `compact-paper-${cycle}`);
+    pixels.transitions.push({ full, compact });
+  }
+  expect((await state(page)).HistoryCount).toBe(initial.HistoryCount);
+  expect((await state(page)).ContentRevision).toBe(initial.ContentRevision);
+  expect((await state(page)).SourcePaperHeight).toBe(initial.SourcePaperHeight);
+  await artifact(info, 'paper-presentation-pixels.json', pixels);
   await click(page, 'tab-home'); await choose(page, 'object-selector', 0);
   await expect.poll(async () => (await state(page)).PropertyProjection).toContain('page-name');
   await filterProperties(page, 'Paper');
