@@ -1,0 +1,79 @@
+name: Preview trace review
+on:
+  pull_request:
+    paths: ['.github/workflows/preview-trace-review.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: browser-evidence-*
+          run-id: 38246880941
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: evidence
+      - name: Inspect retained preview traces and paper extents
+        shell: bash
+        run: |
+          python3 -m venv /tmp/preview-review
+          /tmp/preview-review/bin/pip -q install Pillow==11.3.0
+          /tmp/preview-review/bin/python - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          from PIL import Image
+          def decode(v):
+              if isinstance(v,list): return [decode(x) for x in v]
+              if not isinstance(v,dict): return v
+              if 'o' in v and isinstance(v['o'],list): return {e['k']:decode(e['v']) for e in v['o']}
+              if 'a' in v: return decode(v['a'])
+              if len(v)==1:
+                  for k in ('s','n','b'):
+                      if k in v: return v[k]
+                  if v.get('v') in ('null','undefined'): return None
+              return {k:decode(x) for k,x in v.items()}
+          roots=[p.parent for p in Path('evidence').rglob('trace.zip') if p.parent.name.startswith('preview-navigation-')]
+          if len(roots)!=2: raise RuntimeError(f'Expected two preview failures; found {len(roots)}')
+          for root in roots:
+              print('FAILURE',root.name)
+              for p in root.glob('*.png'):
+                  im=Image.open(p).convert('RGB'); print('IMAGE',p.name,im.size)
+                  for y in (170,200,250,400,600,700,750,800,850,900,940):
+                      if y>=im.height: continue
+                      spans=[]; start=None
+                      for x in range(im.width):
+                          white=min(im.getpixel((x,y)))>245
+                          if white and start is None: start=x
+                          if start is not None and (not white or x==im.width-1):
+                              end=x if not white else x+1
+                              if end-start>30: spans.append([start,end])
+                              start=None
+                      print('WHITE_ROW',y,spans)
+              last=None
+              with zipfile.ZipFile(root/'trace.zip') as z:
+                  for name in z.namelist():
+                      if not name.endswith('.trace'): continue
+                      for line in z.read(name).decode().splitlines():
+                          ev=json.loads(line)
+                          if ev.get('type')=='before' and ev.get('method') in ('click','press','screenshot'): print('ACTION',json.dumps(ev.get('params',{}))[:500])
+                          if ev.get('type')=='console' and ev.get('messageType')=='error': print('CONSOLE',str(ev)[:1500])
+                          if ev.get('type')!='after' or 'result' not in ev: continue
+                          result=decode(ev['result']); candidates=[result]
+                          if isinstance(result,dict): candidates+=list(result.values())
+                          for s in candidates:
+                              if not isinstance(s,dict) or 'PreviewIndexBuilds' not in s: continue
+                              d={k:s.get(k) for k in ('Preview','PreviewPage','PreparedPages','Zoom','RenderCount','PreviewIndexBuilds','Status','Diagnostics')}
+                              d['commands']={k:v for k,v in s.get('Commands',{}).items() if k in ('preview-paper','preview-viewport','preview-fit-page','preview-page','preview-search')}
+                              d['inputs']={k:v for k,v in s.get('Inputs',{}).items() if k.startswith('preview-')}
+                              if d!=last: print('STATE',json.dumps(d,ensure_ascii=False)); last=d
+              if last:
+                  r=last['commands'].get('preview-paper')
+                  if r:
+                      for p in root.glob('*.png'):
+                          im=Image.open(p).convert('RGB')
+                          pts=[(int(r['X']+10),int(r['Y']+r['Height']-10)),(int(r['X']+r['Width']/2),int(r['Y']+r['Height']/2))]
+                          print('BOUND_SAMPLES',p.name,[(x,y,im.getpixel((x,y))) for x,y in pts if 0<=x<im.width and 0<=y<im.height])
+          PY
