@@ -91,8 +91,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
         Focus(FocusState.Pointer); start = new(pointer.Position.X / PointScale, pointer.Position.Y / PointScale);
         clickSelection = null; pointerMoved = false;
         additive = (e.KeyModifiers & (VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift)) != 0;
-        var selected = surface.Layout.Objects.LastOrDefault(o => Session.SelectedIds.Contains(o.Item.Id) && !o.Item.Locked);
-        resizeHandle = selected is null ? null : DesignerGeometry.HitHandle(selected.Bounds, start.X, start.Y, 5 / PointScale);
+        resizeHandle = surface.Layout.HitSelectedHandle(Session.SelectedIds, start.X, start.Y, 5 / PointScale)?.Handle;
         if (resizeHandle is not null) { Session.BeginDrag(); dragging = Session.HasActiveDrag; }
         else if (surface.Layout.HitTest(start.X, start.Y) is { } hit)
         {
@@ -114,13 +113,12 @@ public sealed class ReportDesignView : UserControl, IDisposable
     {
         if (pointerId != e.Pointer.PointerId || !dragging && !marquee) return;
         var p = e.GetCurrentPoint(surface).Position; double x = p.X / PointScale, y = p.Y / PointScale;
-        // Preserve a multi-selection for dragging, but collapse an ordinary completed click.
-        // A physical movement remains a drag even when it snaps back to the same geometry.
         pointerMoved |= Math.Abs(x - start.X) * PointScale > 3 || Math.Abs(y - start.Y) * PointScale > 3;
         if (dragging)
         {
             if (resizeHandle is { } handle) Session.PreviewResize(x - start.X, y - start.Y, handle);
-            else Session.PreviewDrag(x - start.X, y - start.Y);
+            // A click's small physical jitter is not an edit, even with snapping off.
+            else if (pointerMoved) Session.PreviewDrag(x - start.X, y - start.Y);
         }
         else { surface.Marquee = new(Math.Min(start.X, x), Math.Min(start.Y, y), Math.Abs(x - start.X), Math.Abs(y - start.Y)); surface.Invalidate(); }
         e.Handled = true;
@@ -167,6 +165,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     }
     private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer) : SKCanvasElement
     {
+        private static readonly ResizeHandle[] SelectionHandles = Enum.GetValues<ResizeHandle>();
         public DesignLayout Layout { get; set; } = DesignLayout.Create(session.Page, false);
         public TextLayoutCache TextLayouts { get; } = new(renderer.Metrics);
         public double PointScale { get; set; } = 1;
@@ -184,7 +183,8 @@ public sealed class ReportDesignView : UserControl, IDisposable
             using var dash = SKPathEffect.CreateDash([2, 2], 0);
             try
             {
-                var paper = Layout.Paper; var viewport = canvas.LocalClipBounds;
+                var paper = Layout.Paper; var viewport = canvas.LocalClipBounds; double tolerance = 6 / PointScale;
+                bool Visible(DesignObject entry) => entry.Bounds.Bottom + tolerance >= viewport.Top && entry.Bounds.Y - tolerance <= viewport.Bottom && entry.Bounds.Right + tolerance >= viewport.Left && entry.Bounds.X - tolerance <= viewport.Right;
                 paint.Color = ReportRenderer.Color("#989898"); canvas.DrawRect(ReportRenderer.Rect(paper.Offset(3, 3)), paint);
                 paint.Color = SKColors.White; canvas.DrawRect(ReportRenderer.Rect(paper), paint);
                 if (ShowRulers) DrawRulers(canvas, paint, viewport);
@@ -209,8 +209,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
                 }
                 foreach (var entry in Layout.Objects)
                 {
-                    double tolerance = 6 / PointScale;
-                    if (entry.Bounds.Bottom + tolerance < viewport.Top || entry.Bounds.Y - tolerance > viewport.Bottom || entry.Bounds.Right + tolerance < viewport.Left || entry.Bounds.X - tolerance > viewport.Right) continue;
+                    if (!Visible(entry)) continue;
                     string text = entry.Item switch { TextItem t => TextLayouts.GetWrappedText(t.Text, entry.Bounds.Width - t.Style.Padding * 2, t.Style), BarcodeItem b => b.Text, CheckBoxItem c => c.Expression, _ => "" };
                     try { renderer.DrawItem(canvas, new(entry.Item, entry.Bounds, text), true); }
                     catch (ReportRenderException error)
@@ -220,19 +219,22 @@ public sealed class ReportDesignView : UserControl, IDisposable
                     }
                     paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = (float)(1 / PointScale); paint.Color = ReportRenderer.Color("#B3B3B3");
                     paint.PathEffect = dash; canvas.DrawRect(ReportRenderer.Rect(entry.Bounds), paint); paint.PathEffect = null; paint.Style = SKPaintStyle.Fill;
-                    if (session.SelectedIds.Contains(entry.Item.Id))
+                }
+                // Adorners are an overlay, not part of an object's report paint order.
+                // Later overlapping report objects must not hide actionable handles.
+                if (session.SelectedIds.Count > 0) foreach (var entry in Layout.Objects)
+                {
+                    if (!session.SelectedIds.Contains(entry.Item.Id) || !Visible(entry)) continue;
+                    var color = ReportRenderer.Color(entry.Item.Locked ? "#858585" : "#2374B0");
+                    paint.Color = color; paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = (float)(1 / PointScale); canvas.DrawRect(ReportRenderer.Rect(entry.Bounds), paint);
+                    double size = 6 / PointScale;
+                    foreach (var handle in SelectionHandles)
                     {
-                        var color = ReportRenderer.Color(entry.Item.Locked ? "#858585" : "#2374B0");
-                        paint.Color = color; paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = (float)(1 / PointScale); canvas.DrawRect(ReportRenderer.Rect(entry.Bounds), paint);
-                        double size = 6 / PointScale;
-                        foreach (var handle in Enum.GetValues<ResizeHandle>())
-                        {
-                            var p = DesignerGeometry.HandlePoint(entry.Bounds, handle); var rect = new SKRect((float)(p.X - size / 2), (float)(p.Y - size / 2), (float)(p.X + size / 2), (float)(p.Y + size / 2));
-                            paint.Style = SKPaintStyle.Fill; paint.Color = SKColors.White; canvas.DrawRect(rect, paint);
-                            paint.Style = SKPaintStyle.Stroke; paint.Color = color; canvas.DrawRect(rect, paint);
-                        }
-                        paint.Style = SKPaintStyle.Fill;
+                        var p = DesignerGeometry.HandlePoint(entry.Bounds, handle); var rect = new SKRect((float)(p.X - size / 2), (float)(p.Y - size / 2), (float)(p.X + size / 2), (float)(p.Y + size / 2));
+                        paint.Style = SKPaintStyle.Fill; paint.Color = SKColors.White; canvas.DrawRect(rect, paint);
+                        paint.Style = SKPaintStyle.Stroke; paint.Color = color; canvas.DrawRect(rect, paint);
                     }
+                    paint.Style = SKPaintStyle.Fill;
                 }
                 if (Marquee is { } box) { paint.Color = ReportRenderer.Color("#303976B4"); canvas.DrawRect(ReportRenderer.Rect(box), paint); paint.Style = SKPaintStyle.Stroke; paint.Color = ReportRenderer.Color("#3976B4"); canvas.DrawRect(ReportRenderer.Rect(box), paint); }
                 lastError = null;
