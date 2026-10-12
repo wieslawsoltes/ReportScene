@@ -1,0 +1,53 @@
+name: Browser trace review
+on:
+  pull_request:
+    paths: ['.github/workflows/browser-trace-review.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-evidence-4
+          run-id: 38174908110
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: evidence
+      - name: Read recorded failure context and trace state
+        run: |
+          python3 - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          roots = list(Path('evidence').rglob('reportscene-opening-*'))
+          if len(roots) != 1:
+              raise RuntimeError(f'Expected one retained failure, found {len(roots)}')
+          root = roots[0]
+          for f in root.glob('*.md'):
+              print('CONTEXT', f.name, f.read_text()[:12000])
+          trace = zipfile.ZipFile(root / 'trace.zip')
+          for name in trace.namelist():
+              if not name.endswith(('.trace', '.network')):
+                  continue
+              print('STREAM', name)
+              states = []; seen = set()
+              for line in trace.read(name).decode('utf-8').splitlines():
+                  event = json.loads(line); kind = event.get('type')
+                  if kind in ('console', 'event', 'resource-snapshot'):
+                      s = json.dumps(event, ensure_ascii=False)
+                      if any(word in s.lower() for word in ['error', 'fatal', 'abort', 'exception', 'failed']):
+                          print('ERROR', s[:5000])
+                  if kind == 'after' and 'result' in event:
+                      text = json.dumps(event['result'], ensure_ascii=False)
+                      if 'Commands' in text or 'reportScene' in text or 'ready' in text:
+                          if len(states) < 2: states.append(event)
+                          last = event
+                  if kind == 'before' and event.get('method') in ['goto', 'waitForFunction', 'click']:
+                      print('ACTION', json.dumps(event, ensure_ascii=False)[:3000])
+                  if kind == 'after' and event.get('error'):
+                      print('ACTION_ERROR', json.dumps(event, ensure_ascii=False)[:5000])
+              for event in states + ([last] if 'last' in locals() else []):
+                  print('STATE', json.dumps(event, ensure_ascii=False)[:24000])
+          PY
