@@ -12,7 +12,8 @@ public static class ConformanceSuite
         .Concat(PreparedPageIndexTests.Run()).Concat(DesignerActivityTests.Run()).Concat(PreparedSearchTests.Run()).Concat(ParameterScopeTests.Run())
         .Concat(PaginationPerformanceTests.Run()).Concat(PreparationCancellationTests.Run()).Concat(RecoveryReadinessTests.Run()).Concat(ExportVisibilityTests.Run())
         .Concat(ImplicitSubreportRowTests.Run()).Concat(RelationIndexTests.Run()).Concat(DesignerGeometryTests.Run()).Concat(DesignerBatchTests.Run())
-        .Concat(DesignerOutlineTests.Run()).Concat(DesignerPageTests.Run()).Concat(AuthoringTextCacheTests.Run()).Concat(AuthoringIntegrationTests.Run()).ToList();
+        .Concat(DesignerOutlineTests.Run()).Concat(DesignerPageTests.Run()).Concat(AuthoringTextCacheTests.Run()).Concat(AuthoringIntegrationTests.Run())
+        .Concat(DesignerNavigationTests.Run()).ToList();
     public static async Task<List<TestResult>> RunAsync()
     {
         var results = Run(); results.AddRange(await DesignerOperationTests.RunAsync()); return results;

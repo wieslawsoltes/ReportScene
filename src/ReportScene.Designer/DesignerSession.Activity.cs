@@ -4,6 +4,8 @@ public sealed partial class DesignerSession
 {
     /// <summary>Content-history revision; navigation, selection and MarkSaved do not change it.</summary>
     public long Revision => revision;
+    /// <summary>Loaded-document identity. Stable across edits/undo/navigation; Load always issues a new identity.</summary>
+    public Guid DocumentId => documentEpoch;
     public bool HasActiveDrag => dragOriginal is not null;
 }
 
@@ -20,7 +22,9 @@ public sealed class DesignerActivityTracker
     {
         ArgumentNullException.ThrowIfNull(session);
         bool committed = revision != session.Revision, active = session.HasActiveDrag;
-        var result = new DesignerActivity(committed || active || dragging, !active, committed);
+        // Navigation and save acknowledgements still publish selection/status events,
+        // but cannot change report/data metadata. Do not reconstruct it on those paths.
+        var result = new DesignerActivity(committed || active || dragging, !active && (committed || dragging), committed);
         revision = session.Revision; dragging = active; return result;
     }
 }
