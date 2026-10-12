@@ -10,6 +10,11 @@ namespace ReportScene.UnoPackageTests;
 public static class PackageConsumers
 {
     public static ReportDesignerControl CreateDesigner(IReportWorkspaceHost host, ReportDocument document) => new(host, document);
+    public static ReportDesignerControl CreateDesignerWithPreferences(IReportWorkspaceHost host, ReportDocument document, IDesignerPreferenceStore store) => new(host, document, store);
+    public static DesignerOptionsEditor CreateOptionsEditor(DesignerPreferences settings)
+    { var editor = new DesignerOptionsEditor(settings); editor.RestoreDefaults(); _ = editor.ReadValue(); return editor; }
+    public static async Task InitializePreferences(ReportDesignerControl designer)
+    { await designer.RestorePreferencesAsync(); _ = designer.CurrentPreferences; _ = await designer.FlushPreferencesAsync(); }
     public static ReportDesignView CreateDesignSurface(DesignerSession session, ReportRenderer renderer)
         => new(session, renderer) { Unit = DesignerUnit.Millimeters, ShowRulers = true, ShowFullPage = false };
     public static ReportPreviewView CreatePreviewSurface(ReportRenderer renderer) => new(renderer);
@@ -34,5 +39,8 @@ public static class PackageConsumers
         control.ResetContexts(); return control;
     }
     public static PaneSplitter CreateSplitter(Action<double> resize)
-    { var control = new PaneSplitter { Minimum = 180, Maximum = 640, Value = 280, Reverse = true }; control.ValueChanged += resize; return control; }
+    {
+        var control = new PaneSplitter { Minimum = 180, Maximum = 640, Value = 280, Reverse = true };
+        control.ValueChanged += resize; control.InteractionStarted += () => { }; control.InteractionCompleted += _ => { }; return control;
+    }
 }
