@@ -60,4 +60,14 @@ Check(DesignLayout.Create(batch.Page, false).Paper.Height < DesignLayout.Create(
 var layoutCache = new TextLayoutCache(new ApproximateTextMeasurer()); var style = new ItemStyle();
 string wrapped = layoutCache.GetWrappedText("Reusable cached text", 50, style);
 Check(wrapped == layoutCache.GetWrappedText("Reusable cached text", 50, style) && layoutCache.Hits == 1 && layoutCache.Misses == 1, "bounded authoring text cache");
+var projection = new DesignerOutlineProjection(outline, "ChildValue");
+Check(projection.Count == 3 && projection.ContainsKey(projection.Last().Key) && !projection.ContainsKey("absent"), "indexed immutable outline projection");
+var epoch = session.DocumentId; session.MarkSaved(); session.SetPage(1);
+Check(session.DocumentId == epoch, "stable loaded-document identity");
+var navigation = new DesignerActivityTracker(session); session.MarkSaved(); var activity = navigation.Observe(session);
+Check(!activity.RefreshStructure && !activity.SaveRecovery && !activity.InvalidatePrepared, "save skips structural metadata work");
+batch.Select("a"); batch.SetSelectionLocked(false); batch.SelectAll(); var layout = DesignLayout.Create(batch.Page);
+var point = layout.Objects[0].Bounds;
+Check(layout.HitSelectedHandle(batch.SelectedIds, point.X + point.Width, point.Y, 1)?.Handle == ResizeHandle.TopRight, "selection handle hit test packaged API");
+session.Load(session.Document); Check(session.DocumentId != epoch, "reload issues a distinct document identity");
 Console.WriteLine($"{passed}/{passed} isolated package-consumer checks passed.");
