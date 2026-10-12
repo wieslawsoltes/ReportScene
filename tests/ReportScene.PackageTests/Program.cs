@@ -100,6 +100,13 @@ Check(emptyPosition.Move(ReportPageCommand.Last) == emptyPosition && !emptyPosit
 Check(ReportPreviewViewport.Calculate(new(20, 16, 300, 400), 800, 600, .5) == new RectD(0, 0, 600, 800), "native viewport geometry converted to points");
 Check(ReportPreviewViewport.Calculate(new(-300, -800, 2000, 5000), 800, 600, 2) == new RectD(149, 399, 402, 302), "native scroll viewport translation and pixel guard");
 Check(ReportPreviewViewport.Calculate(new(1000, 1000, 100, 100), 800, 600, 1) == default, "offscreen preview has no visible candidate region");
+var bookmarkSource = new TextItem { Id = "shared", Bookmark = "Repeated" };
+var bookmarkReport = new PreparedReport("Outline", [new(7, 100, 100, [new(bookmarkSource, new(10, 10, 30, 30)), new(bookmarkSource, new(10, 10, 30, 30), Clip: new(20, 20, 5, 5))])], [], TimeSpan.Zero);
+var bookmarks = new PreparedOutlineSnapshot(bookmarkReport);
+Check(bookmarks.Count == 2 && bookmarks.ItemsExamined == 2 && bookmarks.Entries.All(b => b.PageIndex == 0 && b.PageNumber == 7), "bounded prepared bookmark occurrences");
+Check(bookmarks.Entries[1].Bounds == new RectD(20, 20, 5, 5), "prepared outline clipping");
+Check(bookmarks.Find("bookmark:0:1") == bookmarks.Entries[1] && bookmarks.Find("BOOKMARK:0:1") is null, "ordinal occurrence identity lookup");
+Check(ReportPreviewReveal.Calculate(new(320, 250, 40, 30), 300, 200, 100, 200, 1000, 1000) == new PreviewScrollTarget(176, 296), "minimal two-axis preview reveal");
 Console.WriteLine($"{passed}/{passed} isolated package-consumer checks passed.");
 
 sealed class PackagePreferenceStore : IDesignerPreferenceStore

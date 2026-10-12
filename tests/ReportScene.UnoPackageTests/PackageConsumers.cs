@@ -25,6 +25,16 @@ public static class PackageConsumers
         var control = new ReportPageNavigator(); control.PageRequested += navigate;
         control.SetPosition(3, 1, resetEditor: true); _ = control.Position; _ = control.ValidationMessage; _ = control.Elements; return control;
     }
+    public static ReportPreviewOutlineView CreatePreviewOutline(PreparedOutlineSnapshot snapshot, Action<PreparedBookmark> navigate)
+    {
+        var control = new ReportPreviewOutlineView(); control.BookmarkRequested += navigate;
+        control.SetSnapshot(snapshot); control.FilterText = "Page"; control.SelectBookmark(snapshot.Entries.FirstOrDefault()); return control;
+    }
+    public static void OpenPreviewOutline(ReportPreviewView preview)
+    {
+        preview.OutlineWidth = 240; preview.OutlineVisible = true;
+        if (preview.OutlineSnapshot?.Entries.FirstOrDefault() is { } bookmark) _ = preview.NavigateBookmark(bookmark);
+    }
     public static MatrixDefinitionEditor CreateMatrixEditor(MatrixItem matrix, IEnumerable<DataTable> tables) => new(matrix, tables);
     public static SubreportDefinitionEditor CreateSubreportEditor(SubreportItem subreport, IEnumerable<ReportPage> pages, string owner) => new(subreport, pages, owner);
     public static DataTablePreview CreateDataPreview(DataTable table)
