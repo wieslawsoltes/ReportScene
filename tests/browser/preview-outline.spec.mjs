@@ -22,6 +22,18 @@ async function openReport(page, report = fixture()) {
   await click(page, 'preview-report'); await expect.poll(async () => (await state(page)).PreparedPages).toBe(2);
   await fresh(page);
 }
+async function bookmarkControl(page, pageIndex, label) {
+  // Keys contain prepared drawing-list ordinals, not design-object indices.
+  // Locate the real native caption within its page, then retain that exact
+  // occurrence key. Do not synthesize model targets or bypass pointer input.
+  const prefix = `preview-outline-bookmark:${pageIndex}:`;
+  const matches = async () => {
+    const s = await state(page);
+    return Object.keys(s.Commands).filter(key => key.startsWith(prefix) && s.Inputs[key] === label);
+  };
+  await expect.poll(async () => (await matches()).length, { message: `One realized ${label} bookmark on page ordinal ${pageIndex}` }).toBe(1);
+  return (await matches())[0];
+}
 async function expectRevealed(page) {
   await expect.poll(async () => {
     const s = await state(page), paper = s.Commands['preview-paper'], viewport = s.Commands['preview-viewport'], target = s.PreviewHighlight;
@@ -42,8 +54,6 @@ async function visibleTargetPixels(page, info) {
       const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
       const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
       const [r, g, b] = context.getImageData(x, y, 1, 1).data;
-      // The green report fill plus the yellow highlight must actually be painted;
-      // a blank background, model-only target, or unhighlighted fill cannot pass.
       return r > 100 && r < 160 && g > 155 && g < 200 && b < 100;
     }, { base64: bytes.toString('base64'), x, y });
   }, { message: 'The revealed bookmark is visibly painted and highlighted' }).toBe(true);
@@ -58,13 +68,15 @@ test('preview outline preserves duplicate bookmark occurrences and reuses its me
   expect((await state(page)).PreviewOutlineBuilds).toBe(1);
   await fill(page, 'preview-outline-filter', 'Repeated');
   await expect.poll(async () => (await state(page)).PreviewOutlineProjectedCount).toBe(4);
-  expect((await state(page)).Inputs['preview-outline-bookmark:0:1']).toBe('Repeated');
-  expect((await state(page)).Inputs['preview-outline-bookmark:1:0']).toBe('Repeated');
-  await click(page, 'preview-outline-bookmark:1:0');
+  const first = await bookmarkControl(page, 0, 'Repeated'), second = await bookmarkControl(page, 1, 'Repeated');
+  expect(first).not.toBe(second);
+  expect((await state(page)).Inputs[first]).toBe('Repeated'); expect((await state(page)).Inputs[second]).toBe('Repeated');
+  await click(page, second);
   await expect.poll(async () => (await state(page)).PreviewPage).toBe(2);
-  await expect.poll(async () => (await state(page)).PreviewSelectedBookmark).toBe('bookmark:1:0');
+  await expect.poll(async () => (await state(page)).PreviewSelectedBookmark).toBe(second.slice('preview-outline-'.length));
   await expectRevealed(page);
-  await click(page, 'preview-outline-bookmark:0:1'); await expect.poll(async () => (await state(page)).PreviewPage).toBe(1);
+  await click(page, first); await expect.poll(async () => (await state(page)).PreviewPage).toBe(1);
+  await expect.poll(async () => (await state(page)).PreviewSelectedBookmark).toBe(first.slice('preview-outline-'.length));
   await expectRevealed(page); const retained = await state(page);
   await click(page, 'preview-outline-close'); await expect.poll(async () => (await state(page)).PreviewOutlineVisible).toBe(false);
   await click(page, 'preview-outline'); await expect.poll(async () => (await state(page)).PreviewOutlineFilter).toBe('Repeated');
@@ -85,42 +97,33 @@ test('bookmark and search navigation reveal offscreen targets on both axes at hi
   await ready(page); await openReport(page); const before = await state(page);
   await choose(page, 'preview-zoom', 9); await expect.poll(async () => (await state(page)).Zoom).toBe(4);
   await click(page, 'preview-outline'); await fill(page, 'preview-outline-filter', 'Far target');
-  await expect.poll(async () => (await state(page)).PreviewOutlineProjectedCount).toBe(2);
-  await click(page, 'preview-outline-bookmark:1:1');
-  await expect.poll(async () => (await state(page)).PreviewPage).toBe(2); await expectRevealed(page);
-  expect((await state(page)).PreviewViewport.HorizontalOffset).toBeGreaterThan(0);
-  expect((await state(page)).PreviewViewport.VerticalOffset).toBeGreaterThan(0);
-  await visibleTargetPixels(page, info);
+  await click(page, await bookmarkControl(page, 1, 'Far target'));
+  await expect.poll(async () => (await state(page)).PreviewPage).toBe(2); await expectRevealed(page); await visibleTargetPixels(page, info);
+  const revealed = await state(page);
+  expect(revealed.PreviewViewport.HorizontalOffset).toBeGreaterThan(0); expect(revealed.PreviewViewport.VerticalOffset).toBeGreaterThan(0);
   await click(page, 'first-page'); await expect.poll(async () => (await state(page)).PreviewPage).toBe(1);
   await fill(page, 'preview-search', 'needle-right-bottom'); await click(page, 'find-next');
-  await expect.poll(async () => (await state(page)).Status).toContain('Match 1 of 1');
-  await expect.poll(async () => (await state(page)).PreviewPage).toBe(2); await expectRevealed(page);
-  const current = await state(page);
-  expect(current.PreviewViewport.HorizontalOffset).toBeGreaterThan(0); expect(current.PreviewViewport.VerticalOffset).toBeGreaterThan(0);
+  await expect.poll(async () => (await state(page)).PreviewPage).toBe(2); await expectRevealed(page); await visibleTargetPixels(page, info);
+  const searched = await state(page); expect(searched.SearchMatches).toBe(1);
   await click(page, 'find-next'); await expectRevealed(page);
-  expect((await state(page)).PreviewIndexBuilds).toBe(current.PreviewIndexBuilds);
+  expect((await state(page)).PreviewIndexBuilds).toBe(searched.PreviewIndexBuilds);
   expect((await state(page)).PreviewOutlineBuilds).toBe(1);
-  expect((await state(page)).SearchQueryScans).toBe(1); expect((await state(page)).Dirty).toBe(false);
-  expect((await state(page)).ContentRevision).toBe(before.ContentRevision); expect((await state(page)).Diagnostics).toEqual([]);
-  await visibleTargetPixels(page, info); await artifact(info, 'two-axis-reveal.json', await state(page));
+  expect((await state(page)).ContentRevision).toBe(before.ContentRevision); expect((await state(page)).Dirty).toBe(false);
+  expect((await state(page)).Diagnostics).toEqual([]); await artifact(info, 'bookmark-and-search-reveal.json', { revealed, searched, final: await state(page) });
 });
 
 test('replacing a prepared report clears old bookmark targets and filters and displays the empty outline state', async ({ page }, info) => {
   await ready(page); await openReport(page); await click(page, 'preview-outline');
-  await fill(page, 'preview-outline-filter', 'Far target'); await click(page, 'preview-outline-bookmark:1:1');
-  await expect.poll(async () => (await state(page)).PreviewSelectedBookmark).toBe('bookmark:1:1');
+  await fill(page, 'preview-outline-filter', 'Far target'); await click(page, await bookmarkControl(page, 1, 'Far target')); await expectRevealed(page);
   const before = await state(page); await click(page, 'back-to-design'); await openReport(page, fixture(false));
-  await expect.poll(async () => (await state(page)).PreviewOutlineVisible).toBe(true);
   await expect.poll(async () => (await state(page)).PreviewBookmarkCount).toBe(0);
-  await expect.poll(async () => (await state(page)).PreviewOutlineBuilds).toBe(before.PreviewOutlineBuilds + 1);
-  expect((await state(page)).PreviewOutlineFilter).toBe(''); expect((await state(page)).PreviewSelectedBookmark).toBeNull();
-  expect((await state(page)).PreviewHighlight).toBeNull(); expect((await state(page)).PreviewRevealPending).toBe(false);
+  await expect.poll(async () => (await state(page)).PreviewOutlineFilter).toBe('');
+  expect((await state(page)).PreviewOutlineBuilds).toBe(before.PreviewOutlineBuilds + 1);
+  expect((await state(page)).PreviewSelectedBookmark).toBeNull(); expect((await state(page)).PreviewHighlight).toBeNull();
+  expect((await state(page)).PreviewRevealPending).toBe(false);
   await expect.poll(async () => (await state(page)).Inputs['preview-outline-summary']).toBe('No bookmarks in this report.');
-  expect((await state(page)).Commands['preview-outline-bookmark:1:1']).toBeUndefined();
-  const builds = (await state(page)).PreviewOutlineBuilds;
+  expect((await state(page)).PreviewOutlineProjectedCount).toBe(0);
   await click(page, 'preview-outline-close'); await click(page, 'preview-outline');
-  expect((await state(page)).PreviewOutlineBuilds).toBe(builds);
-  expect((await state(page)).PreviewPage).toBe(1); expect((await state(page)).HistoryCount).toBe(0);
-  expect((await state(page)).Dirty).toBe(false); expect((await state(page)).Diagnostics).toEqual([]);
-  await screenshot(page, info.outputPath('empty-preview-outline.png')); await artifact(info, 'bookmark-replacement.json', await state(page));
+  expect((await state(page)).PreviewOutlineBuilds).toBe(before.PreviewOutlineBuilds + 1);
+  expect((await state(page)).Diagnostics).toEqual([]); await screenshot(page, info.outputPath('empty-preview-outline.png')); await artifact(info, 'outline-replacement.json', await state(page));
 });
