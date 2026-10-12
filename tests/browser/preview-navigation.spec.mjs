@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ready, state, fresh, bounds, click, fill, save, artifact, screenshot } from './uno-driver.mjs';
+import { ready, state, fresh, bounds, click, fill, choose, save, artifact, screenshot } from './uno-driver.mjs';
 
 function evidence(snapshot) {
   return { page: snapshot?.PreviewPage, zoom: snapshot?.Zoom, renderCount: snapshot?.RenderCount,
@@ -9,16 +9,21 @@ test.afterEach(async ({ page }, info) => {
   if (page.isClosed()) return;
   const snapshot = await state(page);
   console.log('PREVIEW_EVIDENCE', JSON.stringify(evidence(snapshot)));
-  await artifact(info, 'preview-final-state.json', snapshot);
+  await artifact(info, 'preview-final-state.json', snapshot ?? { unavailable: true });
 });
 
-async function openPreview(page, count = 3) {
+async function openPreview(page, count = 3, dense = false) {
   await ready(page); await click(page, 'tab-report');
   const report = { name: 'Preview navigation contract', pages: Array.from({ length: count }, (_, n) => ({
-    name: `Page${n + 1}`, width: 595.276, height: 841.89,
-    bands: [{ name: `Title${n + 1}`, kind: 'ReportTitle', height: 60,
-      items: [{ $type: 'text', id: `text-${n}`, name: `Caption${n + 1}`, text: `Page ${n + 1} needle-${n + 1}`,
-        bounds: { x: 0, y: 0, width: 480, height: 40 }, style: { fontSize: 18 } }] }]
+    name: `Page${n + 1}`, width: 595.276, height: 841.89, margins: { left: 24, top: 24, right: 24, bottom: 12 },
+    bands: [{ name: `Title${n + 1}`, kind: 'ReportTitle', height: dense ? 720 : 60,
+      items: dense ? Array.from({ length: 500 }, (_, k) => ({ $type: 'shape', id: `dense-${n}-${k}`, name: `Cell${n}_${k}`,
+        bounds: { x: 10 + k % 20 * 26, y: 10 + Math.floor(k / 20) * 26, width: 20, height: 20 }, style: { fill: '#305EA0', borderWidth: 0 } }))
+        : [{ $type: 'text', id: `text-${n}`, name: `Caption${n + 1}`, text: `Page ${n + 1} needle-${n + 1}`,
+          bounds: { x: 0, y: 0, width: 480, height: 40 }, style: { fontSize: 18 } }] },
+      { name: `Footer${n + 1}`, kind: 'PageFooter', height: 24,
+        items: [{ $type: 'shape', id: `footer-${n}`, name: `FooterMarker${n + 1}`,
+          bounds: { x: 12, y: 0, width: 32, height: 24 }, style: { fill: '#305EA0', borderWidth: 0 } }] }]
   })) };
   const r = await bounds(page, 'open'), waiting = page.waitForEvent('filechooser');
   await page.mouse.click(r.X + r.Width / 2, r.Y + r.Height / 2);
@@ -43,6 +48,15 @@ async function focusPaper(page) {
   const r = await bounds(page, 'preview-paper');
   await page.mouse.click(r.X + Math.min(80, r.Width / 2), r.Y + 90); await fresh(page);
   console.log('PREVIEW_FOCUS', JSON.stringify(evidence(await state(page))));
+}
+async function samplePixels(page, path, points) {
+  const image = await screenshot(page, path);
+  return page.evaluate(async ({ base64, points }) => {
+    const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
+    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
+    return points.map(([x, y]) => Array.from(context.getImageData(Math.floor(x), Math.floor(y), 1, 1).data));
+  }, { base64: image.toString('base64'), points });
 }
 
 test('preview first last and strict page entry synchronize native controls without stale navigation or edits', async ({ page }, info) => {
@@ -107,18 +121,19 @@ test('whole-page fitting uses both viewport axes and preserves prepared content 
         && paper.X >= viewport.X && paper.Y >= viewport.Y && paper.X + paper.Width <= viewport.X + viewport.Width
         && paper.Y + paper.Height <= viewport.Y + viewport.Height);
     }, { message: 'The entire actual paper element fits inside the viewport with gutters' }).toBe(true);
-    const r = await bounds(page, 'preview-paper');
+    const r = await bounds(page, 'preview-paper'), scale = (await state(page)).Zoom * 96 / 72;
     console.log('PREVIEW_FIT', width, JSON.stringify(evidence(await state(page))));
+    let samples;
     await expect.poll(async () => {
-      const image = await screenshot(page, info.outputPath(`whole-page-${width}.png`));
-      return page.evaluate(async ({ base64, r }) => {
-        const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-        const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-        const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-        const inside = context.getImageData(Math.floor(r.X + 10), Math.floor(r.Y + r.Height - 10), 1, 1).data;
-        return Math.min(...Array.from(inside).slice(0, 3));
-      }, { base64: image.toString('base64'), r });
+      samples = await samplePixels(page, info.outputPath(`whole-page-${width}.png`), [
+        [r.X + 10, r.Y + r.Height - 10], [r.X + 52 * scale, r.Y + (841.89 - 24) * scale]
+      ]);
+      return Math.min(...samples[0].slice(0, 3));
     }, { message: 'The fitted lower paper region is visibly white in the presented frame' }).toBeGreaterThan(245);
+    // Actual lower-page report content must survive too; a white control background
+    // cannot satisfy this assertion or hide a missing recorded footer.
+    expect(samples[1]).toEqual([48, 94, 160, 255]);
+    await artifact(info, `whole-page-pixels-${width}.json`, samples);
     expect((await state(page)).PreviewIndexBuilds).toBe(builds); expect((await state(page)).PreparedPages).toBe(1);
     expect((await state(page)).ContentRevision).toBe(before.ContentRevision);
   }
@@ -127,4 +142,31 @@ test('whole-page fitting uses both viewport axes and preserves prepared content 
   expect((await state(page)).PreviewIndexBuilds).toBe(builds);
   expect(await save(page)).toEqual(original); expect((await state(page)).Diagnostics).toEqual([]);
   await artifact(info, 'preview-fit-state.json', await state(page));
+});
+
+test('preview viewport culling follows real scroll and zoom without rebuilding the prepared index', async ({ page }, info) => {
+  const before = await openPreview(page, 1, true);
+  await expect.poll(async () => (await state(page)).PreviewCandidatesExamined).toBeGreaterThanOrEqual(500);
+  const full = await state(page), original = await save(page);
+  await choose(page, 'preview-zoom', 9);
+  await expect.poll(async () => (await state(page)).Zoom).toBe(4);
+  await expect.poll(async () => {
+    const s = await state(page); return s.PreviewViewport.Paint.PointScale > 5 && s.PreviewCandidatesExamined > 0 && s.PreviewCandidatesExamined < 160;
+  }, { message: 'The actual preview queries the visible region, not all 500 page objects' }).toBe(true);
+  const top = await state(page), viewport = await bounds(page, 'preview-viewport');
+  await page.mouse.move(viewport.X + viewport.Width / 2, viewport.Y + viewport.Height / 2); await page.mouse.wheel(0, 600);
+  await expect.poll(async () => (await state(page)).PreviewViewport.VerticalOffset).toBeGreaterThan(100);
+  await expect.poll(async () => (await state(page)).PreviewViewport.Paint.Viewport.Y).toBeGreaterThan(10);
+  const scrolled = await state(page);
+  expect(scrolled.PreviewCandidatesExamined).toBeGreaterThan(0); expect(scrolled.PreviewCandidatesExamined).toBeLessThan(160);
+  expect(scrolled.PreviewIndexBuilds).toBe(full.PreviewIndexBuilds);
+  expect(scrolled.ContentRevision).toBe(before.ContentRevision); expect(scrolled.HistoryCount).toBe(before.HistoryCount);
+  await screenshot(page, info.outputPath('scrolled-indexed-preview.png'));
+  await click(page, 'preview-fit-page');
+  await expect.poll(async () => (await state(page)).PreviewViewport.VerticalOffset).toBe(0);
+  await expect.poll(async () => (await state(page)).PreviewCandidatesExamined).toBeGreaterThanOrEqual(500);
+  expect((await state(page)).PreviewIndexBuilds).toBe(full.PreviewIndexBuilds);
+  expect(await save(page)).toEqual(original); expect((await state(page)).Diagnostics).toEqual([]);
+  await artifact(info, 'native-viewport-culling.json', { full: evidence(full), top: evidence(top), scrolled: evidence(scrolled),
+    examined: { full: full.PreviewCandidatesExamined, top: top.PreviewCandidatesExamined, scrolled: scrolled.PreviewCandidatesExamined } });
 });

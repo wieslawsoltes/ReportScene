@@ -12,7 +12,10 @@ namespace ReportScene.Controls.Uno;
 
 /// <summary>Read-only paint/viewport evidence. A render callback is not a presentation acknowledgement.</summary>
 public readonly record struct PreviewPaintSnapshot(double AreaWidth, double AreaHeight, double PointScale, RectD Clip, RectD Paper,
-    double ScaleX, double ScaleY, double TranslateX, double TranslateY);
+    double ScaleX, double ScaleY, double TranslateX, double TranslateY)
+{
+    public RectD Viewport { get; init; }
+}
 public readonly record struct PreviewViewportSnapshot(double Width, double Height, double ExtentWidth, double ExtentHeight,
     double HorizontalOffset, double VerticalOffset, string FocusOwner, PreviewPaintSnapshot Paint);
 
@@ -57,7 +60,7 @@ public sealed class ReportPreviewView : UserControl
     public ReportPreviewView(ReportRenderer renderer)
     {
         IsTabStop = true;
-        surface = new(renderer) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new(16) };
+        surface = new(renderer, VisibleViewport) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new(16) };
         surface.Failed += e => Failed?.Invoke(e);
         scroll = new() { Content = surface, IsTabStop = true, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Enabled, Background = ControlTheme.Brush("#AAB2BA") };
         surface.PointerPressed += (_, e) =>
@@ -65,8 +68,8 @@ public sealed class ReportPreviewView : UserControl
             var pointer = e.GetCurrentPoint(surface);
             if (pointer.Properties.IsLeftButtonPressed || pointer.PointerDevice.PointerDeviceType != Windows.Devices.Input.PointerDeviceType.Mouse) scroll.Focus(FocusState.Pointer);
         };
-        // A new point scale is assigned before the asynchronous layout pass. Repaint
-        // again with the final element/viewport clip, including scrolling and resize.
+        // The retained drawing contains only the current viewport. Re-record after
+        // native scrolling or asynchronous layout changes, never from an idle timer.
         surface.SizeChanged += (_, _) => surface.Invalidate();
         scroll.SizeChanged += (_, _) => surface.Invalidate();
         scroll.ViewChanged += (_, _) => surface.Invalidate();
@@ -74,6 +77,14 @@ public sealed class ReportPreviewView : UserControl
         // Tunnelling runs before the ScrollViewer's class handler consumes paging keys.
         // It is scoped to this preview, never the sibling page-entry/search TextBoxes.
         PreviewKeyDown += HandleNavigationKeys;
+    }
+    private RectD? VisibleViewport()
+    {
+        if (!surface.IsLoaded || !scroll.IsLoaded || surface.ActualWidth <= 0 || surface.ActualHeight <= 0
+            || scroll.ViewportWidth <= 0 || scroll.ViewportHeight <= 0) return null;
+        var origin = surface.TransformToVisual(scroll).TransformPoint(new(0, 0));
+        return ReportPreviewViewport.Calculate(new(origin.X, origin.Y, surface.ActualWidth, surface.ActualHeight),
+            scroll.ViewportWidth, scroll.ViewportHeight, surface.PointScale);
     }
     public void Navigate(ReportPageCommand command) => PageIndex = Position.Move(command).Index;
     public void FitWidth() => Fit(ReportFitMode.Width);
@@ -120,7 +131,7 @@ public sealed class ReportPreviewView : UserControl
         surface.Highlight = hit?.Bounds; surface.Invalidate();
         if (hit is not null) scroll.ChangeView(null, Math.Max(0, hit.Bounds.Y * surface.PointScale - 100), null);
     }
-    private sealed class PreviewCanvas(ReportRenderer renderer) : SKCanvasElement
+    private sealed class PreviewCanvas(ReportRenderer renderer, Func<RectD?> visibleViewport) : SKCanvasElement
     {
         private PreparedPage? sourcePage;
         private PreparedPageIndex? index;
@@ -147,10 +158,14 @@ public sealed class ReportPreviewView : UserControl
             canvas.Save(); canvas.Scale((float)PointScale); RenderCount++;
             try
             {
+                // Uno records on a very large virtual canvas. LocalClipBounds was
+                // observed quantized by tens of pixels; clipping/culling from it lost
+                // right/lower report objects. Native layout is the viewport authority.
+                var viewport = visibleViewport() ?? new RectD(0, 0, index.Page.Width, index.Page.Height);
                 var clip = canvas.LocalClipBounds; var matrix = canvas.TotalMatrix;
                 LastPaint = new(area.Width, area.Height, PointScale, new(clip.Left, clip.Top, clip.Width, clip.Height),
-                    new(0, 0, index.Page.Width, index.Page.Height), matrix.ScaleX, matrix.ScaleY, matrix.TransX, matrix.TransY);
-                LastCandidatesExamined = renderer.DrawIndexedPage(canvas, index, new(clip.Left, clip.Top, clip.Width, clip.Height));
+                    new(0, 0, index.Page.Width, index.Page.Height), matrix.ScaleX, matrix.ScaleY, matrix.TransX, matrix.TransY) { Viewport = viewport };
+                LastCandidatesExamined = renderer.DrawIndexedPage(canvas, index, viewport);
                 if (Highlight is { } bounds) { using var paint = new SKPaint { Color = new(255, 211, 58, 115) }; canvas.DrawRect(ReportRenderer.Rect(bounds), paint); }
                 lastError = null;
             }
