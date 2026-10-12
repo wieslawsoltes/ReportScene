@@ -16,11 +16,14 @@ public sealed partial class ReportDesignerControl
         if (disposed || pageNavigator is null) return;
         var position = PreviewView.Position; bool changed = pageNavigator.Position != position;
         pageNavigator.SetPosition(position.Count, position.Index);
+        if (commands.TryGetValue("preview-outline", out var control) && control is Button button)
+            button.Background = ControlTheme.Brush(PreviewView.OutlineVisible ? "#CDE6F7" : "#00FFFFFF");
         if (previewMode && changed) UpdateStatus();
     }
     private void BuildPreviewRibbon()
     {
-        Group("Designer", Command("back-to-design", "Design", "report", () => { SetPreview(false); BuildRibbon(); }, true));
+        Group("View", Vertical(Command("back-to-design", "Design", "report", () => { SetPreview(false); BuildRibbon(); }),
+            Command("preview-outline", "Outline", "report", () => PreviewView.OutlineVisible = !PreviewView.OutlineVisible)));
         if (!previewNavigationBound)
         { PreviewView.ViewChanged += SyncPreviewNavigator; previewNavigationBound = true; }
         var navigator = new ReportPageNavigator();
@@ -30,7 +33,6 @@ public sealed partial class ReportDesignerControl
         pageNavigator = navigator;
         navigator.PageRequested += index => Run(() =>
         {
-            // A late event from a removed ribbon must not navigate another prepared report.
             if (!previewMode || !ReferenceEquals(pageNavigator, navigator) || boundReport is null
                 || !boundReport.TryGetTarget(out var target) || !ReferenceEquals(PreviewView.Report, target)) return;
             PreviewView.PageIndex = index;
@@ -62,5 +64,6 @@ public sealed partial class ReportDesignerControl
         var export = AsyncCommand("export-pdf", "PDF", "export", () => ExportAsync(ExportFormat.Pdf), true);
         var formats = Command("export-formats", "More formats", "export", () => { }, true); var menu = new MenuFlyout(); foreach (var format in Enum.GetValues<ExportFormat>()) Menu(menu, format.ToString(), () => Run(() => ExportAsync(format))); formats.Flyout = menu;
         Group("Export", export, formats, AsyncCommand("print", "Print", "print", PrintAsync, true));
+        SyncPreviewNavigator();
     }
 }
