@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using ReportScene.Controls.Uno;
 using ReportScene.Export;
+using ReportScene.Model;
 using Windows.System;
 
 namespace ReportScene.Designer.Uno;
@@ -22,11 +23,16 @@ public sealed partial class ReportDesignerControl
         Group("Designer", Command("back-to-design", "Design", "report", () => { SetPreview(false); BuildRibbon(); }, true));
         if (!previewNavigationBound)
         { PreviewView.ViewChanged += SyncPreviewNavigator; previewNavigationBound = true; }
-        var navigator = new ReportPageNavigator(); var boundReport = PreviewView.Report; pageNavigator = navigator;
+        var navigator = new ReportPageNavigator();
+        // Keep only a weak identity token. Removed controls can remain in the command
+        // registry until rebuilt; their callbacks must not retain invalidated report pages.
+        var boundReport = PreviewView.Report is { } report ? new WeakReference<PreparedReport>(report) : null;
+        pageNavigator = navigator;
         navigator.PageRequested += index => Run(() =>
         {
             // A late event from a removed ribbon must not navigate another prepared report.
-            if (!previewMode || !ReferenceEquals(pageNavigator, navigator) || !ReferenceEquals(PreviewView.Report, boundReport)) return;
+            if (!previewMode || !ReferenceEquals(pageNavigator, navigator) || boundReport is null
+                || !boundReport.TryGetTarget(out var target) || !ReferenceEquals(PreviewView.Report, target)) return;
             PreviewView.PageIndex = index;
         });
         navigator.Failed += ShowError;
