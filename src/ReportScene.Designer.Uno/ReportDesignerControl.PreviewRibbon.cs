@@ -22,14 +22,19 @@ public sealed partial class ReportDesignerControl
         Group("Designer", Command("back-to-design", "Design", "report", () => { SetPreview(false); BuildRibbon(); }, true));
         if (!previewNavigationBound)
         { PreviewView.ViewChanged += SyncPreviewNavigator; previewNavigationBound = true; }
-        pageNavigator = new ReportPageNavigator();
-        pageNavigator.PageRequested += index => Run(() => PreviewView.PageIndex = index);
-        pageNavigator.Failed += ShowError;
-        pageNavigator.SetPosition(PreviewView.Position.Count, PreviewView.PageIndex, resetEditor: true);
-        foreach (var pair in pageNavigator.Elements) commands[pair.Key] = pair.Value;
+        var navigator = new ReportPageNavigator(); var boundReport = PreviewView.Report; pageNavigator = navigator;
+        navigator.PageRequested += index => Run(() =>
+        {
+            // A late event from a removed ribbon must not navigate another prepared report.
+            if (!previewMode || !ReferenceEquals(pageNavigator, navigator) || !ReferenceEquals(PreviewView.Report, boundReport)) return;
+            PreviewView.PageIndex = index;
+        });
+        navigator.Failed += ShowError;
+        navigator.SetPosition(PreviewView.Position.Count, PreviewView.PageIndex, resetEditor: true);
+        foreach (var pair in navigator.Elements) commands[pair.Key] = pair.Value;
         commands["preview-paper"] = PreviewView.CanvasElement;
         commands["preview-viewport"] = PreviewView.ViewportElement;
-        Group("Pages", pageNavigator);
+        Group("Pages", navigator);
         Group("Zoom", ZoomChoice(true), Vertical(Command("preview-fit-width", "Fit width", "zoom", PreviewView.FitWidth), Command("preview-fit-page", "Whole page", "report", PreviewView.FitPage)));
         var search = new TextBox { PlaceholderText = "Find in report", Text = searchTerm, Width = 180, MinHeight = 28, Height = 28, FontSize = 11, Padding = new(6, 2, 4, 2) };
         search.KeyDown += (_, e) =>
