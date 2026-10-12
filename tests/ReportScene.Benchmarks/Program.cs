@@ -45,6 +45,14 @@ records.Add(new { name = "page-index", itemCount = items.Length, queryCount = qu
     indexedCandidates = examined, build,
     oldMeasure = Measure(() => queries.Sum(q => items.Count(i => PreparedVisibility.Intersect(i.Bounds, q) is { Width: > 0, Height: > 0 }))),
     newMeasure = Measure(() => queries.Sum(q => index.Query(q).Count)) });
+var emptyViewport = new RectD(0, 0, 0, 100); var disjointViewport = new RectD(400, 100, 100, 100);
+foreach (var query in new[] { emptyViewport, disjointViewport })
+{
+    if (index.Query(query, out int candidates).Count != 0 || candidates != 0) throw new InvalidOperationException("Empty-query fast-path mismatch.");
+    records.Add(new { name = query.Width == 0 ? "page-index-empty-query" : "page-index-disjoint-query", itemCount = index.Count, queryCount = 10000,
+        note = "Current API cost only, with index construction excluded. No historical speed ratio or browser/GPU latency is inferred.",
+        measure = Measure(() => { int checksum = 0; for (int n = 0; n < 10000; n++) { checksum += index.Query(query, out int examinedEntries).Count + examinedEntries; } return checksum; }) });
+}
 var intervals = new VerticalIntervalIndex(items.Select(i => (i.Bounds.Y, i.Bounds.Bottom))); long intervalCandidates = 0;
 foreach (var query in queries) { _ = intervals.Query(query.Y, query.Bottom, out int candidates); intervalCandidates += candidates; }
 records.Add(new { name = "pagination-interval-index", intervalCount = intervals.Count, queryCount = queries.Length,

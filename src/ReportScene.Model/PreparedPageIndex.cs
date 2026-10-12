@@ -24,8 +24,6 @@ public sealed class PreparedPageIndex
         for (int n = 0; n < items.Length; n++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            // Compute built-in stroke extents once at snapshot construction,
-            // not on each repaint. Nominal search/bookmark geometry is unchanged.
             if (PreparedPaintBounds.VisibleBounds(page, items[n]) is { } bounds) visible.Add(new(n, bounds));
         }
         entries = visible.ToArray();
@@ -51,16 +49,23 @@ public sealed class PreparedPageIndex
     public IReadOnlyList<PreparedItem> Query(RectD viewport, out int candidatesExamined, CancellationToken cancellationToken = default)
     {
         if (!double.IsFinite(viewport.X) || !double.IsFinite(viewport.Y) || !double.IsFinite(viewport.Right) || !double.IsFinite(viewport.Bottom)) throw new ArgumentOutOfRangeException(nameof(viewport));
-        cancellationToken.ThrowIfCancellationRequested(); int examined = 0; var found = new List<int>();
-        void Visit(Node node)
-        {
-            cancellationToken.ThrowIfCancellationRequested(); if (!Overlaps(node.Bounds, viewport)) return;
-            if (node.Left is { } left) { Visit(left); Visit(node.Right!); return; }
-            for (int n = node.Start; n < node.Start + node.Count; n++)
-            { examined++; if (Overlaps(entries[n].Bounds, viewport)) found.Add(entries[n].Index); }
-        }
-        if (root is not null && viewport.Width > 0 && viewport.Height > 0) Visit(root);
-        found.Sort(); candidatesExamined = examined;
-        return Array.AsReadOnly(found.Select(n => items[n]).ToArray());
+        cancellationToken.ThrowIfCancellationRequested(); candidatesExamined = 0;
+        // A private recursive method avoids a per-call captured local-function
+        // object. Empty/disjoint viewports return before allocating hit storage.
+        if (root is null || viewport.Width <= 0 || viewport.Height <= 0 || !Overlaps(root.Bounds, viewport)) return Array.Empty<PreparedItem>();
+        var found = new List<int>(8);
+        Visit(root, viewport, found, ref candidatesExamined, cancellationToken);
+        if (found.Count == 0) return Array.Empty<PreparedItem>();
+        found.Sort(); var result = new PreparedItem[found.Count];
+        for (int n = 0; n < result.Length; n++) result[n] = items[found[n]];
+        return Array.AsReadOnly(result);
+    }
+    private void Visit(Node node, RectD viewport, List<int> found, ref int examined, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested(); if (!Overlaps(node.Bounds, viewport)) return;
+        if (node.Left is { } left)
+        { Visit(left, viewport, found, ref examined, cancellationToken); Visit(node.Right!, viewport, found, ref examined, cancellationToken); return; }
+        for (int n = node.Start; n < node.Start + node.Count; n++)
+        { examined++; if (Overlaps(entries[n].Bounds, viewport)) found.Add(entries[n].Index); }
     }
 }
