@@ -2,7 +2,7 @@ using ReportScene.Model;
 
 namespace ReportScene.Designer;
 
-/// <summary>Conservative authoring culling in report points, sharing built-in stroke extents with prepared rendering.</summary>
+/// <summary>Conservative authoring culling in report points, sharing built-in paint extents with prepared rendering.</summary>
 public static class DesignerPaintCulling
 {
     public static bool IsVisible(DesignObject item, RectD viewport, double pointScale)
@@ -10,7 +10,7 @@ public static class DesignerPaintCulling
         ArgumentNullException.ThrowIfNull(item);
         if (!double.IsFinite(pointScale) || pointScale <= 0) throw new ArgumentOutOfRangeException(nameof(pointScale));
         Validate(viewport, nameof(viewport));
-        double outset = PreparedPaintBounds.StrokeOutset(item.Item, item.Bounds);
+        double outset = PreparedPaintBounds.PaintOutset(item.Item, item.Bounds);
         if (viewport.Width == 0 || viewport.Height == 0) return false;
         double tolerance = Math.Max(outset, 6 / pointScale);
         var b = item.Bounds;

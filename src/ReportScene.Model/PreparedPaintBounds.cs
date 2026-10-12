@@ -3,7 +3,7 @@ namespace ReportScene.Model;
 /// <summary>Geometric paint extents for built-in report objects, distinct from nominal search/bookmark areas.</summary>
 public static class PreparedPaintBounds
 {
-    /// <summary>Includes explicit borders and renderer-owned line/checkbox strokes, using prepared dimensions.</summary>
+    /// <summary>Half the conservative explicit or renderer-owned stroke width, using prepared dimensions.</summary>
     public static double StrokeOutset(ReportItem source, RectD bounds)
     {
         ArgumentNullException.ThrowIfNull(source); ArgumentNullException.ThrowIfNull(source.Style);
@@ -11,30 +11,47 @@ public static class PreparedPaintBounds
         double border = source.Style.BorderWidth;
         if (!double.IsFinite(border) || border < 0 || !float.IsFinite((float)border))
             throw new ArgumentException("Border width must be finite, nonnegative and representable by the renderer.", nameof(source));
-        // The renderer submits binary32 stroke widths. Rounding up cannot be
-        // ignored when constructing a conservative double-precision index.
         double width = Math.Max(border, (double)(float)border);
         if (source is ShapeItem { Shape: ShapeKind.Line }) width = Math.Max(width, .5);
         if (source is CheckBoxItem)
         {
             double side = Math.Min(bounds.Width, bounds.Height);
             if (!float.IsFinite((float)side)) throw new ArgumentException("Checkbox size exceeds the renderer's range.", nameof(bounds));
-            width = Math.Max(width, Math.Max(1, Math.Max(side / 14, (double)((float)side / 14f))));
+            width = Math.Max(width, CheckStroke(side));
         }
         return width / 2;
     }
 
-    /// <summary>Conservative stroke extents intersected with the paper and optional prepared-item clip.</summary>
+    /// <summary>Stroke and built-in path-join extents, conservative for both checked and unchecked boxes.</summary>
+    public static double PaintOutset(ReportItem source, RectD bounds)
+    {
+        double outset = StrokeOutset(source, bounds);
+        if (source is CheckBoxItem)
+        {
+            double side = Math.Min(bounds.Width, bounds.Height);
+            // DrawCheck's fixed path (.2,.5)->(.43,.75)->(.82,.23) has its
+            // vertices at least 1/8 side inside the box; its single miter
+            // extends less than one full stroke width from that vertex.
+            // For tiny boxes the one-point minimum can protrude past the
+            // rectangle stroke. Large boxes retain their usual half-width.
+            double clearance = Math.Min(side, (double)(float)side) / 8;
+            outset = Math.Max(outset, CheckStroke(side) - clearance);
+        }
+        return outset;
+    }
+
+    private static double CheckStroke(double side) => Math.Max(1, Math.Max(side / 14, (double)((float)side / 14f)));
+
+    /// <summary>Conservative painted extents intersected with the paper and optional prepared-item clip.</summary>
     public static RectD? VisibleBounds(PreparedPage page, PreparedItem item)
     {
         ArgumentNullException.ThrowIfNull(page); ArgumentNullException.ThrowIfNull(item);
         if (!double.IsFinite(page.Width) || !double.IsFinite(page.Height) || page.Width <= 0 || page.Height <= 0)
             throw new ArgumentException("Page dimensions must be finite and positive.", nameof(page));
-        double outset = StrokeOutset(item.Source, item.Bounds);
+        double outset = PaintOutset(item.Source, item.Bounds);
         if (item.Clip is { } clip)
         {
             Validate(clip, nameof(item), nonnegative: false);
-            // Match DrawItem: a finite zero/negative clip suppresses drawing.
             if (clip.Width <= 0 || clip.Height <= 0) return null;
         }
         var b = item.Bounds;
