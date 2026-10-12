@@ -17,6 +17,6 @@ public static class ConformanceSuite
     public static async Task<List<TestResult>> RunAsync()
     {
         var results = Run(); results.AddRange(await DesignerOperationTests.RunAsync());
-        results.AddRange(await DesignerPreferenceStoreTests.RunAsync()); return results;
+        results.AddRange(await DesignerPreferenceStoreTests.RunAsync()); results.AddRange(await PreferenceStoreEdgeTests.RunAsync()); return results;
     }
 }

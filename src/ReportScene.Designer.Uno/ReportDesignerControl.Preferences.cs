@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using ReportScene.Controls.Uno;
 using ReportScene.Model;
 
@@ -111,14 +112,32 @@ public sealed partial class ReportDesignerControl
     {
         var baseline = preferences.Current;
         var editor = new DesignerOptionsEditor(baseline);
-        foreach (var pair in editor.Editors) commands[pair.Key] = pair.Value;
+        var registered = new HashSet<string>(StringComparer.Ordinal);
+        void Register(string key, FrameworkElement value) { commands[key] = value; registered.Add(key); }
+        foreach (var pair in editor.Editors) Register(pair.Key, pair.Value);
         var error = new TextBlock { Text = preferenceError, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = ControlTheme.Brush("#A3372E") };
+        Register("options-error", error);
         var content = new StackPanel { Spacing = 6, Width = Math.Clamp(ActualWidth - 120, 280, 600) };
         content.Children.Add(new ScrollViewer { Content = editor, MaxHeight = Math.Clamp(ActualHeight - 240, 180, 460), VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         content.Children.Add(error);
         var dialog = new ContentDialog { Title = "Designer Options", Content = content, XamlRoot = XamlRoot,
             PrimaryButtonText = "Apply", SecondaryButtonText = "Restore defaults", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
         dialog.Resources["ContentDialogMaxWidth"] = 720d;
+        dialog.Opened += (_, _) =>
+        {
+            var pending = new Stack<DependencyObject>(); pending.Push(dialog);
+            while (pending.TryPop(out var node))
+            {
+                if (node is Button button)
+                {
+                    if (button.Name == "PrimaryButton" || button.Content is string text && text == "Apply") Register("options-dialog-apply", button);
+                    if (button.Name == "SecondaryButton" || button.Content is string reset && reset == "Restore defaults") Register("options-dialog-defaults", button);
+                    if (button.Name == "CloseButton" || button.Content is string close && close == "Cancel") Register("options-dialog-cancel", button);
+                }
+                for (int n = 0; n < VisualTreeHelper.GetChildrenCount(node); n++) pending.Push(VisualTreeHelper.GetChild(node, n));
+            }
+            NotifyState();
+        };
         dialog.SecondaryButtonClick += (_, e) => { editor.RestoreDefaults(); error.Text = "Defaults are in the draft. Apply to save, or Cancel to keep your settings."; e.Cancel = true; };
         dialog.PrimaryButtonClick += (_, e) =>
         {
@@ -137,6 +156,6 @@ public sealed partial class ReportDesignerControl
                 if (await FlushPreferencesAsync()) SetStatus(preferences.CanPersist ? "Designer preferences saved locally." : "Designer preferences applied for this workspace.");
             }
         }
-        finally { foreach (var key in editor.Editors.Keys) commands.Remove(key); NotifyState(); }
+        finally { foreach (var key in registered) commands.Remove(key); NotifyState(); }
     }
 }

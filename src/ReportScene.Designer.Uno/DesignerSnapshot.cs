@@ -49,6 +49,24 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public long TextLayoutCacheHits { get; init; }
     public long TextLayoutCacheMisses { get; init; }
     public int TextLayoutCacheCharacters { get; init; }
+    public bool PreferencesLoaded { get; init; }
+    public bool PreferencesPending { get; init; }
+    public long PreferencesGeneration { get; init; }
+    public long PreferencesWriteCount { get; init; }
+    public string PreferencesError { get; init; } = "";
+    public double PreferredSidebarWidth { get; init; }
+    public double PreferredTreeHeight { get; init; }
+    public bool EffectiveTreeShown { get; init; }
+    public bool EffectivePropertiesShown { get; init; }
+    public bool PaneDragActive { get; init; }
+    public double WorkspaceWidth { get; init; }
+    public double WorkspaceHeight { get; init; }
+    public double GridSpacing { get; init; }
+    public bool SnapEnabled { get; init; }
+    public bool GridVisible { get; init; }
+    public bool RulersVisible { get; init; }
+    public double DesignZoom { get; init; }
+    public double PreviewZoom { get; init; }
 }
 [JsonSerializable(typeof(DesignerSnapshot))]
 public partial class DesignerSnapshotJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
@@ -100,6 +118,7 @@ public sealed partial class ReportDesignerControl
             switch (element)
             {
                 case TextBox text: inputs[id] = text.Text; break;
+                case TextBlock label: inputs[id] = label.Text; break;
                 case TreeViewItem row: inputs[id] = row.Content?.ToString() ?? ""; break;
                 case ToggleButton toggle: inputs[id] = toggle.IsChecked?.ToString() ?? "Mixed"; break;
                 case Slider slider: inputs[id] = slider.Value.ToString(CultureInfo.InvariantCulture); break;
@@ -140,7 +159,16 @@ public sealed partial class ReportDesignerControl
             TreePaneHeight = treeHeight, TreeShown = showTree, PropertiesShown = showProperties, ActiveDrag = Session.HasActiveDrag,
             FullPaper = DesignView.ShowFullPage, DesignPaperHeight = DesignView.Layout.Paper.Height, SourcePaperHeight = Session.Page.Height,
             TextLayoutCacheHits = DesignView.TextLayouts.Hits, TextLayoutCacheMisses = DesignView.TextLayouts.Misses,
-            TextLayoutCacheCharacters = DesignView.TextLayouts.RetainedCharacters
+            TextLayoutCacheCharacters = DesignView.TextLayouts.RetainedCharacters,
+            PreferencesLoaded = preferencesLoaded, PreferencesPending = preferences.HasPending,
+            PreferencesGeneration = preferences.Generation, PreferencesWriteCount = preferences.WriteCount, PreferencesError = preferenceError,
+            PreferredSidebarWidth = preferredSidebarWidth, PreferredTreeHeight = preferredTreeHeight,
+            EffectiveTreeShown = visiblePaneLayout.ShowTree, EffectivePropertiesShown = visiblePaneLayout.ShowProperties,
+            PaneDragActive = sideSplitter.IsDragging || treeSplitter.IsDragging,
+            WorkspaceWidth = workspace.ActualWidth, WorkspaceHeight = workspace.ActualHeight,
+            GridSpacing = Session.GridSize, SnapEnabled = Session.SnapToGrid,
+            GridVisible = DesignView.ShowGrid, RulersVisible = DesignView.ShowRulers,
+            DesignZoom = DesignView.Zoom, PreviewZoom = PreviewView.Zoom
         };
     }
 }
