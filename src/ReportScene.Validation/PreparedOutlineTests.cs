@@ -11,7 +11,7 @@ public static class PreparedOutlineTests
         PreparedReport Report(params PreparedPage[] pages) => new("Bookmarks", pages, [], TimeSpan.Zero);
         yield return Test("duplicate labels and source identifiers retain occurrence order", () =>
         {
-            var snapshot = new PreparedOutlineSnapshot(Report(new(7, 100, 100, [Item("Repeated"), Item("Repeated")]), new(7, 100, 100, [Item("Repeated")])));
+            var snapshot = new PreparedOutlineSnapshot(Report(new PreparedPage(7, 100, 100, [Item("Repeated"), Item("Repeated")]), new PreparedPage(7, 100, 100, [Item("Repeated")])));
             Conformance.Equal(3, snapshot.Count); Conformance.Equal(3, snapshot.Entries.Select(e => e.Key).Distinct().Count());
             Conformance.Equal(true, snapshot.Entries.Select(e => e.PageIndex).SequenceEqual([0, 0, 1]));
             Conformance.Equal(true, snapshot.Entries.All(e => e.PageNumber == 7 && e.ObjectId == "same-source"));
@@ -19,12 +19,12 @@ public static class PreparedOutlineTests
         });
         yield return Test("outline targets intersect both page and item clip", () =>
         {
-            var snapshot = new PreparedOutlineSnapshot(Report(new(10, 100, 100, [Item("Visible", new(80, 80, 40, 40), new(85, 85, 10, 10))])));
+            var snapshot = new PreparedOutlineSnapshot(Report(new PreparedPage(10, 100, 100, [Item("Visible", new(80, 80, 40, 40), new(85, 85, 10, 10))])));
             Conformance.Equal(new RectD(85, 85, 10, 10), snapshot.Entries.Single().Bounds); Conformance.Equal(0, snapshot.Entries[0].PageIndex);
         });
         yield return Test("blank fully clipped and off-paper entries do not become targets", () =>
         {
-            var snapshot = new PreparedOutlineSnapshot(Report(new(1, 100, 100, [Item(null), Item(" \t"), Item("Off", new(200, 0, 20, 20)), Item("Clipped", clip: new(90, 90, 2, 2)), Item("Visible")])));
+            var snapshot = new PreparedOutlineSnapshot(Report(new PreparedPage(1, 100, 100, [Item(null), Item(" \t"), Item("Off", new(200, 0, 20, 20)), Item("Clipped", clip: new(90, 90, 2, 2)), Item("Visible")])));
             Conformance.Equal(1, snapshot.Count); Conformance.Equal(5L, snapshot.ItemsExamined); Conformance.Equal("Visible", snapshot.Entries[0].Text);
         });
         yield return Test("snapshot owns metadata rather than mutable prepared lists", () =>
@@ -36,7 +36,7 @@ public static class PreparedOutlineTests
         });
         yield return Test("entry and retained-string limits fail rather than truncate", () =>
         {
-            var report = Report(new(1, 100, 100, [Item("One"), Item("Two")]));
+            var report = Report(new PreparedPage(1, 100, 100, [Item("One"), Item("Two")]));
             Conformance.Throws<ArgumentException>(() => new PreparedOutlineSnapshot(report, maximumBookmarks: 1));
             Conformance.Throws<ArgumentException>(() => new PreparedOutlineSnapshot(report, maximumTextCharacters: 3));
             Conformance.Throws<ArgumentOutOfRangeException>(() => new PreparedOutlineSnapshot(report, maximumBookmarks: 0));
@@ -45,19 +45,19 @@ public static class PreparedOutlineTests
         {
             using var c = new CancellationTokenSource(); c.Cancel();
             Conformance.Throws<OperationCanceledException>(() => new PreparedOutlineSnapshot(Report(), cancellationToken: c.Token));
-            Conformance.Throws<ArgumentException>(() => new PreparedOutlineSnapshot(Report(new(1, double.NaN, 100, []))));
-            Conformance.Throws<ArgumentException>(() => new PreparedOutlineSnapshot(Report(new(1, 100, 100, [Item("Bad", new(double.NaN, 0, 10, 10))]))));
+            Conformance.Throws<ArgumentException>(() => new PreparedOutlineSnapshot(Report(new PreparedPage(1, double.NaN, 100, []))));
+            Conformance.Throws<ArgumentException>(() => new PreparedOutlineSnapshot(Report(new PreparedPage(1, 100, 100, [Item("Bad", new(double.NaN, 0, 10, 10))]))));
         });
         yield return Test("keys use ordinal identity and empty snapshots are valid", () =>
         {
-            var snapshot = new PreparedOutlineSnapshot(Report(new(1, 100, 100, [Item("One")])));
+            var snapshot = new PreparedOutlineSnapshot(Report(new PreparedPage(1, 100, 100, [Item("One")])));
             Conformance.Equal(true, snapshot.Find("BOOKMARK:0:0") is null && snapshot.Find(null) is null);
             Conformance.Equal(0, new PreparedOutlineSnapshot(Report()).Count);
         });
         yield return Test("large repeated label report is scanned once and every occurrence is distinct", () =>
         {
             var items = Enumerable.Range(0, 10000).Select(_ => Item("Same")).ToArray();
-            var snapshot = new PreparedOutlineSnapshot(Report(new(1, 100, 100, items)));
+            var snapshot = new PreparedOutlineSnapshot(Report(new PreparedPage(1, 100, 100, items)));
             Conformance.Equal(10000L, snapshot.ItemsExamined); Conformance.Equal(10000, snapshot.Count);
             for (int n = 0; n < items.Length; n++) Conformance.Equal(n, snapshot.Find("bookmark:0:" + n)!.ItemIndex);
         });
