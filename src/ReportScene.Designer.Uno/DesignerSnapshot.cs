@@ -115,6 +115,7 @@ public sealed partial class ReportDesignerControl
         var inputs = new Dictionary<string, string>(StringComparer.Ordinal);
         void Input(string id, FrameworkElement element)
         {
+            if (element is Control control) inputs[id + "-enabled"] = control.IsEnabled.ToString();
             switch (element)
             {
                 case TextBox text: inputs[id] = text.Text; break;

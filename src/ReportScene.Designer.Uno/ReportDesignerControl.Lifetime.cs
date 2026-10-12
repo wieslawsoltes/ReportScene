@@ -49,6 +49,7 @@ public sealed partial class ReportDesignerControl
         preferenceTimer.Stop(); preferences.Changed -= PreferencesChanged; preferences.Dispose();
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectedChanged; KeyDown -= HandleShortcuts;
         DesignView.ViewChanged -= ViewChanged; PreviewView.ViewChanged -= ViewChanged;
+        PreviewView.ViewChanged -= SyncPreviewNavigator; pageNavigator = null;
         searchSession = null; prepared = null; PreviewView.Report = null; commands.Clear(); objectIndices.Clear();
         DesignView.Dispose(); PreviewView.Dispose(); renderer.Dispose(); base.Dispose();
     }

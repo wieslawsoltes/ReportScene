@@ -3,9 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using ReportScene.Controls.Uno;
-using ReportScene.Export;
 using ReportScene.Model;
-using Windows.System;
 
 namespace ReportScene.Designer.Uno;
 
@@ -135,33 +133,5 @@ public sealed partial class ReportDesignerControl
         var choice = new ReportComboBox { Width = 174, MinHeight = 0, Height = 25, Padding = new(5, 0, 0, 0), FontSize = 11, CornerRadius = new(0), PlaceholderText = "Open sample…" };
         foreach (var name in AllSampleNames) choice.Items.Add(name);
         choice.SelectionChanged += (_, _) => { if (choice.SelectedItem is string name) Run(() => LoadAnySampleAsync(name)); }; commands["samples"] = choice; return choice;
-    }
-    private void BuildPreviewRibbon()
-    {
-        Group("Designer", Command("back-to-design", "Design", "report", () => { SetPreview(false); BuildRibbon(); }, true));
-        var page = new TextBox { Text = (PreviewView.PageIndex + 1).ToString(), Width = 40, MinHeight = 26, Height = 26, Padding = new(5, 2, 3, 2), FontSize = 11 };
-        page.KeyDown += (_, e) => { if (e.Key == VirtualKey.Enter && int.TryParse(page.Text, out var n)) { PreviewView.PageIndex = n - 1; page.Text = (PreviewView.PageIndex + 1).ToString(); UpdateStatus(); e.Handled = true; } }; commands["preview-page"] = page;
-        Group("Pages", Vertical(Horizontal(Command("previous-page", "Previous page", "previous", () => { PreviewView.PageIndex--; page.Text = (PreviewView.PageIndex + 1).ToString(); UpdateStatus(); }, text: false), page, Command("next-page", "Next page", "next", () => { PreviewView.PageIndex++; page.Text = (PreviewView.PageIndex + 1).ToString(); UpdateStatus(); }, text: false)), ControlTheme.Label("of " + (prepared?.Pages.Count ?? 0) + " pages", 10)));
-        Group("Zoom", ZoomChoice(true), Command("preview-fit-width", "Fit width", "zoom", PreviewView.FitWidth, true));
-        var search = new TextBox { PlaceholderText = "Find in report", Text = searchTerm, Width = 180, MinHeight = 28, Height = 28, FontSize = 11, Padding = new(6, 2, 4, 2) };
-        search.KeyDown += (_, e) =>
-        {
-            if (e.Key != VirtualKey.Enter) return;
-            bool previous = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
-            Find(search.Text, previous); e.Handled = true;
-        };
-        commands["preview-search"] = ControlTheme.Identify(search, "preview-search", "Find in report");
-        var matchCase = new CheckBox { Content = "Match case", IsChecked = searchOptions.MatchCase, FontSize = 11, MinHeight = 26 };
-        var wholeWord = new CheckBox { Content = "Whole word", IsChecked = searchOptions.WholeWord, FontSize = 11, MinHeight = 26 };
-        void OptionsChanged()
-        { searchOptions = new(matchCase.IsChecked == true, wholeWord.IsChecked == true); if (!string.IsNullOrEmpty(search.Text)) Find(search.Text); }
-        matchCase.Checked += (_, _) => OptionsChanged(); matchCase.Unchecked += (_, _) => OptionsChanged();
-        wholeWord.Checked += (_, _) => OptionsChanged(); wholeWord.Unchecked += (_, _) => OptionsChanged();
-        commands["find-match-case"] = ControlTheme.Identify(matchCase, "find-match-case", "Match case");
-        commands["find-whole-word"] = ControlTheme.Identify(wholeWord, "find-whole-word", "Whole word");
-        Group("Find", Vertical(search, Horizontal(Command("find-previous", "Previous", "previous", () => Find(search.Text, true)), Command("find-next", "Next", "next", () => Find(search.Text)))), Vertical(matchCase, wholeWord));
-        var export = AsyncCommand("export-pdf", "PDF", "export", () => ExportAsync(ExportFormat.Pdf), true);
-        var formats = Command("export-formats", "More formats", "export", () => { }, true); var menu = new MenuFlyout(); foreach (var format in Enum.GetValues<ExportFormat>()) Menu(menu, format.ToString(), () => Run(() => ExportAsync(format))); formats.Flyout = menu;
-        Group("Export", export, formats, AsyncCommand("print", "Print", "print", PrintAsync, true));
     }
 }
