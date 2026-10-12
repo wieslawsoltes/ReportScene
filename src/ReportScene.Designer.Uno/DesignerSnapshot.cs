@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using ReportScene.Controls.Uno;
 using ReportScene.Model;
 
 namespace ReportScene.Designer.Uno;
@@ -19,6 +20,7 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public long ContentRevision { get; init; }
     public long PreviewIndexBuilds { get; init; }
     public int PreviewCandidatesExamined { get; init; }
+    public PreviewViewportSnapshot PreviewViewport { get; init; }
     public int SearchQueryScans { get; init; }
     public int SearchMatches { get; init; }
     public bool RecoveryPending { get; init; }
@@ -149,8 +151,8 @@ public sealed partial class ReportDesignerControl
         return new(Session.Document.Name, Session.IsDirty, previewMode, Session.Document.Pages.Count, PreviewView.Report?.Pages.Count ?? 0, PreviewView.PageIndex + 1, DocumentTree.AllItems(Session.Document).Count(), Session.SelectedIds.Count, Session.CanUndo, Session.CanRedo, Session.HistoryCount, previewMode ? PreviewView.Zoom : DesignView.Zoom, previewMode ? PreviewView.RenderCount : DesignView.RenderCount, status.Text, diagnostics.ToArray(), commandBounds, propertyBounds, objects, inputs, ++snapshotSequence)
         {
             DocumentId = Session.DocumentId, ContentRevision = Session.Revision, PreviewIndexBuilds = PreviewView.IndexBuildCount,
-            PreviewCandidatesExamined = PreviewView.LastCandidatesExamined, SearchQueryScans = searchSession?.QueryScanCount ?? 0,
-            SearchMatches = searchSession?.Matches.Count ?? 0, RecoveryPending = recovery.HasPending,
+            PreviewCandidatesExamined = PreviewView.LastCandidatesExamined, PreviewViewport = PreviewView.ViewportSnapshot,
+            SearchQueryScans = searchSession?.QueryScanCount ?? 0, SearchMatches = searchSession?.Matches.Count ?? 0, RecoveryPending = recovery.HasPending,
             DesignLayoutBuilds = DesignView.LayoutBuildCount, ReplacementScanCount = Session.LastReplacementScanCount,
             OutlineCreatedNodes = tree.CreatedNodeCount, OutlineUpdates = tree.UpdateCount, OutlineSnapshotBuilds = outlineSnapshotBuilds,
             OutlineContextCount = tree.ContextCount, OutlineContextKey = tree.ContextKey, OutlineProjectedCount = tree.ProjectedCount,

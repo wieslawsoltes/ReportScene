@@ -1,6 +1,17 @@
 import { test, expect } from '@playwright/test';
 import { ready, state, fresh, bounds, click, fill, save, artifact, screenshot } from './uno-driver.mjs';
 
+function evidence(snapshot) {
+  return { page: snapshot?.PreviewPage, zoom: snapshot?.Zoom, renderCount: snapshot?.RenderCount,
+    viewport: snapshot?.PreviewViewport, paper: snapshot?.Commands['preview-paper'], diagnostics: snapshot?.Diagnostics };
+}
+test.afterEach(async ({ page }, info) => {
+  if (page.isClosed()) return;
+  const snapshot = await state(page);
+  console.log('PREVIEW_EVIDENCE', JSON.stringify(evidence(snapshot)));
+  await artifact(info, 'preview-final-state.json', snapshot);
+});
+
 async function openPreview(page, count = 3) {
   await ready(page); await click(page, 'tab-report');
   const report = { name: 'Preview navigation contract', pages: Array.from({ length: count }, (_, n) => ({
@@ -31,6 +42,7 @@ async function expectPage(page, number) {
 async function focusPaper(page) {
   const r = await bounds(page, 'preview-paper');
   await page.mouse.click(r.X + Math.min(80, r.Width / 2), r.Y + 90); await fresh(page);
+  console.log('PREVIEW_FOCUS', JSON.stringify(evidence(await state(page))));
 }
 
 test('preview first last and strict page entry synchronize native controls without stale navigation or edits', async ({ page }, info) => {
@@ -96,6 +108,7 @@ test('whole-page fitting uses both viewport axes and preserves prepared content 
         && paper.Y + paper.Height <= viewport.Y + viewport.Height);
     }, { message: 'The entire actual paper element fits inside the viewport with gutters' }).toBe(true);
     const r = await bounds(page, 'preview-paper');
+    console.log('PREVIEW_FIT', width, JSON.stringify(evidence(await state(page))));
     await expect.poll(async () => {
       const image = await screenshot(page, info.outputPath(`whole-page-${width}.png`));
       return page.evaluate(async ({ base64, r }) => {
