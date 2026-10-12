@@ -1,0 +1,11 @@
+# Prepared-query work and allocation review
+
+The stroke-visibility correction keeps painted bounds in the immutable page index rather than calculating them during indexed repaint. Review also found avoidable work when a native viewport is empty or does not overlap indexed content: the old query created a captured recursive function context, a hit list, a LINQ result iterator/array and a read-only result wrapper even when there was nothing to return.
+
+The query now validates geometry and cancellation first, then returns the shared empty array for empty/disjoint/rootless cases before creating hit storage. Recursion is a private method with explicit arguments and a by-reference candidate count, not a captured local function. Positive queries preserve painter order and independent read-only result snapshots while copying selected entries directly without a LINQ iterator. Queries that enter the tree but find no overlapping entries also share the empty result, although their traversal list has already been allocated.
+
+Three additional conformance cases verify shared empty-result identity and zero examined entries, cancellation/invalid-input behavior on early returns, and immutable independent positive results. Existing randomized, narrow-viewport, spanning-object, painter-order and raster differential tests remain mandatory.
+
+The benchmark records 10,000 empty and 10,000 disjoint queries against a prebuilt 100,000-item index, with current runtime/OS, median time, managed allocation count and zero-result/candidate checksum. Construction and the caller's delegate allocation are outside these loops. The existing nonempty query benchmark still records its own current index cost and differential equality against a linear visibility scan. Results must come from a completed current-head artifact; this document does not invent timing or allocation numbers.
+
+This is not allocation-free positive querying, a new asymptotic spatial-index algorithm, a complete frame benchmark or a hardware-GPU/FPS/input-latency claim. The linear DrawPage(viewport) path deliberately calculates paint bounds per candidate, trading a small amount of work for correct stroke visibility; callers needing repeated viewport drawing can reuse PreparedPageIndex.
