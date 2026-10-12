@@ -36,6 +36,8 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public int SearchMatches { get; init; }
     public bool RecoveryPending { get; init; }
     public long DesignLayoutBuilds { get; init; }
+    public RectD DesignPaintViewport { get; init; }
+    public int DesignDrawnObjects { get; init; }
     public int ReplacementScanCount { get; init; }
     public long OutlineCreatedNodes { get; init; }
     public long OutlineUpdates { get; init; }
@@ -154,6 +156,8 @@ public sealed partial class ReportDesignerControl
             if (Bounds(pair.Value) is not { } bounds) continue;
             commandBounds[pair.Key] = bounds; Input(pair.Key, pair.Value);
         }
+        if (Bounds(DesignView.CanvasElement) is { } designPaper) commandBounds["design-paper"] = designPaper;
+        if (Bounds(DesignView.ViewportElement) is { } designViewport) commandBounds["design-viewport"] = designViewport;
         var propertyBounds = new Dictionary<string, ElementBounds>(StringComparer.Ordinal);
         foreach (var pair in properties.Editors)
             if (Bounds(pair.Value) is { } bounds) { propertyBounds[pair.Key] = bounds; Input("property:" + pair.Key, pair.Value); }
@@ -169,7 +173,8 @@ public sealed partial class ReportDesignerControl
             PreviewOutlineFilter = PreviewView.OutlineFilter, PreviewOutlineProjectedCount = PreviewView.OutlineProjectedCount,
             PreviewSelectedBookmark = PreviewView.SelectedBookmarkKey, PreviewHighlight = PreviewView.HighlightBounds, PreviewRevealPending = PreviewView.RevealPending,
             SearchQueryScans = searchSession?.QueryScanCount ?? 0, SearchMatches = searchSession?.Matches.Count ?? 0, RecoveryPending = recovery.HasPending,
-            DesignLayoutBuilds = DesignView.LayoutBuildCount, ReplacementScanCount = Session.LastReplacementScanCount,
+            DesignLayoutBuilds = DesignView.LayoutBuildCount, DesignPaintViewport = DesignView.LastPaintViewport, DesignDrawnObjects = DesignView.LastDrawnObjectCount,
+            ReplacementScanCount = Session.LastReplacementScanCount,
             OutlineCreatedNodes = tree.CreatedNodeCount, OutlineUpdates = tree.UpdateCount, OutlineSnapshotBuilds = outlineSnapshotBuilds,
             OutlineContextCount = tree.ContextCount, OutlineContextKey = tree.ContextKey, OutlineProjectedCount = tree.ProjectedCount,
             OutlineVisibleRows = tree.VisibleRowCount, OutlineFilter = tree.FilterText, ActiveTree = activeTree,

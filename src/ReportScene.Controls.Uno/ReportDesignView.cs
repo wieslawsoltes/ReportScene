@@ -42,6 +42,9 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public TextLayoutCache TextLayouts => surface.TextLayouts;
     public long LayoutBuildCount { get; private set; } = 1;
     public FrameworkElement CanvasElement => surface;
+    public FrameworkElement ViewportElement => scroll;
+    public RectD LastPaintViewport => surface.LastViewport;
+    public int LastDrawnObjectCount => surface.LastDrawnObjectCount;
     public event Action<ReportItem>? EditRequested;
     public event Action<Exception>? Failed;
     public event Action? ViewChanged;
@@ -49,15 +52,28 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public ReportDesignView(DesignerSession session, ReportRenderer renderer)
     {
         Session = session; Renderer = renderer; activity = new(session); IsTabStop = true;
-        surface = new(session, renderer) { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+        surface = new(session, renderer, VisibleViewport) { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
         scroll = new() { Content = surface, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Enabled, VerticalScrollMode = ScrollMode.Enabled, Background = ControlTheme.Brush("#C3C3C3") };
         Content = scroll; ControlTheme.Identify(this, "report-design-view", "Report design surface");
         surface.PointerPressed += (_, e) => Guard(() => Pressed(e)); surface.PointerMoved += (_, e) => Guard(() => Moved(e)); surface.PointerReleased += (_, e) => Guard(() => Released(e));
         surface.PointerCanceled += (_, _) => Guard(Cancel); surface.PointerCaptureLost += (_, _) => { if (dragging || marquee) Guard(Cancel); };
         surface.DoubleTapped += (_, e) => Guard(() => { var p = e.GetPosition(surface); var hit = surface.Layout.HitTest(p.X / PointScale, p.Y / PointScale); if (hit is not null) EditRequested?.Invoke(hit.Item); e.Handled = true; });
         surface.PointerWheelChanged += (_, e) => { if ((e.KeyModifiers & VirtualKeyModifiers.Control) != 0) { Zoom *= e.GetCurrentPoint(surface).Properties.MouseWheelDelta > 0 ? 1.1 : 1 / 1.1; e.Handled = true; } };
+        // Native layout and scrolling, not a recording canvas clip, define which
+        // objects need repainting. No idle polling or model mutation is involved.
+        surface.SizeChanged += (_, _) => surface.Invalidate();
+        scroll.SizeChanged += (_, _) => surface.Invalidate();
+        scroll.ViewChanged += (_, _) => surface.Invalidate();
         surface.RenderFailed += e => Failed?.Invoke(e); KeyDown += OnKeyDown;
         Session.Changed += SessionChanged; Session.SelectionChanged += SelectionChanged; SizeSurface();
+    }
+    private RectD? VisibleViewport()
+    {
+        if (!surface.IsLoaded || !scroll.IsLoaded || surface.ActualWidth <= 0 || surface.ActualHeight <= 0
+            || scroll.ViewportWidth <= 0 || scroll.ViewportHeight <= 0) return null;
+        var origin = surface.TransformToVisual(scroll).TransformPoint(new(0, 0));
+        return ReportPreviewViewport.Calculate(new(origin.X, origin.Y, surface.ActualWidth, surface.ActualHeight),
+            scroll.ViewportWidth, scroll.ViewportHeight, PointScale);
     }
     private void Guard(Action action) { try { action(); } catch (Exception e) { Failed?.Invoke(e); } }
     private void SessionChanged(object? sender, EventArgs e)
@@ -81,7 +97,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public void ScrollToSelection()
     {
         var item = surface.Layout.Objects.FirstOrDefault(i => Session.SelectedIds.Contains(i.Item.Id));
-        if (item is not null) scroll.ChangeView(Math.Max(0, item.Bounds.X * PointScale - 80), Math.Max(0, item.Bounds.Y * PointScale - 80), null);
+        if (item is not null) scroll.ChangeView(Math.Max(0, item.Bounds.X * PointScale - 80), Math.Max(0, item.Bounds.Y * PointScale - 80), null, true);
     }
     private void Pressed(PointerRoutedEventArgs e)
     {
@@ -117,7 +133,6 @@ public sealed class ReportDesignView : UserControl, IDisposable
         if (dragging)
         {
             if (resizeHandle is { } handle) Session.PreviewResize(x - start.X, y - start.Y, handle);
-            // A click's small physical jitter is not an edit, even with snapping off.
             else if (pointerMoved) Session.PreviewDrag(x - start.X, y - start.Y);
         }
         else { surface.Marquee = new(Math.Min(start.X, x), Math.Min(start.Y, y), Math.Abs(x - start.X), Math.Abs(y - start.Y)); surface.Invalidate(); }
@@ -163,7 +178,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectionChanged;
         surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); base.Dispose();
     }
-    private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer) : SKCanvasElement
+    private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer, Func<RectD?> visibleViewport) : SKCanvasElement
     {
         private static readonly ResizeHandle[] SelectionHandles = Enum.GetValues<ResizeHandle>();
         public DesignLayout Layout { get; set; } = DesignLayout.Create(session.Page, false);
@@ -174,17 +189,21 @@ public sealed class ReportDesignView : UserControl, IDisposable
         public DesignerUnit Unit { get; set; } = DesignerUnit.Points;
         public RectD? Marquee { get; set; }
         public long RenderCount { get; private set; }
+        public RectD LastViewport { get; private set; }
+        public int LastDrawnObjectCount { get; private set; }
         public event Action<Exception>? RenderFailed;
         private string? lastError;
         protected override void RenderOverride(SKCanvas canvas, Size area)
         {
-            canvas.Save(); canvas.Scale((float)PointScale); RenderCount++;
+            canvas.Save(); canvas.Scale((float)PointScale); RenderCount++; LastDrawnObjectCount = 0;
             using var paint = new SKPaint { IsAntialias = false };
             using var dash = SKPathEffect.CreateDash([2, 2], 0);
             try
             {
-                var paper = Layout.Paper; var viewport = canvas.LocalClipBounds; double tolerance = 6 / PointScale;
-                bool Visible(DesignObject entry) => entry.Bounds.Bottom + tolerance >= viewport.Top && entry.Bounds.Y - tolerance <= viewport.Bottom && entry.Bounds.Right + tolerance >= viewport.Left && entry.Bounds.X - tolerance <= viewport.Right;
+                var paper = Layout.Paper;
+                LastViewport = visibleViewport() ?? new RectD(0, 0, Layout.Width, Layout.Height);
+                var viewport = ReportRenderer.Rect(LastViewport);
+                bool Visible(DesignObject entry) => DesignerPaintCulling.IsVisible(entry, LastViewport, PointScale);
                 paint.Color = ReportRenderer.Color("#989898"); canvas.DrawRect(ReportRenderer.Rect(paper.Offset(3, 3)), paint);
                 paint.Color = SKColors.White; canvas.DrawRect(ReportRenderer.Rect(paper), paint);
                 if (ShowRulers) DrawRulers(canvas, paint, viewport);
@@ -210,6 +229,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
                 foreach (var entry in Layout.Objects)
                 {
                     if (!Visible(entry)) continue;
+                    LastDrawnObjectCount++;
                     string text = entry.Item switch { TextItem t => TextLayouts.GetWrappedText(t.Text, entry.Bounds.Width - t.Style.Padding * 2, t.Style), BarcodeItem b => b.Text, CheckBoxItem c => c.Expression, _ => "" };
                     try { renderer.DrawItem(canvas, new(entry.Item, entry.Bounds, text), true); }
                     catch (ReportRenderException error)
@@ -220,8 +240,6 @@ public sealed class ReportDesignView : UserControl, IDisposable
                     paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = (float)(1 / PointScale); paint.Color = ReportRenderer.Color("#B3B3B3");
                     paint.PathEffect = dash; canvas.DrawRect(ReportRenderer.Rect(entry.Bounds), paint); paint.PathEffect = null; paint.Style = SKPaintStyle.Fill;
                 }
-                // Adorners are an overlay, not part of an object's report paint order.
-                // Later overlapping report objects must not hide actionable handles.
                 if (session.SelectedIds.Count > 0) foreach (var entry in Layout.Objects)
                 {
                     if (!session.SelectedIds.Contains(entry.Item.Id) || !Visible(entry)) continue;
