@@ -20,14 +20,19 @@ public interface IReportExporter
     ExportFile Export(PreparedReport report, ExportFormat format, ExportOptions? options = null, ReportDocument? document = null, CancellationToken cancellationToken = default);
 }
 
-public sealed class ReportExporter : IReportExporter
+public sealed partial class ReportExporter : IReportExporter
 {
     public IReadOnlyList<ExportFormat> Formats { get; } = Enum.GetValues<ExportFormat>();
     public ExportFile Export(PreparedReport report, ExportFormat format, ExportOptions? options = null, ReportDocument? document = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(report); options ??= new(); ValidateOptions(options);
         var pages = report.Pages.Where(p => p.Number >= options.FirstPage && p.Number <= options.LastPage).ToArray();
-        if (pages.Length == 0 && format != ExportFormat.Csv) throw new ArgumentException("The selected page range is empty.");
+        return ExportPages(report, format, options, document, pages, cancellationToken);
+    }
+    private static ExportFile ExportPages(PreparedReport report, ExportFormat format, ExportOptions options,
+        ReportDocument? document, IReadOnlyList<PreparedPage> pages, CancellationToken cancellationToken)
+    {
+        if (pages.Count == 0 && format != ExportFormat.Csv) throw new ArgumentException("The selected page range is empty.");
         if (report.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error)) throw new InvalidOperationException("Reports containing errors cannot be exported.");
         cancellationToken.ThrowIfCancellationRequested();
         if (format != ExportFormat.Csv) foreach (var page in pages) ValidatePage(page);
@@ -75,8 +80,14 @@ public sealed class ReportExporter : IReportExporter
         }
         ExportFile PagesOrZip(string extension, string mediaType, Func<PreparedPage, byte[]> export)
         {
-            if (pages.Length == 1) return new(safeName + "." + extension, mediaType, export(pages[0]));
-            return Zip(safeName + "-" + extension + ".zip", pages.Select(p => { cancellationToken.ThrowIfCancellationRequested(); return new ExportFile($"page-{p.Number:D4}.{extension}", mediaType, export(p)); }));
+            if (pages.Count == 1) return new(safeName + "." + extension, mediaType, export(pages[0]));
+            var duplicateNumbers = pages.GroupBy(p => p.Number).Where(g => g.Skip(1).Any()).Select(g => g.Key).ToHashSet();
+            return Zip(safeName + "-" + extension + ".zip", pages.Select((p, ordinal) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                string suffix = duplicateNumbers.Contains(p.Number) ? $"-position-{ordinal + 1:D4}" : "";
+                return new ExportFile($"page-{p.Number:D4}{suffix}.{extension}", mediaType, export(p));
+            }));
         }
     }
     public static byte[] Png(ReportRenderer renderer, PreparedPage page, ExportOptions options)
