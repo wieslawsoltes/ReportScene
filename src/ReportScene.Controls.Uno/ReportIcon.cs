@@ -51,6 +51,8 @@ public sealed class ReportIcon : SKCanvasElement
             case "band": R(2, 3, 20, 18); fill.Color = new(240, 194, 139); R(3, 10, 18, 5, true); L(2, 10, 22, 10); L(2, 15, 22, 15); break;
             case "next": Path(8, 4, 16, 12, 8, 20); break;
             case "previous": Path(16, 4, 8, 12, 16, 20); break;
+            case "first": L(5, 4, 5, 20); Path(18, 4, 10, 12, 18, 20); break;
+            case "last": L(19, 4, 19, 20); Path(6, 4, 14, 12, 6, 20); break;
             case "settings": canvas.DrawCircle(12, 12, 6, line); canvas.DrawCircle(12, 12, 2, line); for (int i = 0; i < 8; i++) { double a = i * Math.PI / 4; L((float)(12 + 7 * Math.Cos(a)), (float)(12 + 7 * Math.Sin(a)), (float)(12 + 10 * Math.Cos(a)), (float)(12 + 10 * Math.Sin(a))); } break;
             default: R(4, 4, 16, 16); L(8, 9, 16, 9); L(8, 14, 16, 14); break;
         }
