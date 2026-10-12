@@ -28,7 +28,10 @@ public sealed class ReportRenderer : IDisposable
         {
             canvas.ClipRect(SKRect.Create((float)page.Width, (float)page.Height));
             if (paper) { using var white = new SKPaint { Color = SKColors.White }; canvas.DrawRect(SKRect.Create((float)page.Width, (float)page.Height), white); }
-            foreach (var item in page.Items) if (viewport is null || item.Bounds.Intersects(viewport.Value)) DrawItem(canvas, item);
+            // The optional viewport remains a culling hint, not an extra canvas
+            // clip. Use the same painted extents as the prepared spatial index.
+            foreach (var item in page.Items)
+                if (viewport is null || PreparedPaintBounds.VisibleBounds(page, item) is { } painted && painted.Intersects(viewport.Value)) DrawItem(canvas, item);
         }
         finally { canvas.Restore(); }
     }
