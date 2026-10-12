@@ -43,6 +43,14 @@ public static class DesignerViewportTests
                 Conformance.Equal(true, DesignerPaintCulling.IsVisible(Item(new(775, 1075, 20, 20)), viewport, scale));
             }
         });
+        yield return Test("renderer-owned checkbox and line strokes survive nominal-bounds culling", () =>
+        {
+            var checkbox = new DesignObject(new CheckBoxItem(), new Band(), new(100, 100, 1000, 1000));
+            Conformance.Equal(true, DesignerPaintCulling.IsVisible(checkbox, new(70, 500, 1, 10), 4));
+            Conformance.Equal(false, DesignerPaintCulling.IsVisible(checkbox, new(50, 500, 1, 10), 4));
+            var line = new DesignObject(new ShapeItem { Shape = ShapeKind.Line }, new Band(), new(100, 100, 0, 100));
+            Conformance.Equal(true, DesignerPaintCulling.IsVisible(line, new(99.8, 120, .01, 10), 100));
+        });
         yield return Test("invalid geometry is rejected before draw submission", () =>
         {
             var item = Item(new(0, 0, 10, 10));
