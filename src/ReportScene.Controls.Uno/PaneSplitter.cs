@@ -19,6 +19,7 @@ public sealed class PaneSplitter : UserControl
     public bool Reverse { get; set; }
     public double Minimum { get; set; } = 120;
     public double Maximum { get; set; } = 640;
+    public bool IsDragging => dragging;
     public double Value
     {
         get => value;
@@ -31,6 +32,8 @@ public sealed class PaneSplitter : UserControl
     }
     public event Action<double>? ValueChanged;
     public event Action? ResetRequested;
+    public event Action? InteractionStarted;
+    public event Action<bool>? InteractionCompleted;
     public PaneSplitter()
     {
         IsTabStop = true; Content = line;
@@ -45,7 +48,9 @@ public sealed class PaneSplitter : UserControl
             var point = e.GetCurrentPoint(this);
             if (point.PointerDevice.PointerDeviceType == Windows.Devices.Input.PointerDeviceType.Mouse && !point.Properties.IsLeftButtonPressed) return;
             reference = Parent as UIElement ?? this; start = e.GetCurrentPoint(reference).Position; original = Value; pointer = e.Pointer;
-            dragging = CapturePointer(e.Pointer); Focus(FocusState.Pointer); e.Handled = true;
+            dragging = CapturePointer(e.Pointer); Focus(FocusState.Pointer);
+            if (dragging) InteractionStarted?.Invoke(); else pointer = null;
+            e.Handled = true;
         };
         PointerMoved += (_, e) =>
         {
@@ -55,7 +60,7 @@ public sealed class PaneSplitter : UserControl
         };
         PointerReleased += (_, e) => { if (pointer?.PointerId == e.Pointer.PointerId) End(false); e.Handled = true; };
         PointerCanceled += (_, _) => End(true);
-        PointerCaptureLost += (_, _) => { dragging = false; pointer = null; };
+        PointerCaptureLost += (_, _) => { if (dragging) End(false); };
         DoubleTapped += (_, e) => { End(false); ResetRequested?.Invoke(); e.Handled = true; };
         KeyDown += (_, e) =>
         {
@@ -72,7 +77,11 @@ public sealed class PaneSplitter : UserControl
     }
     private void End(bool cancel)
     {
-        if (!dragging) return; dragging = false; if (cancel) Value = original;
-        if (pointer is { } captured) ReleasePointerCapture(captured); pointer = null; line.Background = ControlTheme.Brush("#D0D0D0");
+        if (!dragging) return;
+        // Keep transient-state guards active while restoring the visible value.
+        if (cancel) Value = original;
+        dragging = false; var captured = pointer; pointer = null;
+        if (captured is not null) ReleasePointerCapture(captured);
+        line.Background = ControlTheme.Brush("#D0D0D0"); InteractionCompleted?.Invoke(cancel);
     }
 }

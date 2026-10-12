@@ -24,16 +24,13 @@ public sealed record DesignerPreferences
     public bool AlphabeticalProperties { get; init; }
     public DesignerExplorerTab ExplorerTab { get; init; } = DesignerExplorerTab.Data;
     public double DesignZoom { get; init; } = .85;
-    public double PreviewZoom { get; init; } = 1;
+    public double PreviewZoom { get; init; } = .8;
 
     public DesignerPreferences Validate()
     {
         if (Version != 1) throw new ArgumentException("This designer preference version is not supported.", nameof(Version));
-        Range(SidebarWidth, 180, 640, nameof(SidebarWidth));
-        Range(TreeHeight, 96, 480, nameof(TreeHeight));
-        Range(GridSize, 1, 72, nameof(GridSize));
-        Range(DesignZoom, .15, 4, nameof(DesignZoom));
-        Range(PreviewZoom, .1, 4, nameof(PreviewZoom));
+        Range(SidebarWidth, 180, 640, nameof(SidebarWidth)); Range(TreeHeight, 96, 480, nameof(TreeHeight));
+        Range(GridSize, 1, 72, nameof(GridSize)); Range(DesignZoom, .15, 4, nameof(DesignZoom)); Range(PreviewZoom, .1, 4, nameof(PreviewZoom));
         if (!Enum.IsDefined(Unit)) throw new ArgumentOutOfRangeException(nameof(Unit));
         if (!Enum.IsDefined(ExplorerTab)) throw new ArgumentOutOfRangeException(nameof(ExplorerTab));
         return this;
@@ -49,6 +46,7 @@ public sealed record DesignerPreferences
 public static class DesignerPreferencesJson
 {
     public const int MaximumCharacters = 8192;
+    private static readonly string defaults = JsonSerializer.Serialize(new DesignerPreferences(), DesignerPreferencesJsonContext.Default.DesignerPreferences);
     public static string Serialize(DesignerPreferences value)
     {
         ArgumentNullException.ThrowIfNull(value); value.Validate();
@@ -67,7 +65,21 @@ public static class DesignerPreferencesJson
             var names = new HashSet<string>(StringComparer.Ordinal);
             foreach (var property in document.RootElement.EnumerateObject())
                 if (!names.Add(property.Name)) throw new JsonException("Duplicate preference field: " + property.Name);
-            var value = JsonSerializer.Deserialize(json, DesignerPreferencesJsonContext.Default.DesignerPreferences)
+            if (!names.Contains("version")) throw new JsonException("The preference version is required.");
+            // Source-generated init-only assignment can otherwise replace omitted
+            // property initializers with CLR zeroes. Normalize absent fields only;
+            // explicit null/invalid values and unknown properties remain errors.
+            using var defaultDocument = JsonDocument.Parse(defaults);
+            using var output = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(output))
+            {
+                writer.WriteStartObject();
+                foreach (var property in document.RootElement.EnumerateObject()) property.WriteTo(writer);
+                foreach (var property in defaultDocument.RootElement.EnumerateObject())
+                    if (!names.Contains(property.Name)) property.WriteTo(writer);
+                writer.WriteEndObject();
+            }
+            var value = JsonSerializer.Deserialize(output.ToArray(), DesignerPreferencesJsonContext.Default.DesignerPreferences)
                 ?? throw new JsonException("Preferences must not be null.");
             return value.Validate();
         }

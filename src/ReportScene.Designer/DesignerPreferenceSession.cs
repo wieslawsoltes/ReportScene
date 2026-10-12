@@ -42,8 +42,6 @@ public sealed class DesignerPreferenceSession : IDisposable
         }
         Changed?.Invoke(); return true;
     }
-
-    /// <summary>Explicit reset also repairs invalid stored data when current values are already defaults.</summary>
     public void RestoreDefaults() => Update(new(), forceSave: true);
 
     /// <summary>Load once; any prior or intervening local choice wins over stored settings.</summary>
@@ -68,14 +66,17 @@ public sealed class DesignerPreferenceSession : IDisposable
         }
         Changed?.Invoke(); return true;
     }
+    public Task FlushAsync(CancellationToken cancellationToken = default) => FlushWhenReadyAsync(static () => true, cancellationToken);
 
     /// <summary>
-    /// Explicit host-driven flush, with no polling or automatic error retry. Updates that
-    /// arrive during a save are drained in order; intermediate queued values are coalesced.
-    /// A host acknowledging a write does not necessarily guarantee physical-disk durability.
+    /// Coalesce pending values and drain newer changes after each acknowledged write.
+    /// The host readiness check runs before every snapshot, including after awaiting a
+    /// write. A false result defers pending work; it never captures transient drag state.
+    /// Failures require an explicit retry or another host-scheduled flush, not idle polling.
     /// </summary>
-    public async Task FlushAsync(CancellationToken cancellationToken = default)
+    public async Task FlushWhenReadyAsync(Func<bool> canSnapshot, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(canSnapshot);
         using var linked = OperationToken(cancellationToken); var token = linked.Token;
         token.ThrowIfCancellationRequested(); if (store is null) return;
         await writeGate.WaitAsync(token);
@@ -83,6 +84,8 @@ public sealed class DesignerPreferenceSession : IDisposable
         {
             while (true)
             {
+                token.ThrowIfCancellationRequested();
+                if (!canSnapshot()) return;
                 DesignerPreferences value; long requested;
                 lock (sync)
                 {
@@ -107,7 +110,7 @@ public sealed class DesignerPreferenceSession : IDisposable
     {
         lock (sync) { if (disposed) return; disposed = true; }
         lifetime.Cancel();
-        // Do not dispose the gate while a host callback or a queued flush owns it.
-        // No new operations can start. Existing operations observe the cancelled token.
+        // The gate can still belong to an awaited host callback; existing operations
+        // observe cancellation and release it themselves. No new operation can start.
     }
 }
