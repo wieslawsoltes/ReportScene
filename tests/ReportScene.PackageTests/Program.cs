@@ -97,6 +97,9 @@ Check(pagePosition.TrySelect(" 1 ", out var firstPage) && firstPage.Index == 0 &
 Check(ReportPreviewFit.Calculate(600, 800, 840, 1040, ReportFitMode.WholePage) == .9375, "whole-page point-to-DIP fitting");
 var emptyPosition = new ReportPagePosition(0);
 Check(emptyPosition.Move(ReportPageCommand.Last) == emptyPosition && !emptyPosition.TrySelect("1", out _), "empty preview boundary navigation");
+Check(ReportPreviewViewport.Calculate(new(20, 16, 300, 400), 800, 600, .5) == new RectD(0, 0, 600, 800), "native viewport geometry converted to points");
+Check(ReportPreviewViewport.Calculate(new(-300, -800, 2000, 5000), 800, 600, 2) == new RectD(149, 399, 402, 302), "native scroll viewport translation and pixel guard");
+Check(ReportPreviewViewport.Calculate(new(1000, 1000, 100, 100), 800, 600, 1) == default, "offscreen preview has no visible candidate region");
 Console.WriteLine($"{passed}/{passed} isolated package-consumer checks passed.");
 
 sealed class PackagePreferenceStore : IDesignerPreferenceStore
