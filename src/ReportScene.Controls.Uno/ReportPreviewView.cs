@@ -19,8 +19,8 @@ public readonly record struct PreviewPaintSnapshot(double AreaWidth, double Area
 public readonly record struct PreviewViewportSnapshot(double Width, double Height, double ExtentWidth, double ExtentHeight,
     double HorizontalOffset, double VerticalOffset, string FocusOwner, PreviewPaintSnapshot Paint);
 
-/// <summary>Only the current page and its immutable spatial index are retained by the preview surface.</summary>
-public sealed class ReportPreviewView : UserControl
+/// <summary>The current-page spatial index is retained; optional bookmark metadata is materialized only when the outline is opened.</summary>
+public sealed partial class ReportPreviewView : UserControl
 {
     private readonly PreviewCanvas surface;
     private readonly ScrollViewer scroll;
@@ -30,7 +30,12 @@ public sealed class ReportPreviewView : UserControl
     public PreparedReport? Report
     {
         get => report;
-        set { report = value; pageIndex = 0; surface.ResetPage(); Refresh(); scroll.ChangeView(0, 0, null, true); }
+        set
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            report = value; pageIndex = 0; ResetOutline(); surface.ResetPage(); Refresh(); scroll.ChangeView(0, 0, null, true);
+            if (outlineVisible) try { EnsureOutline(); } catch (Exception error) { Failed?.Invoke(error); }
+        }
     }
     public int PageIndex
     {
@@ -39,6 +44,7 @@ public sealed class ReportPreviewView : UserControl
         {
             int next = new ReportPagePosition(report?.Pages.Count ?? 0, value).Index;
             if (next == pageIndex) return;
+            pendingReveal = null; SelectedBookmarkKey = null; outlineView.SelectBookmark(null);
             pageIndex = next; surface.Highlight = null; Refresh(); scroll.ChangeView(0, 0, null, true);
         }
     }
@@ -68,14 +74,13 @@ public sealed class ReportPreviewView : UserControl
             var pointer = e.GetCurrentPoint(surface);
             if (pointer.Properties.IsLeftButtonPressed || pointer.PointerDevice.PointerDeviceType != Windows.Devices.Input.PointerDeviceType.Mouse) scroll.Focus(FocusState.Pointer);
         };
-        // The retained drawing contains only the current viewport. Re-record after
-        // native scrolling or asynchronous layout changes, never from an idle timer.
-        surface.SizeChanged += (_, _) => surface.Invalidate();
-        scroll.SizeChanged += (_, _) => surface.Invalidate();
+        surface.SizeChanged += (_, _) => { surface.Invalidate(); QueueReveal(); };
+        scroll.SizeChanged += (_, _) => { surface.Invalidate(); QueueReveal(); };
         scroll.ViewChanged += (_, _) => surface.Invalidate();
-        Content = scroll; ControlTheme.Identify(this, "report-preview-view", "Prepared report preview; Page Up/Down changes pages, Ctrl+Home/End jumps to first/last");
+        InitializeOutline();
+        ControlTheme.Identify(this, "report-preview-view", "Prepared report preview; Page Up/Down changes pages, Ctrl+Home/End jumps to first/last");
         // Tunnelling runs before the ScrollViewer's class handler consumes paging keys.
-        // It is scoped to this preview, never the sibling page-entry/search TextBoxes.
+        // Preview navigation excludes the outline's search and native tree controls.
         PreviewKeyDown += HandleNavigationKeys;
     }
     private RectD? VisibleViewport()
@@ -93,13 +98,17 @@ public sealed class ReportPreviewView : UserControl
     {
         if (report?.Pages.ElementAtOrDefault(pageIndex) is { } page && ReportPreviewFit.Calculate(page.Width, page.Height, scroll.ViewportWidth, scroll.ViewportHeight, mode) is { } fitted)
         {
-            Zoom = fitted;
+            pendingReveal = null; Zoom = fitted;
             if (mode == ReportFitMode.WholePage) scroll.ChangeView(0, 0, null, true);
         }
     }
     private void HandleNavigationKeys(object sender, KeyRoutedEventArgs e)
     {
         if (e.Handled || e.OriginalSource is TextBox) return;
+        bool fromPaper = false;
+        for (DependencyObject? element = e.OriginalSource as DependencyObject; element is not null; element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
+            if (ReferenceEquals(element, scroll)) { fromPaper = true; break; }
+        if (!fromPaper) return;
         bool ctrl = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
         ReportPageCommand? command = e.Key switch
         {
@@ -115,21 +124,18 @@ public sealed class ReportPreviewView : UserControl
         surface.SetPage(report?.Pages.ElementAtOrDefault(pageIndex)); surface.PointScale = Zoom * 96 / 72;
         if (surface.Page is { } page) { surface.Width = page.Width * surface.PointScale; surface.Height = page.Height * surface.PointScale; surface.Visibility = Visibility.Visible; }
         else { surface.Width = surface.Height = 0; surface.Visibility = Visibility.Collapsed; }
-        surface.Invalidate(); ViewChanged?.Invoke();
+        surface.Invalidate(); QueueReveal(); ViewChanged?.Invoke();
     }
     public void Highlight(SearchHit? hit)
     {
-        if (hit is not null)
-        {
-            // Search identifies physical page metadata, while navigation positions are
-            // ordinal within the displayed list (which may be a selected page range).
-            int index = -1;
-            if (report is not null) for (int n = 0; n < report.Pages.Count; n++) if (report.Pages[n].Number == hit.Page) { index = n; break; }
-            if (index < 0) { surface.Highlight = null; surface.Invalidate(); return; }
-            PageIndex = index;
-        }
-        surface.Highlight = hit?.Bounds; surface.Invalidate();
-        if (hit is not null) scroll.ChangeView(null, Math.Max(0, hit.Bounds.Y * surface.PointScale - 100), null);
+        pendingReveal = null; SelectedBookmarkKey = null; outlineView.SelectBookmark(null);
+        if (hit is null) { surface.Highlight = null; surface.Invalidate(); return; }
+        // Search retains physical-page metadata mapping; bookmark occurrences use
+        // their exact ordinal so duplicate page labels cannot redirect a bookmark.
+        int index = -1;
+        if (report is not null) for (int n = 0; n < report.Pages.Count; n++) if (report.Pages[n].Number == hit.Page) { index = n; break; }
+        if (index < 0) { surface.Highlight = null; surface.Invalidate(); return; }
+        ShowTarget(index, hit.Bounds);
     }
     private sealed class PreviewCanvas(ReportRenderer renderer, Func<RectD?> visibleViewport) : SKCanvasElement
     {
@@ -158,9 +164,6 @@ public sealed class ReportPreviewView : UserControl
             canvas.Save(); canvas.Scale((float)PointScale); RenderCount++;
             try
             {
-                // Uno records on a very large virtual canvas. LocalClipBounds was
-                // observed quantized by tens of pixels; clipping/culling from it lost
-                // right/lower report objects. Native layout is the viewport authority.
                 var viewport = visibleViewport() ?? new RectD(0, 0, index.Page.Width, index.Page.Height);
                 var clip = canvas.LocalClipBounds; var matrix = canvas.TotalMatrix;
                 LastPaint = new(area.Width, area.Height, PointScale, new(clip.Left, clip.Top, clip.Width, clip.Height),

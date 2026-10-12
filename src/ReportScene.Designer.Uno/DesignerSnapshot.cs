@@ -21,6 +21,17 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public long PreviewIndexBuilds { get; init; }
     public int PreviewCandidatesExamined { get; init; }
     public PreviewViewportSnapshot PreviewViewport { get; init; }
+    public bool PreviewOutlineVisible { get; init; }
+    public bool PreviewOutlineEffectiveVisible { get; init; }
+    public double PreviewOutlineWidth { get; init; }
+    public int PreviewBookmarkCount { get; init; }
+    public long PreviewOutlineBuilds { get; init; }
+    public long PreviewOutlineNodes { get; init; }
+    public int PreviewOutlineProjectedCount { get; init; }
+    public string PreviewOutlineFilter { get; init; } = "";
+    public string? PreviewSelectedBookmark { get; init; }
+    public RectD? PreviewHighlight { get; init; }
+    public bool PreviewRevealPending { get; init; }
     public int SearchQueryScans { get; init; }
     public int SearchMatches { get; init; }
     public bool RecoveryPending { get; init; }
@@ -138,7 +149,7 @@ public sealed partial class ReportDesignerControl
                     break;
             }
         }
-        foreach (var pair in commands.Concat(tree.Elements()))
+        foreach (var pair in commands.Concat(tree.Elements()).Concat(PreviewView.OutlineElements()))
         {
             if (Bounds(pair.Value) is not { } bounds) continue;
             commandBounds[pair.Key] = bounds; Input(pair.Key, pair.Value);
@@ -152,6 +163,11 @@ public sealed partial class ReportDesignerControl
         {
             DocumentId = Session.DocumentId, ContentRevision = Session.Revision, PreviewIndexBuilds = PreviewView.IndexBuildCount,
             PreviewCandidatesExamined = PreviewView.LastCandidatesExamined, PreviewViewport = PreviewView.ViewportSnapshot,
+            PreviewOutlineVisible = PreviewView.OutlineVisible, PreviewOutlineEffectiveVisible = PreviewView.OutlineEffectivelyVisible,
+            PreviewOutlineWidth = PreviewView.OutlineWidth, PreviewBookmarkCount = PreviewView.OutlineSnapshot?.Count ?? 0,
+            PreviewOutlineBuilds = PreviewView.OutlineBuildCount, PreviewOutlineNodes = PreviewView.OutlineNodeCount,
+            PreviewOutlineFilter = PreviewView.OutlineFilter, PreviewOutlineProjectedCount = PreviewView.OutlineProjectedCount,
+            PreviewSelectedBookmark = PreviewView.SelectedBookmarkKey, PreviewHighlight = PreviewView.HighlightBounds, PreviewRevealPending = PreviewView.RevealPending,
             SearchQueryScans = searchSession?.QueryScanCount ?? 0, SearchMatches = searchSession?.Matches.Count ?? 0, RecoveryPending = recovery.HasPending,
             DesignLayoutBuilds = DesignView.LayoutBuildCount, ReplacementScanCount = Session.LastReplacementScanCount,
             OutlineCreatedNodes = tree.CreatedNodeCount, OutlineUpdates = tree.UpdateCount, OutlineSnapshotBuilds = outlineSnapshotBuilds,
