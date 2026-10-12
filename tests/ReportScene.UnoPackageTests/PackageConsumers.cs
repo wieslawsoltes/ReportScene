@@ -18,6 +18,13 @@ public static class PackageConsumers
     public static ReportDesignView CreateDesignSurface(DesignerSession session, ReportRenderer renderer)
         => new(session, renderer) { Unit = DesignerUnit.Millimeters, ShowRulers = true, ShowFullPage = false };
     public static ReportPreviewView CreatePreviewSurface(ReportRenderer renderer) => new(renderer);
+    public static void NavigatePreview(ReportPreviewView preview)
+    { preview.Navigate(ReportPageCommand.Last); preview.FitPage(); _ = preview.Position; _ = preview.ViewportElement; }
+    public static ReportPageNavigator CreatePageNavigator(Action<int> navigate)
+    {
+        var control = new ReportPageNavigator(); control.PageRequested += navigate;
+        control.SetPosition(3, 1, resetEditor: true); _ = control.Position; _ = control.ValidationMessage; _ = control.Elements; return control;
+    }
     public static MatrixDefinitionEditor CreateMatrixEditor(MatrixItem matrix, IEnumerable<DataTable> tables) => new(matrix, tables);
     public static SubreportDefinitionEditor CreateSubreportEditor(SubreportItem subreport, IEnumerable<ReportPage> pages, string owner) => new(subreport, pages, owner);
     public static DataTablePreview CreateDataPreview(DataTable table)

@@ -90,6 +90,13 @@ try
     Check(DesignerPreferencesJson.Deserialize((await fileStore.LoadAsync())!) == options, "native file preference store from isolated package");
 }
 finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+var pagePosition = new ReportPagePosition(3).Move(ReportPageCommand.Last);
+Check(pagePosition.PageNumber == 3 && !pagePosition.CanNext && pagePosition.CanPrevious, "ordinal preview page navigation");
+Check(!pagePosition.TrySelect("2147483648", out var unchanged) && unchanged == pagePosition, "invalid preview entry preserves page");
+Check(pagePosition.TrySelect(" 1 ", out var firstPage) && firstPage.Index == 0 && !firstPage.CanPrevious, "trimmed page ordinal selection");
+Check(ReportPreviewFit.Calculate(600, 800, 840, 1040, ReportFitMode.WholePage) == .9375, "whole-page point-to-DIP fitting");
+var emptyPosition = new ReportPagePosition(0);
+Check(emptyPosition.Move(ReportPageCommand.Last) == emptyPosition && !emptyPosition.TrySelect("1", out _), "empty preview boundary navigation");
 Console.WriteLine($"{passed}/{passed} isolated package-consumer checks passed.");
 
 sealed class PackagePreferenceStore : IDesignerPreferenceStore
