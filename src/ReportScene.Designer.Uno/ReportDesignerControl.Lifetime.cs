@@ -9,7 +9,11 @@ public sealed partial class ReportDesignerControl
 {
     private void Run(Action action) { if (disposed) return; try { action(); } catch (Exception e) { ShowError(e); } }
     private async void Run(Func<Task> action) { if (disposed) return; try { await action(); } catch (Exception e) { if (!disposed) ShowError(e); } }
-    private void NotifyState() { if (!disposed) StateChanged?.Invoke(); }
+    private void NotifyState()
+    {
+        if (disposed) return;
+        ObservePreferences(); StateChanged?.Invoke();
+    }
     private void HandleShortcuts(object sender, KeyRoutedEventArgs e)
     {
         if (disposed) return;
@@ -42,6 +46,7 @@ public sealed partial class ReportDesignerControl
     public new void Dispose()
     {
         if (disposed) return; disposed = true; recoveryTimer.Stop(); workspaceOperations?.Dispose();
+        preferenceTimer.Stop(); preferences.Changed -= PreferencesChanged; preferences.Dispose();
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectedChanged; KeyDown -= HandleShortcuts;
         DesignView.ViewChanged -= ViewChanged; PreviewView.ViewChanged -= ViewChanged;
         searchSession = null; prepared = null; PreviewView.Report = null; commands.Clear(); objectIndices.Clear();

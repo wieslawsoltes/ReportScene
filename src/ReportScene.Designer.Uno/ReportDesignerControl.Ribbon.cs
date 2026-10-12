@@ -44,7 +44,6 @@ public sealed partial class ReportDesignerControl
                 choice.IsEnabled = editable;
                 if (value is not null && !choice.Items.Contains(value))
                 {
-                    // Keep custom selected values visible without accumulating an unbounded font list.
                     if (choice.Items.Count > 32) choice.Items.RemoveAt(choice.Items.Count - 1);
                     choice.Items.Add(value);
                 }
@@ -103,7 +102,9 @@ public sealed partial class ReportDesignerControl
                 break;
             case "View":
                 var grid = new CheckBox { Content = "Show grid", IsChecked = DesignView.ShowGrid, FontSize = 11, MinHeight = 26 }; grid.Checked += (_, _) => DesignView.ShowGrid = true; grid.Unchecked += (_, _) => DesignView.ShowGrid = false;
-                var snap = new CheckBox { Content = "Snap to grid", IsChecked = Session.SnapToGrid, FontSize = 11, MinHeight = 26 }; snap.Checked += (_, _) => Session.SnapToGrid = true; snap.Unchecked += (_, _) => Session.SnapToGrid = false;
+                var snap = new CheckBox { Content = "Snap to grid", IsChecked = Session.SnapToGrid, FontSize = 11, MinHeight = 26 };
+                snap.Checked += (_, _) => { Session.SnapToGrid = true; NotifyState(); };
+                snap.Unchecked += (_, _) => { Session.SnapToGrid = false; NotifyState(); };
                 commands["show-grid"] = ControlTheme.Identify(grid, "show-grid", "Show grid"); commands["snap-grid"] = ControlTheme.Identify(snap, "snap-grid", "Snap to grid");
                 var rulers = new CheckBox { Content = "Rulers", IsChecked = DesignView.ShowRulers, FontSize = 11, MinHeight = 26 }; rulers.Checked += (_, _) => DesignView.ShowRulers = true; rulers.Unchecked += (_, _) => DesignView.ShowRulers = false;
                 commands["show-rulers"] = ControlTheme.Identify(rulers, "show-rulers", "Show rulers");
@@ -115,7 +116,8 @@ public sealed partial class ReportDesignerControl
                 commands["show-full-paper"] = ControlTheme.Identify(fullPage, "show-full-paper", "Show full paper height instead of compact bands");
                 Group("Grid", Vertical(grid, snap)); Group("Rulers", Vertical(rulers, fullPage), units); Group("Zoom", ZoomChoice(false), Command("fit-width", "Fit width", "zoom", DesignView.FitWidth, true));
                 Group("Panels", Vertical(Command("toggle-tree", "Data / Report Tree", "data", () => { showTree = !showTree; ApplyPaneLayout(); }), Command("toggle-properties", "Properties", "settings", () => { showProperties = !showProperties; ApplyPaneLayout(); })), Vertical(Command("toggle-sidebar", "Tool windows", "table", ToggleSidebar), Command("toggle-messages", "Messages", "report", ToggleMessages)), Command("reset-layout", "Reset layout", "report", ResetPaneLayout, true));
-                Group("Samples", SamplesChoice()); Group("Help", AsyncCommand("compatibility", "Compatibility", "report", ShowCurrentCompatibilityAsync, true));
+                Group("Samples", SamplesChoice());
+                Group("Settings", Vertical(AsyncCommand("designer-options", "Options…", "settings", DesignerOptionsAsync), AsyncCommand("compatibility", "Compatibility", "report", ShowCurrentCompatibilityAsync)));
                 break;
         }
         SyncRibbonSelection(); UpdateStatus(); UpdateTabSelection();

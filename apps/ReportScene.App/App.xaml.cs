@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using ReportScene.Designer;
 using ReportScene.Designer.Uno;
 using ReportScene.Rendering.Skia;
 using Windows.Storage;
@@ -27,14 +28,19 @@ public sealed partial class App : Application
             catch (Exception fontError) when (!OperatingSystem.IsBrowser()) { System.Diagnostics.Debug.WriteLine("Using system fonts: " + fontError.Message); }
 #if __WASM__
             var host = new BrowserWorkspaceHost();
+            var preferenceStore = new BrowserDesignerPreferenceStore();
 #else
             var host = new DesktopWorkspaceHost();
+            var preferenceStore = new FileDesignerPreferenceStore(Path.Combine(ApplicationData.Current.LocalFolder.Path, "reportscene-preferences.v1.json"));
 #endif
-            designer = new ReportDesignerControl(host);
+            designer = new ReportDesignerControl(host, null, preferenceStore);
             window.Content = designer;
             window.Closed += (_, _) => designer.Dispose();
 #if __WASM__
             host.Attach(designer);
+#endif
+            await designer.RestorePreferencesAsync();
+#if __WASM__
             if (!host.SelfTest) await designer.RestoreRecoveryAsync();
 #else
             await designer.RestoreRecoveryAsync();

@@ -12,8 +12,9 @@ public sealed partial class ReportDesignerControl
     private readonly TextBlock propertyHelpTitle = ControlTheme.Label("Properties", 11, true);
     private readonly TextBlock propertyHelp = new() { Text = "Select a property to see its description.", FontSize = 11, TextWrapping = TextWrapping.Wrap };
     private readonly TextBox propertyFilter = new() { PlaceholderText = "Filter properties…", FontSize = 11, MinHeight = 0, Height = 24, Padding = new(5, 1, 3, 1), CornerRadius = new(0), MaxLength = 256 };
-    private bool showTree = true, showProperties = true;
-    private double sidebarWidth = 280, treeHeight = 210;
+    private bool showTree = true, showProperties = true, adjustingPanes;
+    private double sidebarWidth = 280, treeHeight = 210, sidebarBeforeDrag = 280, treeBeforeDrag = 210;
+    private DesignerPaneLayout visiblePaneLayout;
     private DesignerUnit displayUnit = DesignerUnit.Points;
     private void BuildTitleBar()
     {
@@ -21,6 +22,7 @@ public sealed partial class ReportDesignerControl
         bar.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); bar.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) }); bar.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         var quick = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0 };
         quick.Children.Add(AsyncCommand("quick-save", "Save report", "save", SaveAsync, text: false)); quick.Children.Add(Command("quick-undo", "Undo", "undo", Session.Undo, text: false)); quick.Children.Add(Command("quick-redo", "Redo", "redo", Session.Redo, text: false));
+        quick.Children.Add(AsyncCommand("quick-options", "Designer options", "settings", DesignerOptionsAsync, text: false));
         foreach (var button in quick.Children.OfType<Button>()) { button.Height = 25; button.Padding = new(5, 1, 5, 1); }
         bar.Children.Add(quick); title.HorizontalAlignment = HorizontalAlignment.Center; title.TextTrimming = TextTrimming.CharacterEllipsis; Grid.SetColumn(title, 1); bar.Children.Add(title);
         var brand = ControlTheme.Label("ReportScene", 10); Grid.SetColumn(brand, 2); bar.Children.Add(brand); AddRoot(bar, 0);
@@ -35,7 +37,8 @@ public sealed partial class ReportDesignerControl
         menu.Items.Add(new MenuFlyoutSeparator());
         var samples = new MenuFlyoutSubItem { Text = "Open sample" };
         foreach (var name in AllSampleNames) { var item = new MenuFlyoutItem { Text = name }; item.Click += (_, _) => Run(() => LoadAnySampleAsync(name)); samples.Items.Add(item); }
-        menu.Items.Add(samples); menu.Items.Add(new MenuFlyoutSeparator()); Menu(menu, "Print report…", () => Run(PrintAsync)); Menu(menu, "Compatibility and diagnostics", () => Run(ShowCurrentCompatibilityAsync));
+        menu.Items.Add(samples); menu.Items.Add(new MenuFlyoutSeparator()); Menu(menu, "Print report…", () => Run(PrintAsync));
+        Menu(menu, "Designer options…", () => Run(DesignerOptionsAsync)); Menu(menu, "Compatibility and diagnostics", () => Run(ShowCurrentCompatibilityAsync));
         file.Flyout = menu; tabs.Children.Add(file);
         foreach (var name in new[] { "Home", "Report", "Layout", "View" }) tabs.Children.Add(Command("tab-" + name.ToLowerInvariant(), name, "", () => { activeRibbon = name; if (previewMode) SetPreview(false); BuildRibbon(); UpdateTabSelection(); }));
         tabs.Children.Add(Command("tab-preview", "Preview", "", PreparePreview));
@@ -68,7 +71,11 @@ public sealed partial class ReportDesignerControl
         center.Children.Add(DesignView); center.Children.Add(PreviewView);
         var tabs = new ScrollViewer { Content = pageTabs, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Background = ControlTheme.Brush("#E9E9E9") }; Grid.SetRow(tabs, 1); center.Children.Add(tabs);
         Grid.SetColumn(center, 1); workspace.Children.Add(center);
-        sideSplitter.Value = sidebarWidth; sideSplitter.ValueChanged += value => { sidebarWidth = value; ApplyPaneLayout(); }; sideSplitter.ResetRequested += ResetPaneLayout;
+        sideSplitter.Value = preferredSidebarWidth;
+        sideSplitter.ValueChanged += value => { if (adjustingPanes) return; preferredSidebarWidth = value; ApplyPaneLayout(); };
+        sideSplitter.InteractionStarted += () => { sidebarBeforeDrag = preferredSidebarWidth; preferenceTimer.Stop(); };
+        sideSplitter.InteractionCompleted += cancelled => { if (cancelled) preferredSidebarWidth = sidebarBeforeDrag; ApplyPaneLayout(); SchedulePreferenceSave(); };
+        sideSplitter.ResetRequested += ResetPaneLayout;
         commands["sidebar-splitter"] = ControlTheme.Identify(sideSplitter, "sidebar-splitter", "Resize tool windows; Left or Right changes width; double-click resets layout"); Grid.SetColumn(sideSplitter, 2); workspace.Children.Add(sideSplitter);
         rightPane.RowDefinitions.Add(new() { Height = new(treeHeight) }); rightPane.RowDefinitions.Add(new() { Height = new(4) }); rightPane.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         treePane.RowDefinitions.Add(new() { Height = new(22) }); treePane.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) }); treePane.RowDefinitions.Add(new() { Height = new(24) });
@@ -77,11 +84,15 @@ public sealed partial class ReportDesignerControl
         treeTabs.Children.Add(Command("tree-data", "Data", "data", () => { activeTree = "Data"; RebuildTree(); })); treeTabs.Children.Add(Command("tree-report", "Report Tree", "report", () => { activeTree = "Report"; RebuildTree(); }));
         foreach (var button in treeTabs.Children.OfType<Button>()) { button.Height = 24; button.Padding = new(7, 1, 7, 1); }
         Grid.SetRow(treeTabs, 2); treePane.Children.Add(treeTabs); rightPane.Children.Add(treePane);
-        treeSplitter.Value = treeHeight; treeSplitter.ValueChanged += value => { treeHeight = value; ApplyPaneLayout(); }; treeSplitter.ResetRequested += ResetPaneLayout;
+        treeSplitter.Value = preferredTreeHeight;
+        treeSplitter.ValueChanged += value => { if (adjustingPanes) return; preferredTreeHeight = value; ApplyPaneLayout(); };
+        treeSplitter.InteractionStarted += () => { treeBeforeDrag = preferredTreeHeight; preferenceTimer.Stop(); };
+        treeSplitter.InteractionCompleted += cancelled => { if (cancelled) preferredTreeHeight = treeBeforeDrag; ApplyPaneLayout(); SchedulePreferenceSave(); };
+        treeSplitter.ResetRequested += ResetPaneLayout;
         commands["tree-splitter"] = ControlTheme.Identify(treeSplitter, "tree-splitter", "Resize tree and property panes; Up or Down changes height; double-click resets layout"); Grid.SetRow(treeSplitter, 1); rightPane.Children.Add(treeSplitter);
         BuildPropertyPane(); Grid.SetRow(propertyPane, 2); rightPane.Children.Add(propertyPane);
         sidebar.Child = rightPane; sidebar.BorderThickness = new(1, 0, 0, 0); sidebar.BorderBrush = ControlTheme.Brush("#BFC0C2"); Grid.SetColumn(sidebar, 3); workspace.Children.Add(sidebar);
-        workspace.SizeChanged += (_, _) => ConstrainPanes(); ApplyPaneLayout();
+        workspace.SizeChanged += (_, _) => ConstrainPanes(); ApplyPaneLayout(); InitializePreferenceTracking();
         DesignView.RightTapped += (_, e) =>
         {
             var menu = new MenuFlyout(); Menu(menu, "Edit object…", () => { if (Session.Selection.FirstOrDefault() is { } item) Run(() => EditAnyObjectAsync(item)); });
@@ -111,22 +122,30 @@ public sealed partial class ReportDesignerControl
     }
     private void ApplyPaneLayout()
     {
-        bool any = showTree || showProperties;
-        sidebar.Visibility = any ? Visibility.Visible : Visibility.Collapsed; sideSplitter.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
-        workspace.ColumnDefinitions[2].Width = new(any ? 4 : 0); workspace.ColumnDefinitions[3].Width = new(any ? sidebarWidth : 0);
-        treePane.Visibility = showTree ? Visibility.Visible : Visibility.Collapsed; propertyPane.Visibility = showProperties ? Visibility.Visible : Visibility.Collapsed;
-        treeSplitter.Visibility = showTree && showProperties ? Visibility.Visible : Visibility.Collapsed;
-        rightPane.RowDefinitions[0].Height = !showTree ? new(0) : showProperties ? new(treeHeight) : new(1, GridUnitType.Star);
-        rightPane.RowDefinitions[1].Height = new(showTree && showProperties ? 4 : 0);
-        rightPane.RowDefinitions[2].Height = showProperties ? new(1, GridUnitType.Star) : new(0); NotifyState();
+        if (adjustingPanes) return;
+        adjustingPanes = true;
+        try
+        {
+            var preferred = new DesignerPreferences { SidebarWidth = preferredSidebarWidth, TreeHeight = preferredTreeHeight, ShowTree = showTree, ShowProperties = showProperties };
+            visiblePaneLayout = DesignerPaneLayout.Calculate(preferred, workspace.ActualWidth, workspace.ActualHeight);
+            var layout = visiblePaneLayout;
+            sidebarWidth = layout.SidebarWidth; treeHeight = layout.TreeHeight;
+            sideSplitter.Maximum = layout.MaximumSidebarWidth; sideSplitter.Value = Math.Min(preferredSidebarWidth, layout.MaximumSidebarWidth);
+            treeSplitter.Maximum = layout.MaximumTreeHeight; treeSplitter.Value = Math.Min(preferredTreeHeight, layout.MaximumTreeHeight);
+            sidebar.Visibility = layout.HasSidebar ? Visibility.Visible : Visibility.Collapsed; sideSplitter.Visibility = sidebar.Visibility;
+            workspace.ColumnDefinitions[2].Width = new(layout.HasSidebar ? 4 : 0); workspace.ColumnDefinitions[3].Width = new(sidebarWidth);
+            treePane.Visibility = layout.ShowTree ? Visibility.Visible : Visibility.Collapsed;
+            propertyPane.Visibility = layout.ShowProperties ? Visibility.Visible : Visibility.Collapsed;
+            treeSplitter.Visibility = layout.HasInnerDivider ? Visibility.Visible : Visibility.Collapsed;
+            rightPane.RowDefinitions[0].Height = !layout.ShowTree ? new(0) : layout.ShowProperties ? new(treeHeight) : new(1, GridUnitType.Star);
+            rightPane.RowDefinitions[1].Height = new(layout.HasInnerDivider ? 4 : 0);
+            rightPane.RowDefinitions[2].Height = layout.ShowProperties ? new(1, GridUnitType.Star) : new(0);
+        }
+        finally { adjustingPanes = false; }
+        NotifyState();
     }
-    private void ConstrainPanes()
-    {
-        if (workspace.ActualWidth <= 0 || workspace.ActualHeight <= 0) return;
-        sideSplitter.Maximum = Math.Max(sideSplitter.Minimum, Math.Min(640, workspace.ActualWidth - 280)); sideSplitter.Value = sidebarWidth;
-        treeSplitter.Maximum = Math.Max(treeSplitter.Minimum, workspace.ActualHeight - 200); treeSplitter.Value = treeHeight;
-    }
+    private void ConstrainPanes() => ApplyPaneLayout();
     private void ToggleSidebar() { bool show = !(showTree || showProperties); showTree = showProperties = show; ApplyPaneLayout(); }
     private void ResetPaneLayout()
-    { showTree = showProperties = true; sidebarWidth = 280; treeHeight = 210; sideSplitter.Value = sidebarWidth; treeSplitter.Value = treeHeight; ConstrainPanes(); ApplyPaneLayout(); }
+    { showTree = showProperties = true; preferredSidebarWidth = 280; preferredTreeHeight = 210; ApplyPaneLayout(); }
 }

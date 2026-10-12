@@ -70,4 +70,31 @@ batch.Select("a"); batch.SetSelectionLocked(false); batch.SelectAll(); var layou
 var point = layout.Objects[0].Bounds;
 Check(layout.HitSelectedHandle(batch.SelectedIds, point.X + point.Width, point.Y, 1)?.Handle == ResizeHandle.TopRight, "selection handle hit test packaged API");
 session.Load(session.Document); Check(session.DocumentId != epoch, "reload issues a distinct document identity");
+var options = new DesignerPreferences { SidebarWidth = 600, TreeHeight = 450, Unit = DesignerUnit.Inches };
+Check(options == DesignerPreferencesJson.Deserialize(DesignerPreferencesJson.Serialize(options)), "versioned preference wire format");
+Check(DesignerPreferencesJson.Deserialize("{\"version\":1}") == new DesignerPreferences(), "preference defaults retained by generated serialization");
+var reduced = DesignerPaneLayout.Calculate(options, 500, 500); var expanded = DesignerPaneLayout.Calculate(options, 1600, 1000);
+Check(reduced.SidebarWidth == 223 && expanded.SidebarWidth == 600 && options.SidebarWidth == 600, "viewport layout preserves desired dimensions");
+var preferenceStore = new PackagePreferenceStore(); using var settings = new DesignerPreferenceSession(preferenceStore);
+for (int n = 0; n < 32; n++) settings.Update(settings.Current with { SidebarWidth = 300 + n });
+await settings.FlushWhenReadyAsync(() => false); bool deferred = settings.HasPending && preferenceStore.Writes == 0;
+await settings.FlushAsync();
+Check(deferred && preferenceStore.Writes == 1 && DesignerPreferencesJson.Deserialize(preferenceStore.Json!).SidebarWidth == 331, "coalesced preference persistence and readiness");
+string untouchedReport = ReportJson.Serialize(session.Document); using var restored = new DesignerPreferenceSession(preferenceStore);
+Check(await restored.LoadAsync() && restored.Current.SidebarWidth == 331 && untouchedReport == ReportJson.Serialize(session.Document), "optional store load does not mutate report data");
+string directory = Path.Combine(Path.GetTempPath(), "ReportScene-package-preferences-" + Guid.NewGuid().ToString("N"));
+try
+{
+    var fileStore = new FileDesignerPreferenceStore(Path.Combine(directory, "settings.json"));
+    await fileStore.SaveAsync(DesignerPreferencesJson.Serialize(options));
+    Check(DesignerPreferencesJson.Deserialize((await fileStore.LoadAsync())!) == options, "native file preference store from isolated package");
+}
+finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
 Console.WriteLine($"{passed}/{passed} isolated package-consumer checks passed.");
+
+sealed class PackagePreferenceStore : IDesignerPreferenceStore
+{
+    public string? Json; public int Writes;
+    public Task<string?> LoadAsync(CancellationToken token = default) => Task.FromResult(Json);
+    public Task SaveAsync(string json, CancellationToken token = default) { token.ThrowIfCancellationRequested(); Json = json; Writes++; return Task.CompletedTask; }
+}

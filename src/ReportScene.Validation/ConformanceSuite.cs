@@ -13,9 +13,10 @@ public static class ConformanceSuite
         .Concat(PaginationPerformanceTests.Run()).Concat(PreparationCancellationTests.Run()).Concat(RecoveryReadinessTests.Run()).Concat(ExportVisibilityTests.Run())
         .Concat(ImplicitSubreportRowTests.Run()).Concat(RelationIndexTests.Run()).Concat(DesignerGeometryTests.Run()).Concat(DesignerBatchTests.Run())
         .Concat(DesignerOutlineTests.Run()).Concat(DesignerPageTests.Run()).Concat(AuthoringTextCacheTests.Run()).Concat(AuthoringIntegrationTests.Run())
-        .Concat(DesignerNavigationTests.Run()).ToList();
+        .Concat(DesignerNavigationTests.Run()).Concat(DesignerPreferenceTests.Run()).ToList();
     public static async Task<List<TestResult>> RunAsync()
     {
-        var results = Run(); results.AddRange(await DesignerOperationTests.RunAsync()); return results;
+        var results = Run(); results.AddRange(await DesignerOperationTests.RunAsync());
+        results.AddRange(await DesignerPreferenceStoreTests.RunAsync()); results.AddRange(await PreferenceStoreEdgeTests.RunAsync()); return results;
     }
 }
