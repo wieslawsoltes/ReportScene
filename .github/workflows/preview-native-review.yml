@@ -1,0 +1,51 @@
+name: Preview native review
+on:
+  push:
+    branches: [review/preview-native-regressions]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 72654deaf93da209fb1e9395dec893342ba9ad9d
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify the artifact belongs to the exact source revision
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runId = 38252795823;
+            const result = await github.rest.actions.getWorkflowRun({...context.repo, run_id: runId});
+            if (result.data.head_sha !== '72654deaf93da209fb1e9395dec893342ba9ad9d') throw new Error('Published source revision mismatch');
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({...context.repo, run_id: runId});
+            if (!artifacts.data.artifacts.some(a => a.name === 'browser-app' && !a.expired)) throw new Error('The exact browser application is not yet published');
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-app
+          run-id: 38252795823
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts/testsite/ReportScene
+      - name: Exercise the three original preview scenarios without retries
+        shell: bash
+        run: |
+          npm install --prefix tests/browser
+          cd tests/browser
+          npx playwright install --with-deps chromium
+          cd ../..
+          python3 -m http.server 8000 --directory artifacts/testsite > artifacts/http.log 2>&1 &
+          cd tests/browser
+          npx playwright test preview-navigation.spec.mjs --reporter=list
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preview-focused-evidence
+          path: |
+            tests/browser/test-results
+            artifacts/http.log
+          if-no-files-found: error
