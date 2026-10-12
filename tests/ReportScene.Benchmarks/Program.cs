@@ -62,6 +62,7 @@ records.Add(new { name = "search-api-rescan-vs-session", matchCount = search.Mat
     search.QueryScanCount });
 records.AddRange(RelationBenchmarks.Run());
 records.AddRange(DesignerBenchmarks.Run());
+records.AddRange(OutlineNavigationBenchmarks.Run());
 var evidence = new { schema = 1, framework = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
     processors = Environment.ProcessorCount, timestampUtc = DateTime.UtcNow, note = "Median of three in-process repetitions after one warmup; index build cost recorded separately. No hardware GPU, FPS or browser latency claim.", results = records };
 string json = JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true });

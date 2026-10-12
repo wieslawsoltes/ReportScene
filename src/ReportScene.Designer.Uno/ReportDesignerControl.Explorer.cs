@@ -10,11 +10,20 @@ public sealed partial class ReportDesignerControl
     private DesignerOutline reportOutline = new([]), dataOutline = new([]);
     private string[] pageNames = [];
     private readonly Dictionary<string, int> objectIndices = new(StringComparer.Ordinal);
-    private bool selectingObject;
+    private bool selectingObject, outlineNavigationBound;
+    private Guid outlineDocumentId;
+    private long outlineSnapshotBuilds;
     private readonly ReportComboBox objectSelector = new() { FontSize = 11, MinHeight = 0, Height = 24, Padding = new(5, 0, 0, 0), CornerRadius = new(0), HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Select an object" };
     private void RefreshStructure(bool force = false)
     {
-        var report = DesignerOutline.Report(Session.Document); var data = DesignerOutline.Data(Session.Document);
+        if (!outlineNavigationBound)
+        {
+            tree.NavigationRequested += entry => Run(() => InvokeOutline(entry));
+            outlineNavigationBound = true;
+        }
+        if (outlineDocumentId != Session.DocumentId)
+        { tree.ResetContexts(); outlineDocumentId = Session.DocumentId; }
+        var report = DesignerOutline.Report(Session.Document); var data = DesignerOutline.Data(Session.Document); outlineSnapshotBuilds++;
         bool reportChanged = !reportOutline.HasSameEntries(report);
         if (reportChanged) reportOutline = report;
         if (!dataOutline.HasSameEntries(data)) dataOutline = data;
@@ -55,7 +64,7 @@ public sealed partial class ReportDesignerControl
     }
     private void RebuildTree()
     {
-        tree.SetOutline(activeTree == "Data" ? dataOutline : reportOutline);
+        tree.SetOutline(activeTree == "Data" ? dataOutline : reportOutline, activeTree);
         UpdateTabSelection(); SyncObjectSelection();
     }
     private void SyncObjectSelection()

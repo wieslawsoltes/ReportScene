@@ -26,6 +26,13 @@ public static class PackageConsumers
     }
     public static ReportOutlineView CreateOutline(ReportDocument document)
     { var control = new ReportOutlineView(); control.SetOutline(DesignerOutline.Report(document)); control.SelectKey("page:0"); return control; }
+    public static ReportOutlineView CreateTabbedOutline(ReportDocument document, Action<DesignerOutlineEntry> navigate)
+    {
+        var control = new ReportOutlineView(); control.NavigationRequested += navigate;
+        control.SetOutline(DesignerOutline.Data(document), "Data"); control.FilterText = "Data";
+        control.SetOutline(DesignerOutline.Report(document), "Report"); control.SelectKey("page:0");
+        control.ResetContexts(); return control;
+    }
     public static PaneSplitter CreateSplitter(Action<double> resize)
     { var control = new PaneSplitter { Minimum = 180, Maximum = 640, Value = 280, Reverse = true }; control.ValueChanged += resize; return control; }
 }
