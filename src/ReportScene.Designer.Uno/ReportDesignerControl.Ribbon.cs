@@ -60,6 +60,8 @@ public sealed partial class ReportDesignerControl
             foreach (var (id, align) in new[] { ("text-left", TextAlign.Left), ("text-center", TextAlign.Center), ("text-right", TextAlign.Right) })
                 if (commands.TryGetValue(id, out var element) && element is Button button)
                 { button.IsEnabled = editable; button.Background = ControlTheme.Brush(first is not null && selected.All(i => i.Style.Alignment == align) ? "#CDE6F7" : "#00FFFFFF"); }
+            foreach (string id in new[] { "fill-color", "text-color", "border-color" })
+                if (commands.TryGetValue(id, out var element) && element is Control control) control.IsEnabled = editable;
         }
         finally { updatingRibbon = false; }
     }
@@ -81,7 +83,8 @@ public sealed partial class ReportDesignerControl
                 Group("Text", Vertical(Horizontal(font, size), Horizontal(FormatButton("bold", "Bold", "B"), FormatButton("italic", "Italic", "I"), FormatButton("underline", "Underline", "U"),
                     Command("text-left", "Align text left", "left", () => TextAlignment(TextAlign.Left), text: false), Command("text-center", "Center text", "center", () => TextAlignment(TextAlign.Center), text: false), Command("text-right", "Align text right", "right", () => TextAlignment(TextAlign.Right), text: false))));
                 Group("Paragraph", Vertical(Command("vertical-top", "Top", "left", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Top } })), Command("vertical-center", "Middle", "center", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Center } }))), Command("vertical-bottom", "Bottom", "right", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Bottom } })));
-                Group("Border & fill", Vertical(AsyncCommand("fill-color", "Fill color", "shape", () => ColorAsync(false)), AsyncCommand("text-color", "Text color", "text", () => ColorAsync(true))), Command("border", "Border", "rectangle", () => Session.UpdateSelection("Toggle border", i => i with { Style = i.Style with { BorderWidth = i.Style.BorderWidth > 0 ? 0 : 1 } }), true));
+                Group("Border & fill", Vertical(AsyncCommand("fill-color", "Fill color", "shape", () => NativeColorAsync(ColorPart.Fill)), AsyncCommand("text-color", "Text color", "text", () => NativeColorAsync(ColorPart.Text))),
+                    Vertical(Command("border", "Border", "rectangle", () => Session.UpdateSelection("Toggle border", i => i with { Style = i.Style with { BorderWidth = i.Style.BorderWidth > 0 ? 0 : 1 } })), AsyncCommand("border-color", "Border color", "rectangle", () => NativeColorAsync(ColorPart.Border))));
                 Group("Styles", Vertical(Command("style-heading", "Heading", "text", () => ApplyStyle(new() { FontSize = 16, Bold = true, Foreground = "#244F75" })), Command("style-body", "Body", "text", () => ApplyStyle(new() { FontSize = 10 }))));
                 Group("Report", Command("preview", "Preview", "preview", PreparePreview, true), AsyncCommand("save", "Save", "save", SaveAsync, true), AsyncCommand("matrix-edit", "Edit matrix", "table", EditSelectedMatrixAsync, true));
                 break;
