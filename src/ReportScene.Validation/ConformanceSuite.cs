@@ -14,7 +14,7 @@ public static class ConformanceSuite
         .Concat(ImplicitSubreportRowTests.Run()).Concat(RelationIndexTests.Run()).Concat(DesignerGeometryTests.Run()).Concat(DesignerBatchTests.Run())
         .Concat(DesignerOutlineTests.Run()).Concat(DesignerPageTests.Run()).Concat(AuthoringTextCacheTests.Run()).Concat(AuthoringIntegrationTests.Run())
         .Concat(DesignerNavigationTests.Run()).Concat(DesignerPreferenceTests.Run()).Concat(PreviewNavigationTests.Run()).Concat(PreviewViewportTests.Run())
-        .Concat(ReportPageSelectionTests.Run()).Concat(PreparedOutlineTests.Run()).Concat(DesignerViewportTests.Run()).Concat(DesignerColorTests.Run()).Concat(AuthoringGridTests.Run()).Concat(ReportPrintTests.Run()).Concat(ExportWorkTests.Run()).Concat(DataOnlyExportTests.Run()).ToList();
+        .Concat(ReportPageSelectionTests.Run()).Concat(PreparedOutlineTests.Run()).Concat(DesignerViewportTests.Run()).Concat(DesignerColorTests.Run()).Concat(AuthoringGridTests.Run()).Concat(AuthoringRecordingTests.Run()).Concat(ReportPrintTests.Run()).Concat(ExportWorkTests.Run()).Concat(DataOnlyExportTests.Run()).ToList();
     public static async Task<List<TestResult>> RunAsync()
     {
         var results = Run(); results.AddRange(await DesignerOperationTests.RunAsync());
