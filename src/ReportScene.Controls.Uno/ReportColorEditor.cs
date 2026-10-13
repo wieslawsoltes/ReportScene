@@ -97,10 +97,11 @@ public sealed class ReportColorEditor : UserControl
         details.Children.Add(channels); elements["color-value"] = ControlTheme.Identify(valueLabel, "color-value", "Current valid color"); details.Children.Add(valueLabel);
         elements["color-validation"] = ControlTheme.Identify(error, "color-validation", "Color input validation"); details.Children.Add(error);
         var reset = ControlTheme.Button("color-restore", "Restore original", "undo", () => UserValue(OriginalValue)); elements["color-restore"] = reset; details.Children.Add(reset);
-        hex.TextChanged += (_, _) => Edited(true);
-        foreach (var input in new[] { red, green, blue, alpha }) input.TextChanged += (_, _) => Edited(false);
-        foreach (var input in new[] { hex, red, green, blue, alpha }) input.KeyDown += (_, e) =>
-        { if (e.Key == VirtualKey.Escape) { SetValue(value); e.Handled = true; } };
+        foreach (var input in new[] { hex, red, green, blue, alpha })
+        {
+            input.TextChanged += (_, _) => Edited(input);
+            input.KeyDown += (_, e) => { if (e.Key == VirtualKey.Escape) { SetValue(value); e.Handled = true; } };
+        }
         picker.ColorChanged += (_, e) =>
         {
             var next = FromNative(e.NewColor);
@@ -150,9 +151,14 @@ public sealed class ReportColorEditor : UserControl
     }
     private void RememberText()
     { observedHex = hex.Text; observedRed = red.Text; observedGreen = green.Text; observedBlue = blue.Text; observedAlpha = alpha.Text; }
-    private void Edited(bool fromHex)
+    private void Edited(TextBox input)
     {
-        if (synchronizing != 0 || (hex.Text == observedHex && red.Text == observedRed && green.Text == observedGreen && blue.Text == observedBlue && alpha.Text == observedAlpha)) return;
+        // Check the event source, not the combined fields: a delayed hex event
+        // must not interpret another field's newer draft as a fresh hex edit.
+        string previous = ReferenceEquals(input, hex) ? observedHex : ReferenceEquals(input, red) ? observedRed
+            : ReferenceEquals(input, green) ? observedGreen : ReferenceEquals(input, blue) ? observedBlue : observedAlpha;
+        if (synchronizing != 0 || input.Text == previous) return;
+        bool fromHex = ReferenceEquals(input, hex);
         HasUserChanges = true; RememberText();
         // Preserve the active draft and caret. Normalizing six typed digits would
         // otherwise insert '#' mid-entry and prevent typing an eight-digit ARGB value.
