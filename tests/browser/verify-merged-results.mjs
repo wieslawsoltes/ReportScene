@@ -4,9 +4,10 @@ const tests = [];
 function visit(suite) { for (const spec of suite.specs || []) tests.push(...spec.tests.map(test => ({ ...test, title: spec.title }))); for (const child of suite.suites || []) visit(child); }
 for (const suite of report.suites || []) visit(suite);
 const bad = tests.filter(t => t.expectedStatus !== 'passed' || t.results.length !== 1 || t.results[0].status !== 'passed');
-if (tests.length < 65 || bad.length || report.errors?.length || report.stats.unexpected || report.stats.flaky || report.stats.skipped)
+if (tests.length < 67 || bad.length || report.errors?.length || report.stats.unexpected || report.stats.flaky || report.stats.skipped)
   throw new Error(`Merged browser validation failed: ${tests.length} tests, ${bad.length} rejected, stats=${JSON.stringify(report.stats)}`);
 for (const required of [
+  'authoring zoom selector follows fitting', 'preview zoom selector keeps fitted fractions',
   'discarding invalid color drafts preserves mixed selections',
   'native print dialog invalid and cancelled ranges', 'native print ranges and reverse order', 'native print popup refusal',
   'native color editor retains invalid', 'native color palette keyboard selection',
