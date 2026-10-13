@@ -17,8 +17,16 @@ public sealed partial class ReportExporter
         options ??= new(); ValidateOptions(options); cancellationToken.ThrowIfCancellationRequested();
         if (options.FirstPage != 1 || options.LastPage != int.MaxValue)
             throw new ArgumentException("Do not combine ordinal selection with physical FirstPage/LastPage filters.", nameof(options));
-        if (format == ExportFormat.Csv && selection.Mode != PageSelectionMode.All)
-            throw new ArgumentException("CSV exports bound tables, not selected report pages.", nameof(selection));
+        if (format == ExportFormat.Csv)
+        {
+            if (selection.Mode != PageSelectionMode.All)
+                throw new ArgumentException("CSV exports bound tables, not selected report pages.", nameof(selection));
+            if (selection.SourcePageCount != report.Pages.Count)
+                throw new ArgumentException("The prepared page count changed; select pages again.", nameof(selection));
+            // The selection's count contract still applies, but a data-only export
+            // must not copy or enumerate the unrelated prepared drawing pages.
+            return ExportPages(report, format, options, document, report.Pages, cancellationToken);
+        }
         var selected = selection.Apply(report, cancellationToken);
         return ExportPages(selected, format, options, document, selected.Pages, cancellationToken);
     }

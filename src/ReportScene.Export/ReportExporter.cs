@@ -25,8 +25,16 @@ public sealed partial class ReportExporter : IReportExporter
     public IReadOnlyList<ExportFormat> Formats { get; } = Enum.GetValues<ExportFormat>();
     public ExportFile Export(PreparedReport report, ExportFormat format, ExportOptions? options = null, ReportDocument? document = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(report); options ??= new(); ValidateOptions(options);
-        var pages = report.Pages.Where(p => p.Number >= options.FirstPage && p.Number <= options.LastPage).ToArray();
+        ArgumentNullException.ThrowIfNull(report); options ??= new(); ValidateOptions(options); cancellationToken.ThrowIfCancellationRequested();
+        // CSV has always exported whole bound tables, regardless of the physical
+        // page filter. Do not scan a potentially large drawing list to discard it.
+        if (format == ExportFormat.Csv) return ExportPages(report, format, options, document, report.Pages, cancellationToken);
+        var pages = new List<PreparedPage>();
+        foreach (var page in report.Pages)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (page.Number >= options.FirstPage && page.Number <= options.LastPage) pages.Add(page);
+        }
         return ExportPages(report, format, options, document, pages, cancellationToken);
     }
     private static ExportFile ExportPages(PreparedReport report, ExportFormat format, ExportOptions options,
@@ -35,11 +43,27 @@ public sealed partial class ReportExporter : IReportExporter
         if (pages.Count == 0 && format != ExportFormat.Csv) throw new ArgumentException("The selected page range is empty.");
         if (report.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error)) throw new InvalidOperationException("Reports containing errors cannot be exported.");
         cancellationToken.ThrowIfCancellationRequested();
-        if (format != ExportFormat.Csv) foreach (var page in pages) ValidatePage(page);
+        if (format != ExportFormat.Csv) foreach (var page in pages) { cancellationToken.ThrowIfCancellationRequested(); ValidatePage(page); }
         var safeName = string.Concat(report.Name.Select(c => char.IsLetterOrDigit(c) || c is ' ' or '-' or '_' ? c : '_')).Trim();
         if (safeName.Length == 0) safeName = "Report";
-        using var renderer = new ReportRenderer();
         ExportFile TextFile(string extension, string mediaType, string text) => new(safeName + extension, mediaType, Encoding.UTF8.GetBytes(text));
+        // None of these formats needs a drawing context or font-measurement cache.
+        // Return before creating one, retaining the existing output bytes/metadata.
+        if (format == ExportFormat.Text)
+            return TextFile(".txt", "text/plain", string.Join("\n\f\n", pages.Select(p => string.Join('\n', VisibleItems(p, cancellationToken).Where(v => v.Item.Source is TextItem).OrderBy(v => v.Item.Bounds.Y).ThenBy(v => v.Item.Bounds.X).Select(v => v.Item.Text)))));
+        if (format == ExportFormat.PreparedJson)
+            return TextFile(".prepared.json", "application/json", JsonSerializer.Serialize(report with { Pages = pages }, ReportJsonContext.Default.PreparedReport));
+        if (format == ExportFormat.Csv)
+        {
+            if (document is null || document.Data.Count == 0) throw new ArgumentException("CSV export requires bound data tables. It exports data, not page geometry.");
+            if (document.Data.Count == 1) return new(safeName + ".csv", "text/csv", Encoding.UTF8.GetBytes(DataReaders.WriteCsv(document.Data[0])));
+            return Zip(safeName + "-data.zip", document.Data.Select((table, index) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return new ExportFile($"{index + 1:D3}-{SafeFileName(table.Name)}.csv", "text/csv", Encoding.UTF8.GetBytes(DataReaders.WriteCsv(table)));
+            }));
+        }
+        using var renderer = new ReportRenderer();
         switch (format)
         {
             case ExportFormat.Pdf:
@@ -68,24 +92,21 @@ public sealed partial class ReportExporter : IReportExporter
                     html.Append("</section>");
                 }
                 html.Append("</main></body></html>"); return TextFile(".html", "text/html", html.ToString());
-            case ExportFormat.Text:
-                return TextFile(".txt", "text/plain", string.Join("\n\f\n", pages.Select(p => string.Join('\n', VisibleItems(p, cancellationToken).Where(v => v.Item.Source is TextItem).OrderBy(v => v.Item.Bounds.Y).ThenBy(v => v.Item.Bounds.X).Select(v => v.Item.Text)))));
-            case ExportFormat.PreparedJson:
-                return TextFile(".prepared.json", "application/json", JsonSerializer.Serialize(report with { Pages = pages }, ReportJsonContext.Default.PreparedReport));
-            case ExportFormat.Csv:
-                if (document is null || document.Data.Count == 0) throw new ArgumentException("CSV export requires bound data tables. It exports data, not page geometry.");
-                if (document.Data.Count == 1) return new(safeName + ".csv", "text/csv", Encoding.UTF8.GetBytes(DataReaders.WriteCsv(document.Data[0])));
-                return Zip(safeName + "-data.zip", document.Data.Select((table, index) => new ExportFile($"{index + 1:D3}-{SafeFileName(table.Name)}.csv", "text/csv", Encoding.UTF8.GetBytes(DataReaders.WriteCsv(table)))));
             default: throw new ArgumentOutOfRangeException(nameof(format));
         }
         ExportFile PagesOrZip(string extension, string mediaType, Func<PreparedPage, byte[]> export)
         {
             if (pages.Count == 1) return new(safeName + "." + extension, mediaType, export(pages[0]));
-            var duplicateNumbers = pages.GroupBy(p => p.Number).Where(g => g.Skip(1).Any()).Select(g => g.Key).ToHashSet();
+            var seen = new HashSet<int>(); HashSet<int>? duplicates = null;
+            foreach (var page in pages)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!seen.Add(page.Number)) (duplicates ??= new()).Add(page.Number);
+            }
             return Zip(safeName + "-" + extension + ".zip", pages.Select((p, ordinal) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                string suffix = duplicateNumbers.Contains(p.Number) ? $"-position-{ordinal + 1:D4}" : "";
+                string suffix = duplicates?.Contains(p.Number) == true ? $"-position-{ordinal + 1:D4}" : "";
                 return new ExportFile($"page-{p.Number:D4}{suffix}.{extension}", mediaType, export(p));
             }));
         }
