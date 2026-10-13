@@ -123,13 +123,21 @@ public sealed partial class ReportDesignerControl
         }
         SyncRibbonSelection(); UpdateStatus(); UpdateTabSelection();
     }
+    private ReportZoomSelector? designZoomChoice, previewZoomChoice;
     private UIElement ZoomChoice(bool preview)
     {
-        var choice = new ReportComboBox { Width = 88, MinHeight = 0, Height = 25, Padding = new(5, 0, 0, 0), FontSize = 11, CornerRadius = new(0) };
-        foreach (var n in new[] { 25, 50, 75, 85, 100, 125, 150, 200, 300, 400 }) choice.Items.Add(n + "%");
-        choice.SelectedItem = Math.Round((preview ? PreviewView.Zoom : DesignView.Zoom) * 100).ToString(CultureInfo.InvariantCulture) + "%";
-        choice.SelectionChanged += (_, _) => { if (choice.SelectedItem is string text && double.TryParse(text.TrimEnd('%'), NumberStyles.Float, CultureInfo.InvariantCulture, out var n)) { if (preview) PreviewView.Zoom = n / 100; else DesignView.Zoom = n / 100; UpdateStatus(); } };
-        commands[preview ? "preview-zoom" : "design-zoom"] = ControlTheme.Identify(choice, preview ? "preview-zoom" : "design-zoom", "Zoom"); return choice;
+        var selector = new ReportZoomSelector();
+        selector.SetZoom(preview ? PreviewView.Zoom : DesignView.Zoom);
+        if (preview) previewZoomChoice = selector; else designZoomChoice = selector;
+        selector.ZoomRequested += value =>
+        {
+            if (disposed || previewMode != preview || !ReferenceEquals(preview ? previewZoomChoice : designZoomChoice, selector)) return;
+            if (preview) PreviewView.Zoom = value; else DesignView.Zoom = value;
+            UpdateStatus();
+        };
+        string id = preview ? "preview-zoom" : "design-zoom";
+        commands[id] = ControlTheme.Identify(selector.Editor, id, "Zoom");
+        return selector;
     }
     private UIElement SamplesChoice()
     {
