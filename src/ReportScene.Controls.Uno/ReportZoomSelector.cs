@@ -34,7 +34,9 @@ public sealed class ReportZoomSelector : UserControl
     {
         if (!double.IsFinite(value) || value <= 0 || value > 4) throw new ArgumentOutOfRangeException(nameof(value));
         int index = Array.IndexOf(Presets, value);
-        if (value == zoom && Editor.SelectedIndex == (index < 0 ? Presets.Length : index)) return;
+        int expectedIndex = index < 0 ? Presets.Length : index;
+        if (value == zoom && Editor.SelectedIndex == expectedIndex
+            && Equals(Editor.SelectedItem, Label(value))) return;
         synchronizing = true;
         try
         {
@@ -43,7 +45,15 @@ public sealed class ReportZoomSelector : UserControl
             {
                 string label = Label(value);
                 if (Editor.Items.Count == Presets.Length) Editor.Items.Add(label);
-                else if (!Equals(Editor.Items[Presets.Length], label)) Editor.Items[Presets.Length] = label;
+                else if (!Equals(Editor.Items[Presets.Length], label))
+                {
+                    // The native selector can retain SelectedItem when a selected
+                    // Items slot is replaced at the same SelectedIndex. Deselect
+                    // before replacement so both the item and its painted text
+                    // are rebound. The synchronization guard suppresses feedback.
+                    Editor.SelectedIndex = -1;
+                    Editor.Items[Presets.Length] = label;
+                }
                 Editor.SelectedIndex = Presets.Length;
             }
             else

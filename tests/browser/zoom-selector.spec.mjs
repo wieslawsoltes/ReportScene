@@ -5,7 +5,7 @@ import { loadDesignerFixture } from './designer-fixture.mjs';
 async function matches(page, id) {
   await expect.poll(async () => {
     const s = await state(page), text = s.Inputs[id + '-value'];
-    return typeof text === 'string' && /%$/.test(text) && Math.abs(parseFloat(text) - s.Zoom * 100) <= .0051;
+    return Number(s.Inputs[id]) >= 0 && typeof text === 'string' && /%$/.test(text) && Math.abs(parseFloat(text) - s.Zoom * 100) <= .0051;
   }, { message: 'The native zoom selector displays the actual scale without changing it' }).toBe(true);
 }
 
@@ -17,6 +17,7 @@ test('authoring zoom selector follows fitting and status commands without roundi
   expect((await state(page)).Inputs['design-zoom-value']).toBe('95%');
   await click(page, 'fit-width'); await matches(page, 'design-zoom');
   const fitted = (await state(page)).Zoom;
+  expect((await state(page)).Inputs['design-zoom-value']).not.toBe('95%');
   expect([.25, .5, .75, .85, 1, 1.25, 1.5, 2, 3, 4]).not.toContain(fitted);
   await choose(page, 'design-zoom', 10); expect((await state(page)).Zoom).toBe(fitted);
   for (let n = 0; n < 4; n++) { await click(page, 'status-zoom-out'); await matches(page, 'design-zoom'); }
@@ -37,6 +38,7 @@ test('preview zoom selector keeps fitted fractions and independent authoring zoo
   for (const [width, height] of [[1600, 1000], [1280, 800]]) {
     await page.setViewportSize({ width, height }); await fresh(page); await click(page, 'preview-fit-page');
     await matches(page, 'preview-zoom'); const scale = (await state(page)).Zoom;
+    expect((await state(page)).Inputs['preview-zoom-value']).not.toBe('80%');
     await choose(page, 'preview-zoom', 10); expect((await state(page)).Zoom).toBe(scale);
   }
   await click(page, 'status-zoom-in'); await matches(page, 'preview-zoom');
