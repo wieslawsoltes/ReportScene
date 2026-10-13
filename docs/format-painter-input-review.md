@@ -36,6 +36,28 @@ outward adjustment would then produce infinity. Exact double-range checks
 reject it before canvas mutation, with positive and negative regressions.
 Normal report viewport geometry and raster requirements are unchanged.
 
+## Host callback ownership
+
+The reusable tool previously treated any change observed while Apply was on the
+stack as its own repeat-mode edit. A host observer can make a different edit or
+reload the document during that notification. The tool could then adopt the
+new revision and remain armed, contrary to its external-edit invalidation rule.
+An internal commit callback now supplies the exact formatting revision before
+public notifications. Other content changes cancel the capture regardless of
+observer subscription order. The callback is not retained in undo history.
+
+Capture generations keep a newly requested capture from being consumed by an
+older operation. Recursive Apply is rejected before mutation. Validation errors
+before mutation keep the original capture; an observer failure after commit
+cancels the tool while retaining the completed edit's normal undo entry. Host
+exceptions are propagated, not presented as rolled-back report changes.
+
+Twelve additional shared native/WebAssembly regressions exercise both callback
+orders, reentrant external edits and reload, equal-style selection callbacks and drag startup,
+save acknowledgments, replacement captures, cancellation, disposal, recursive
+Apply rejection and post-commit observer exceptions. The original seventeen
+formatting cases and all eight recording cases remain registered.
+
 All 70 browser scenarios across eight shards, zero retries/skips/flaky results,
 core conformance, differential benchmarks, isolated package consumers, desktop
 and actual Uno WebAssembly gates remain mandatory. Local JavaScript syntax and

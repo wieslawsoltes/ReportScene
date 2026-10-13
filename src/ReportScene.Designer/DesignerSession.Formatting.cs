@@ -13,6 +13,10 @@ public sealed partial class DesignerSession
     /// Lookup and replacement are linear scans, not one full scan per selected object.
     /// </summary>
     public DesignerFormattingResult ApplyFormatting(ItemStyle style, IReadOnlyCollection<string> objectIds)
+        => ApplyFormattingCore(style, objectIds, null);
+
+    internal DesignerFormattingResult ApplyFormattingCore(ItemStyle style, IReadOnlyCollection<string> objectIds,
+        Action<DesignerRevision>? committed)
     {
         ArgumentNullException.ThrowIfNull(style); ArgumentNullException.ThrowIfNull(objectIds);
         if (HasActiveDrag) throw new InvalidOperationException("Complete or cancel the active drag before applying formatting.");
@@ -39,7 +43,7 @@ public sealed partial class DesignerSession
         if (before.Count == 0) { SelectMany(requested); return new(editable, 0); }
         var original = before.ToArray(); var changed = original.Select(item => item with { Style = style }).ToArray();
         // Own the target list: later changes to a caller's collection cannot alter redo selection.
-        Execute("Format painter", () => ReplaceItems(changed), () => ReplaceItems(original), requested.ToArray());
+        Execute("Format painter", () => ReplaceItems(changed), () => ReplaceItems(original), requested.ToArray(), committed);
         return new(editable, changed.Length);
     }
     internal static void ValidateFormatting(ItemStyle style)

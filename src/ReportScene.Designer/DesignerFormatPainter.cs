@@ -13,6 +13,7 @@ public sealed class DesignerFormatPainter : IDisposable
     private DesignerRevision? revision;
     private ItemStyle? style;
     private bool repeating, applying, disposed;
+    private long generation, applyingGeneration;
     public bool IsActive => !disposed && revision is not null && session.IsCurrent(revision);
     public bool IsRepeating => IsActive && repeating;
     public string SourceName { get; private set; } = "";
@@ -30,24 +31,31 @@ public sealed class DesignerFormatPainter : IDisposable
         if (source.Length != 1) return false;
         DesignerSession.ValidateFormatting(source[0].Style);
         // ItemStyle is an immutable sealed record; no document serialization or data copy.
-        style = source[0].Style; SourceName = source[0].Name; revision = session.CaptureRevision(); repeating = repeat;
+        style = source[0].Style; SourceName = source[0].Name; revision = session.CaptureRevision(); repeating = repeat; generation++;
         StateChanged?.Invoke(); return true;
     }
     public DesignerFormattingResult Apply(IReadOnlyCollection<string> objectIds)
     {
         ObjectDisposedException.ThrowIf(disposed, this); ArgumentNullException.ThrowIfNull(objectIds);
+        if (applying) throw new InvalidOperationException("A formatting operation is already notifying its observers.");
         if (!IsActive) { Cancel(); return default; }
-        applying = true;
+        var originalRevision = revision!;
+        applying = true; applyingGeneration = generation;
         try
         {
-            var result = session.ApplyFormatting(style!, objectIds);
+            var result = session.ApplyFormattingCore(style!, objectIds, FormattingCommitted);
             // Equal formatting consumes the one-shot tool without inventing an edit.
             // Missing/locked targets cannot silently consume a captured tool.
-            if (result.EditableObjects > 0 && revision is not null)
-            {
-                if (repeating) revision = session.CaptureRevision(); else Cancel();
-            }
+            if (revision is not null && generation == applyingGeneration
+                && (!session.IsCurrent(revision) || result.EditableObjects > 0 && !repeating)) Cancel();
             return result;
+        }
+        catch
+        {
+            // Validation errors before mutation retain the capture. A throwing
+            // observer after a commit must not leave an ambiguous active tool.
+            if (generation == applyingGeneration && !session.IsCurrent(originalRevision)) Cancel();
+            throw;
         }
         finally { applying = false; }
     }
@@ -55,13 +63,16 @@ public sealed class DesignerFormatPainter : IDisposable
     public void Cancel()
     {
         if (revision is null) return;
-        revision = null; style = null; repeating = false; SourceName = ""; StateChanged?.Invoke();
+        revision = null; style = null; repeating = false; SourceName = ""; generation++; StateChanged?.Invoke();
+    }
+    private void FormattingCommitted(DesignerRevision committed)
+    {
+        if (!disposed && applying && revision is not null && generation == applyingGeneration)
+            revision = committed;
     }
     private void SessionChanged(object? sender, EventArgs e)
     {
-        if (revision is null || session.IsCurrent(revision)) return;
-        if (applying && repeating && !session.HasActiveDrag) revision = session.CaptureRevision();
-        else Cancel();
+        if (revision is not null && !session.IsCurrent(revision)) Cancel();
     }
     public void Dispose()
     {
