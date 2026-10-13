@@ -53,8 +53,15 @@ test('native format painter copies appearance with one click and exact undo with
 test('native format painter repeat mode skips locked targets and Escape cancels without another edit', async ({ page }, info) => {
   await ready(page); await load(page); await selectObject(page, 'b'); await click(page, 'tab-layout'); await click(page, 'lock-objects');
   await click(page, 'tab-home'); await selectObject(page, 'a'); const original = await save(page), before = await state(page);
-  const r = await bounds(page, 'format-painter'); await page.mouse.dblclick(r.X + r.Width / 2, r.Y + r.Height / 2); await fresh(page);
-  await active(page, true); await expect.poll(async () => (await state(page)).Status).toContain('multiple objects');
+  async function repeat() {
+    const r = await bounds(page, 'format-painter'); await page.mouse.dblclick(r.X + r.Width / 2, r.Y + r.Height / 2); await fresh(page);
+    await active(page, true); await expect.poll(async () => (await state(page)).Status).toContain('multiple objects');
+  }
+  await repeat();
+  // The next ordinary click cancels; the double-tap release must not consume it.
+  await click(page, 'format-painter'); await active(page, false);
+  expect((await state(page)).HistoryCount).toBe(before.HistoryCount);
+  await repeat();
   await rawObjectClick(page, 'b'); await active(page, true); expect(await save(page)).toEqual(original);
   expect((await state(page)).HistoryCount).toBe(before.HistoryCount); expect((await state(page)).Objects.find(o => o.Id === 'a').Selected).toBe(true);
   await selectObject(page, 'c'); await active(page, true);
@@ -73,6 +80,9 @@ test('native format painter cancels stale captures and rejects ambiguous mixed-s
   await ready(page); await load(page); await selectObject(page, 'a'); await selectObject(page, 'b', true);
   await expect.poll(async () => (await state(page)).Inputs['format-painter-enabled']).toBe('False');
   await selectObject(page, 'a'); await click(page, 'format-painter'); await active(page, true);
+  // Keyboard activation still follows the native ToggleButton path.
+  await page.keyboard.press('Space'); await fresh(page); await active(page, false);
+  await page.keyboard.press('Space'); await fresh(page); await active(page, true);
   await page.keyboard.press('Escape'); await fresh(page); await active(page, false);
   expect((await state(page)).HistoryCount).toBe(0); expect((await state(page)).Objects.find(o => o.Id === 'a').Selected).toBe(true);
   await click(page, 'format-painter'); await active(page, true); await click(page, 'bold'); await active(page, false);

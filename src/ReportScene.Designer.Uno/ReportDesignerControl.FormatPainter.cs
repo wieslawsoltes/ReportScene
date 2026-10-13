@@ -12,7 +12,7 @@ public sealed partial class ReportDesignerControl
         var label = new TextBlock { Text = "Format\nPainter", FontSize = 11, TextAlignment = Microsoft.UI.Xaml.TextAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Center };
         var icon = new ReportIcon { Icon = "format-painter", Width = 23, Height = 23, HorizontalAlignment = HorizontalAlignment.Center };
-        var button = new ToggleButton { Content = Vertical(icon, label), Width = 69, Height = 61, MinWidth = 0, MinHeight = 0,
+        var button = new ReportRepeatToggleButton { Content = Vertical(icon, label), Width = 69, Height = 61, MinWidth = 0, MinHeight = 0,
             Padding = new(3, 2, 3, 2), BorderThickness = new(0), CornerRadius = new(0) };
         commands["format-painter"] = ControlTheme.Identify(button, "format-painter", "Format Painter");
         ToolTipService.SetToolTip(button, "Copy appearance from one selected object. Click an object to apply; double-click this tool to paint multiple objects. Escape cancels.");
@@ -22,7 +22,7 @@ public sealed partial class ReportDesignerControl
             else DesignView.FormatPainter.Begin();
             SyncFormatPainterButton();
         });
-        button.DoubleTapped += (_, e) => { Run(() => DesignView.FormatPainter.Begin(repeat: true)); e.Handled = true; };
+        button.RepeatRequested += () => Run(() => { DesignView.FormatPainter.Begin(repeat: true); SyncFormatPainterButton(); });
         return button;
     }
     private void SyncFormatPainterButton(bool? singleSelection = null)
