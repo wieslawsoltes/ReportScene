@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { ready, state, fresh, bounds, click, choose, save, artifact, screenshot } from './uno-driver.mjs';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 
 function fixture() {
   const text = (id, x, y, width, height, style) => ({ $type: 'text', id, name: id, text: '', bounds: { x, y, width, height }, style });
@@ -30,14 +31,10 @@ async function expectColor(page, info, file, sample, expected) {
     const s = await state(page), point = sample(s);
     if (!point) return false;
     const bytes = await screenshot(page, info.outputPath(file));
-    return page.evaluate(async ({ base64, point, expected }) => {
-      const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-      if (point.x < 0 || point.y < 0 || point.x >= image.width || point.y >= image.height) return false;
-      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-      const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-      const actual = Array.from(context.getImageData(Math.floor(point.x), Math.floor(point.y), 1, 1).data);
-      return expected.every((value, i) => Math.abs(actual[i] - value) <= 8);
-    }, { base64: bytes.toString('base64'), point, expected });
+    const pixels = screenshotPixels(bytes);
+    if (point.x < 0 || point.y < 0 || point.x >= pixels.width || point.y >= pixels.height) return false;
+    const actual = pixels.pixel(point.x, point.y);
+    return expected.every((value, i) => Math.abs(actual[i] - value) <= 8);
   }, { message: `Native authoring pixels match ${file}, not only object metadata` }).toBe(true);
 }
 

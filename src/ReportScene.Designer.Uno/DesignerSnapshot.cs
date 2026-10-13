@@ -42,8 +42,8 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public long OutlineCreatedNodes { get; init; }
     public long OutlineUpdates { get; init; }
     public long OutlineSnapshotBuilds { get; init; }
-    public int OutlineContextCount { get; init; }
     public string OutlineContextKey { get; init; } = "";
+    public int OutlineContextCount { get; init; }
     public int OutlineProjectedCount { get; init; }
     public int OutlineVisibleRows { get; init; }
     public string OutlineFilter { get; init; } = "";
@@ -92,15 +92,16 @@ public sealed partial class ReportDesignerControl
     /// <summary>Read-only diagnostic data. Test drivers deliver real input, never invoke application commands.</summary>
     public DesignerSnapshot Snapshot()
     {
-        bool Visible(FrameworkElement element)
+        bool InVisibleTree(FrameworkElement element)
         {
-            if (!element.IsLoaded || element.ActualWidth <= 0 || element.ActualHeight <= 0) return false;
-            for (DependencyObject? p = element; p is not null; p = VisualTreeHelper.GetParent(p)) if (p is UIElement ui && ui.Visibility != Visibility.Visible) return false;
+            if (!element.IsLoaded) return false;
+            for (DependencyObject? p = element; p is not null; p = VisualTreeHelper.GetParent(p))
+                if (p is UIElement ui && ui.Visibility != Visibility.Visible) return false;
             return true;
         }
         ElementBounds? Bounds(FrameworkElement element)
         {
-            if (!Visible(element)) return null;
+            if (!InVisibleTree(element) || element.ActualWidth <= 0 || element.ActualHeight <= 0) return null;
             try { var p = element.TransformToVisual(null).TransformPoint(new(0, 0)); return new(p.X, p.Y, element.ActualWidth, element.ActualHeight); }
             catch (InvalidOperationException) { return null; }
         }
@@ -153,8 +154,12 @@ public sealed partial class ReportDesignerControl
         }
         foreach (var pair in commands.Concat(tree.Elements()).Concat(PreviewView.OutlineElements()))
         {
-            if (Bounds(pair.Value) is not { } bounds) continue;
-            commandBounds[pair.Key] = bounds; Input(pair.Key, pair.Value);
+            if (Bounds(pair.Value) is { } bounds)
+            { commandBounds[pair.Key] = bounds; Input(pair.Key, pair.Value); }
+            // An empty validation TextBlock may legitimately measure zero width.
+            // Its native Text still exists; report it without inventing a clickable
+            // rectangle. Unloaded or collapsed controls remain excluded.
+            else if (pair.Value is TextBlock label && InVisibleTree(label)) Input(pair.Key, label);
         }
         if (Bounds(DesignView.CanvasElement) is { } designPaper) commandBounds["design-paper"] = designPaper;
         if (Bounds(DesignView.ViewportElement) is { } designViewport) commandBounds["design-viewport"] = designViewport;

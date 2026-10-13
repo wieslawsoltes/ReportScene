@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { ready, state, fresh, bounds, click, fill, choose, save, artifact, screenshot } from './uno-driver.mjs';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 
 function evidence(snapshot) {
   return { page: snapshot?.PreviewPage, zoom: snapshot?.Zoom, renderCount: snapshot?.RenderCount,
@@ -51,12 +52,8 @@ async function focusPaper(page) {
 }
 async function samplePixels(page, path, points) {
   const image = await screenshot(page, path);
-  return page.evaluate(async ({ base64, points }) => {
-    const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-    return points.map(([x, y]) => Array.from(context.getImageData(Math.floor(x), Math.floor(y), 1, 1).data));
-  }, { base64: image.toString('base64'), points });
+  const pixels = screenshotPixels(image);
+  return points.map(([x, y]) => pixels.pixel(x, y));
 }
 
 test('preview first last and strict page entry synchronize native controls without stale navigation or edits', async ({ page }, info) => {
