@@ -25,6 +25,12 @@ the recording clip/loaded invalidation coexist in ReportDesignView. Both
 original parents are preserved in Git history; older source is not copied over
 new rendering fixes.
 
+The combined review also fixes the clip helper's extreme-range guard: a
+binary64 edge just beyond float.MaxValue can cast to a finite float, but an
+outward adjustment would then produce infinity. Exact double-range checks
+reject it before canvas mutation, with positive and negative regressions.
+Normal report viewport geometry and raster requirements are unchanged.
+
 All 70 browser scenarios across eight shards, zero retries/skips/flaky results,
 core conformance, differential benchmarks, isolated package consumers, desktop
 and actual Uno WebAssembly gates remain mandatory. Local JavaScript syntax and
