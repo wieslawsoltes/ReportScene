@@ -45,6 +45,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public FrameworkElement ViewportElement => scroll;
     public RectD LastPaintViewport => surface.LastViewport;
     public int LastDrawnObjectCount => surface.LastDrawnObjectCount;
+    public GridPaintStatistics LastGridStatistics => surface.LastGridStatistics;
     public event Action<ReportItem>? EditRequested;
     public event Action<Exception>? Failed;
     public event Action? ViewChanged;
@@ -176,13 +177,15 @@ public sealed class ReportDesignView : UserControl, IDisposable
     {
         if (disposed) return; disposed = true;
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectionChanged;
-        surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); base.Dispose();
+        surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); surface.GridPainter.Clear(); base.Dispose();
     }
     private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer, Func<RectD?> visibleViewport) : SKCanvasElement
     {
         private static readonly ResizeHandle[] SelectionHandles = Enum.GetValues<ResizeHandle>();
         public DesignLayout Layout { get; set; } = DesignLayout.Create(session.Page, false);
         public TextLayoutCache TextLayouts { get; } = new(renderer.Metrics);
+        public ReportGridPainter GridPainter { get; } = new();
+        public GridPaintStatistics LastGridStatistics { get; private set; }
         public double PointScale { get; set; } = 1;
         public bool ShowGrid { get; set; } = true;
         public bool ShowRulers { get; set; } = true;
@@ -195,7 +198,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
         private string? lastError;
         protected override void RenderOverride(SKCanvas canvas, Size area)
         {
-            canvas.Save(); canvas.Scale((float)PointScale); RenderCount++; LastDrawnObjectCount = 0;
+            canvas.Save(); canvas.Scale((float)PointScale); RenderCount++; LastDrawnObjectCount = 0; LastGridStatistics = default;
             using var paint = new SKPaint { IsAntialias = false };
             using var dash = SKPathEffect.CreateDash([2, 2], 0);
             try
@@ -220,10 +223,11 @@ public sealed class ReportDesignView : UserControl, IDisposable
                     {
                         paint.Color = ReportRenderer.Color("#D6D6D6");
                         double spacing = double.IsFinite(session.GridSize) ? Math.Max(4, session.GridSize) : 4;
-                        double firstX = band.Bounds.X + Math.Max(0, Math.Ceiling((viewport.Left - band.Bounds.X) / spacing)) * spacing;
-                        double firstY = band.Bounds.Y + Math.Max(0, Math.Ceiling((viewport.Top - band.Bounds.Y) / spacing)) * spacing;
-                        for (double y = firstY; y < Math.Min(band.Bounds.Bottom, viewport.Bottom); y += spacing)
-                            for (double x = firstX; x < Math.Min(band.Bounds.Right, viewport.Right); x += spacing) canvas.DrawPoint((float)x, (float)y, paint);
+                        // Retain the exact float viewport edges, point lattice and paint.
+                        // Only the native submission granularity changes.
+                        var gridView = new RectD(viewport.Left, viewport.Top, (double)viewport.Right - viewport.Left, (double)viewport.Bottom - viewport.Top);
+                        var drawn = GridPainter.Draw(canvas, band.Bounds, gridView, spacing, paint);
+                        LastGridStatistics = new(checked(LastGridStatistics.Points + drawn.Points), checked(LastGridStatistics.Submissions + drawn.Submissions));
                     }
                 }
                 foreach (var entry in Layout.Objects)
