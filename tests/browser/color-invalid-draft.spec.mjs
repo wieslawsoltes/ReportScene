@@ -19,7 +19,10 @@ test('discarding invalid color drafts preserves mixed selections while explicit 
     await page.mouse.click(r.X + 15, r.Y + r.Height - 15); await page.keyboard.press('Escape'); await fresh(page);
     await bounds(page, 'color-dialog-apply');
     expect((await state(page)).Inputs['color-value']).toBe(initial);
-    expect((await state(page)).Inputs['color-validation']).toBe('');
+    // Empty native labels have zero width and are omitted by Snapshot.Visible.
+    // All restored value fields and the open Apply button are still required.
+    expect((await state(page)).Inputs['color-hex']).toBe(initial);
+    expect((await state(page)).Inputs['color-validation'] ?? '').toBe('');
     await click(page, 'color-dialog-apply');
     await expect.poll(async () => Boolean((await state(page)).Commands['color-dialog-apply'])).toBe(false);
     expect((await state(page)).ContentRevision).toBe(before.ContentRevision);

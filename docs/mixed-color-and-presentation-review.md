@@ -17,3 +17,9 @@ The test now polls the original white-paper requirement and exact footer RGBA to
 Print help now explicitly distinguishes browser print-dialog invocation from the desktop host opening HTML in the default viewer. Printer devices, duplex/tray selection and actual completion remain outside that host contract.
 
 The recovered local source tree was independently reconstructed from the CI archive as `35e082b8669d8b0c1772661b0a80f860845c4dcf`, exactly matching pushed print head 9e011fda. Retained older archives remain unchanged. No editable checkout or untracked source directory existed on recovery; older snapshots are not applied over newer GitHub files. Changes in this continuation are separately committed, and current-source native/browser acceptance is required before merge.
+
+## Empty native error-label diagnostics
+
+The first dedicated mixed-color run (38396564664, shard 1) stopped before Apply because it expected an empty `color-validation` string, but the native snapshot omitted that label. The retained trace shows the dialog remained open, `color-value` and the hex field were #FF0000, and the four channels were 255/0/0/255 after Escape. `DesignerSnapshot.Visible` excludes zero-width elements; an empty TextBlock therefore need not appear in Inputs. This was not evidence of a color error, nor acceptance of the still-unreached report/history assertions.
+
+The regression now treats the omitted empty label as no visible validation text and additionally requires the restored hex field. Both invalid-field cases, successful Apply, unchanged mixed report/revision/history and an explicit same-color choice with one-step undo remain mandatory. No production code, scenario timeout, retry count or saved-content assertion is altered by this diagnostic correction. The full combined current-head suite must pass.
