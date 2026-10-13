@@ -25,7 +25,7 @@ public sealed class ReportPrintOptionsEditor : UserControl
         elements["print-report-name"] = ControlTheme.Identify(title, "print-report-name", "Report to print");
         elements["print-reverse"] = ControlTheme.Identify(reverse, "print-reverse", "Print selected pages in reverse order");
         var destination = new TextBlock { Text = "System print dialog", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
-        var help = new TextBlock { Text = "Choose the printer, copies, paper and duplex options in the system dialog. Leave its page range set to All: this document already contains only the pages selected here.",
+        var help = new TextBlock { Text = "The browser requests its print dialog. Desktop opens the document in your default viewer; use that viewer's Print command. Choose printer, copies, paper and duplex there. Leave its range on All: this document already contains only the selected pages.",
             TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = ControlTheme.Brush("#626262") };
         elements["print-destination"] = ControlTheme.Identify(destination, "print-destination", "Printing destination");
         var system = new StackPanel { Spacing = 6 }; system.Children.Add(destination); system.Children.Add(help);
