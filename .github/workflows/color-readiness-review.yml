@@ -1,0 +1,65 @@
+name: Color readiness review
+on:
+  pull_request:
+    paths: ['.github/workflows/color-readiness-review.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-evidence-4
+          run-id: 38352955973
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: evidence
+      - name: Summarize retained trace without changing or rerunning the application
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          def decode(v):
+              if isinstance(v,list): return [decode(x) for x in v]
+              if not isinstance(v,dict): return v
+              if 'o' in v and isinstance(v['o'],list): return {e['k']:decode(e['v']) for e in v['o']}
+              if 'a' in v: return decode(v['a'])
+              if len(v)==1:
+                  for k in ('s','n','b'):
+                      if k in v: return v[k]
+                  if v.get('v') in ('null','undefined'): return None
+              return {k:decode(x) for k,x in v.items()}
+          paths=list(Path('evidence').rglob('trace.zip'))
+          if len(paths)!=1: raise RuntimeError(f'Expected one failed trace, found {len(paths)}')
+          for p in paths[0].parent.glob('*.md'): print('CONTEXT',p.read_text()[:6000])
+          fields=['SnapshotSequence','Zoom','RenderCount','DesignLayoutBuilds','DesignPaintViewport','DesignDrawnObjects','ActiveDrag','Diagnostics','Status','SelectedCount']
+          with zipfile.ZipFile(paths[0]) as z:
+              for name in z.namelist():
+                  if not name.endswith('.trace'): continue
+                  calls={}; states=[]; timings=[]; inputs=[]; values=[]
+                  for raw in z.read(name).decode().splitlines():
+                      e=json.loads(raw)
+                      if e.get('type')=='before':
+                          calls[e['callId']]=e
+                          if e.get('method') in ('click','move','wheel','press'): inputs.append(e)
+                      if e.get('type')=='console' and e.get('messageType')=='error': print('CONSOLE_ERROR',str(e)[:2000])
+                      if e.get('type')!='after': continue
+                      before=calls.get(e.get('callId'),{}); dt=e.get('endTime',0)-before.get('startTime',0)
+                      if dt>1000: timings.append({'ms':dt,'call':before,'error':e.get('error')})
+                      result=decode(e.get('result')); candidates=[result]
+                      if isinstance(result,dict): candidates+=list(result.values())
+                      if before.get('method')=='evaluateExpression' and any(k in str(before.get('params',{})) for k in ['SnapshotSequence','sequence']): values.append({'start':before.get('startTime'),'end':e.get('endTime'),'value':result})
+                      for s in candidates:
+                          if isinstance(s,dict) and 'DesignPaintViewport' in s:
+                              v={k:s.get(k) for k in fields}
+                              v['selected']=[o for o in s.get('Objects',[]) if o.get('Selected')]
+                              v['controls']={k:v for k,v in s.get('Commands',{}).items() if k in ('design-paper','design-viewport','object-selector') or k.startswith('object-selector-option-')}
+                              if not states or states[-1]!=v: states.append(v)
+                  for v in states[-8:]: print('STATE',json.dumps(v))
+                  for v in values[-14:]: print('SEQUENCE',json.dumps(v))
+                  for v in timings[-12:]: print('SLOW',json.dumps(v)[:4000])
+                  for v in inputs[-8:]: print('INPUT',json.dumps(v)[:1500])
+          PY
