@@ -25,6 +25,11 @@ public sealed class ReportIcon : SKCanvasElement
             case "redo": Path(15, 4, 21, 10, 15, 15); Path(20, 10, 10, 10, 5, 13, 4, 17, 6, 20); break;
             case "copy": R(8, 3, 13, 15); fill.Color = SKColors.White; R(3, 7, 13, 15, true); R(3, 7, 13, 15); L(6, 12, 13, 12); L(6, 16, 13, 16); break;
             case "paste": fill.Color = new(225, 188, 120); R(5, 4, 15, 18, true); R(5, 4, 15, 18); fill.Color = SKColors.White; R(8, 2, 9, 4, true); R(8, 2, 9, 4); L(8, 11, 17, 11); L(8, 15, 17, 15); break;
+            case "format-painter":
+                fill.Color = new(230, 181, 100); R(5, 2, 14, 8, true); R(5, 2, 14, 8);
+                L(8, 3, 8, 8); L(12, 3, 12, 8); L(16, 3, 16, 8);
+                fill.Color = new(165, 178, 190); R(5, 10, 14, 3, true); R(5, 10, 14, 3);
+                Path(5, 13, 10, 15, 10, 21, 14, 21, 14, 15, 19, 13); break;
             case "cut": canvas.DrawCircle(6, 18, 3, line); canvas.DrawCircle(18, 18, 3, line); L(8, 16, 19, 3); L(16, 16, 5, 3); break;
             case "delete": line.Color = new(184, 65, 64); L(5, 5, 19, 19); L(19, 5, 5, 19); break;
             case "text": L(4, 4, 20, 4); L(4, 4, 4, 7); L(20, 4, 20, 7); L(12, 4, 12, 21); L(8, 21, 16, 21); break;

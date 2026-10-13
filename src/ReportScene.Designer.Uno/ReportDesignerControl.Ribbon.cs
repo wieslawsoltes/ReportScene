@@ -33,6 +33,7 @@ public sealed partial class ReportDesignerControl
     {
         if (updatingRibbon || Session.HasActiveDrag) return;
         var selected = Session.Selection.ToArray(); bool editable = selected.Any(i => !i.Locked); var first = selected.FirstOrDefault();
+        SyncFormatPainterButton(selected.Length == 1);
         updatingRibbon = true;
         try
         {
@@ -72,7 +73,7 @@ public sealed partial class ReportDesignerControl
         switch (activeRibbon)
         {
             case "Home":
-                Group("Clipboard", AsyncCommand("paste", "Paste", "paste", PasteAsync, true), Vertical(AsyncCommand("cut", "Cut", "cut", CutAsync), AsyncCommand("copy", "Copy", "copy", CopyAsync)));
+                Group("Clipboard", AsyncCommand("paste", "Paste", "paste", PasteAsync, true), Vertical(AsyncCommand("cut", "Cut", "cut", CutAsync), AsyncCommand("copy", "Copy", "copy", CopyAsync)), FormatPainterButton());
                 var font = new ReportComboBox { Width = 151, Height = 25, MinHeight = 0, FontSize = 11, Padding = new(5, 0, 0, 0), CornerRadius = new(0) };
                 foreach (var family in new[] { "Arial", "Calibri", "Times New Roman", "Courier New", "Open Sans" }) font.Items.Add(family);
                 font.SelectionChanged += (_, _) => { if (!updatingRibbon && font.SelectedItem is string family) Run(() => Session.UpdateSelection("Font family", i => i with { Style = i.Style with { FontFamily = family } })); };
