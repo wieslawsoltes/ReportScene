@@ -62,8 +62,8 @@ public sealed partial class ReportDesignerControl
         commands["find-whole-word"] = ControlTheme.Identify(wholeWord, "find-whole-word", "Whole word");
         Group("Find", Vertical(search, Horizontal(Command("find-previous", "Previous", "previous", () => Find(search.Text, true)), Command("find-next", "Next", "next", () => Find(search.Text)))), Vertical(matchCase, wholeWord));
         var export = AsyncCommand("export-pdf", "PDF", "export", () => ExportAsync(ExportFormat.Pdf), true);
-        var formats = Command("export-formats", "More formats", "export", () => { }, true); var menu = new MenuFlyout(); foreach (var format in Enum.GetValues<ExportFormat>()) Menu(menu, format.ToString(), () => Run(() => ExportAsync(format))); formats.Flyout = menu;
-        Group("Export", export, formats, AsyncCommand("print", "Print", "print", PrintAsync, true));
+        var formats = Command("export-formats", "More formats", "export", () => { }); var menu = new MenuFlyout(); foreach (var format in Enum.GetValues<ExportFormat>()) Menu(menu, format.ToString(), () => Run(() => ExportAsync(format))); formats.Flyout = menu;
+        Group("Export", export, Vertical(AsyncCommand("export-options", "Export options…", "settings", ExportOptionsAsync), formats), AsyncCommand("print", "Print", "print", PrintAsync, true));
         SyncPreviewNavigator();
     }
 }
