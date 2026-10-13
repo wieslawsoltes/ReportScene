@@ -5,16 +5,22 @@ using Microsoft.UI.Xaml.Input;
 namespace ReportScene.Controls.Uno;
 
 /// <summary>
-/// Native toggle button with single-click/keyboard activation and a double-tap
-/// repeat request. The second pointer release must not undo that repeat request.
+/// Native toggle with single-click/keyboard activation and a double-tap repeat
+/// request. Hosts use ActivationRequested and RepeatRequested for the paired
+/// actions; inherited Click and Command keep their ordinary native semantics.
 /// </summary>
 public sealed class ReportRepeatToggleButton : ToggleButton
 {
     private bool completingDoubleTap, dispatchingPointer;
+    public event Action? ActivationRequested;
     public event Action? RepeatRequested;
     public ReportRepeatToggleButton()
     {
         IsDoubleTapEnabled = true;
+        Click += (_, _) =>
+        {
+            if (!completingDoubleTap || !dispatchingPointer) ActivationRequested?.Invoke();
+        };
         // A template child or class handler may already have handled the gesture.
         AddHandler(DoubleTappedEvent, new DoubleTappedEventHandler((_, e) =>
         {
@@ -23,6 +29,7 @@ public sealed class ReportRepeatToggleButton : ToggleButton
             RepeatRequested?.Invoke();
             e.Handled = true;
         }), handledEventsToo: true);
+        Unloaded += (_, _) => { completingDoubleTap = false; dispatchingPointer = false; };
     }
     protected override void OnPointerPressed(PointerRoutedEventArgs e)
     {
@@ -42,10 +49,11 @@ public sealed class ReportRepeatToggleButton : ToggleButton
         completingDoubleTap = false;
         base.OnKeyDown(e);
     }
-    protected override void OnClick()
+    protected override void OnToggle()
     {
-        // Suppress only the trailing pointer activation from this double-tap.
-        // Keyboard and automation calls outside pointer dispatch remain native.
-        if (!completingDoubleTap || !dispatchingPointer) base.OnClick();
+        // OnClick is not a public extensibility point in the pinned Uno API.
+        // Preserve native press/capture/focus handling; suppress only the second
+        // pointer toggle and paired activation after a recognized double tap.
+        if (!completingDoubleTap || !dispatchingPointer) base.OnToggle();
     }
 }

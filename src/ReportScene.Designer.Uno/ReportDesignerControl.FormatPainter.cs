@@ -16,7 +16,7 @@ public sealed partial class ReportDesignerControl
             Padding = new(3, 2, 3, 2), BorderThickness = new(0), CornerRadius = new(0) };
         commands["format-painter"] = ControlTheme.Identify(button, "format-painter", "Format Painter");
         ToolTipService.SetToolTip(button, "Copy appearance from one selected object. Click an object to apply; double-click this tool to paint multiple objects. Escape cancels.");
-        button.Click += (_, _) => Run(() =>
+        button.ActivationRequested += () => Run(() =>
         {
             if (DesignView.FormatPainter.IsActive) DesignView.FormatPainter.Cancel();
             else DesignView.FormatPainter.Begin();
