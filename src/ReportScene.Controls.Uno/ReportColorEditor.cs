@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using ReportScene.Designer;
 using Windows.System;
@@ -8,7 +9,7 @@ using Windows.UI;
 
 namespace ReportScene.Controls.Uno;
 
-/// <summary>Reusable native palette/spectrum editor. Changes are drafts; only the host decides when to commit ReadValue().</summary>
+/// <summary>Native palette/spectrum and byte-exact RGBA drafts. Only a host's explicit ReadValue/commit changes a report.</summary>
 public sealed class ReportColorEditor : UserControl
 {
     private static readonly string[] Palette = [
@@ -18,6 +19,8 @@ public sealed class ReportColorEditor : UserControl
         "#004040", "#008080", "#00FFFF", "#80FFFF", "#000080", "#0000FF", "#8080FF", "#C0C0FF",
         "#400080", "#8000FF", "#C080FF", "#E0C0FF", "#800080", "#FF00FF", "#FF80FF", "#FFC0FF"
     ];
+    private static readonly DesignerColorValue[] PaletteValues = Palette.Select(DesignerColorValue.Parse).ToArray();
+    private readonly SolidColorBrush selectedBorder = ControlTheme.Brush("#005A9E"), normalBorder = ControlTheme.Brush("#909090");
     private readonly Dictionary<string, FrameworkElement> elements = new(StringComparer.Ordinal);
     private readonly List<Button> swatches = [];
     private readonly ColorPicker picker = new()
@@ -36,11 +39,15 @@ public sealed class ReportColorEditor : UserControl
     private readonly StackPanel details = new() { Spacing = 8, Width = 260, HorizontalAlignment = HorizontalAlignment.Center };
     private FrameworkElement? spectrum;
     private DesignerColorValue value;
-    private int synchronizing;
+    private int synchronizing, selectedSwatch = -1;
+    private string observedHex = "", observedRed = "", observedGreen = "", observedBlue = "", observedAlpha = "";
     public DesignerColorValue OriginalValue { get; }
     public DesignerColorValue Value => value;
+    public bool HasUserChanges { get; private set; }
     public bool IsValid => TryRead(out _, out _);
     public string ValidationMessage => error.Text;
+    public long ValueChangeCount { get; private set; }
+    public long PaletteUpdateCount { get; private set; }
     public event Action? StateChanged;
 
     public ReportColorEditor(DesignerColorValue initial)
@@ -59,8 +66,8 @@ public sealed class ReportColorEditor : UserControl
         {
             int index = n; string text = Palette[n];
             var button = new Button { Width = 27, Height = 25, MinWidth = 0, MinHeight = 0, Padding = new(0), CornerRadius = new(0),
-                Background = ControlTheme.Brush(text), BorderBrush = ControlTheme.Brush("#909090"), BorderThickness = new(1), HorizontalAlignment = HorizontalAlignment.Left };
-            button.Click += (_, _) => SetValue(DesignerColorValue.Parse(text));
+                Background = ControlTheme.Brush(text), BorderBrush = normalBorder, BorderThickness = new(1), HorizontalAlignment = HorizontalAlignment.Left };
+            button.Click += (_, _) => UserValue(PaletteValues[index]);
             button.KeyDown += (_, e) =>
             {
                 int next = e.Key switch { VirtualKey.Left => index - 1, VirtualKey.Right => index + 1, VirtualKey.Up => index - 8,
@@ -72,7 +79,7 @@ public sealed class ReportColorEditor : UserControl
             ToolTipService.SetToolTip(button, text); Grid.SetColumn(button, n % 8); Grid.SetRow(button, n / 8); palette.Children.Add(button);
         }
         details.Children.Add(palette);
-        var transparent = ControlTheme.Button("color-transparent", "No color (transparent)", "", () => SetValue(new(0, 0, 0, 0)));
+        var transparent = ControlTheme.Button("color-transparent", "No color (transparent)", "", () => UserValue(new(0, 0, 0, 0)));
         transparent.HorizontalAlignment = HorizontalAlignment.Stretch; elements["color-transparent"] = transparent; details.Children.Add(transparent);
         var previews = new Grid(); previews.ColumnDefinitions.Add(new()); previews.ColumnDefinitions.Add(new());
         var original = Preview("Original", new SolidColorBrush(Native(initial)), "color-original-preview");
@@ -89,7 +96,7 @@ public sealed class ReportColorEditor : UserControl
         red = Channel("Red", 0); green = Channel("Green", 1); blue = Channel("Blue", 2); alpha = Channel("Alpha", 3);
         details.Children.Add(channels); elements["color-value"] = ControlTheme.Identify(valueLabel, "color-value", "Current valid color"); details.Children.Add(valueLabel);
         elements["color-validation"] = ControlTheme.Identify(error, "color-validation", "Color input validation"); details.Children.Add(error);
-        var reset = ControlTheme.Button("color-restore", "Restore original", "undo", RestoreOriginal); elements["color-restore"] = reset; details.Children.Add(reset);
+        var reset = ControlTheme.Button("color-restore", "Restore original", "undo", () => UserValue(OriginalValue)); elements["color-restore"] = reset; details.Children.Add(reset);
         hex.TextChanged += (_, _) => Edited(true);
         foreach (var input in new[] { red, green, blue, alpha }) input.TextChanged += (_, _) => Edited(false);
         foreach (var input in new[] { hex, red, green, blue, alpha }) input.KeyDown += (_, e) =>
@@ -97,11 +104,10 @@ public sealed class ReportColorEditor : UserControl
         picker.ColorChanged += (_, e) =>
         {
             var next = FromNative(e.NewColor);
-            if (synchronizing == 0 && next == FromNative(picker.Color) && next != value) SetValue(next);
+            if (synchronizing == 0 && next == FromNative(picker.Color) && next != value) UserValue(next);
         };
         picker.PreviousColor = Native(initial);
-        picker.Loaded += (_, _) => StateChanged?.Invoke();
-        picker.SizeChanged += (_, _) => StateChanged?.Invoke();
+        picker.Loaded += (_, _) => StateChanged?.Invoke(); picker.SizeChanged += (_, _) => StateChanged?.Invoke();
         SizeChanged += (_, e) =>
         {
             bool wide = e.NewSize.Width >= 550;
@@ -112,36 +118,46 @@ public sealed class ReportColorEditor : UserControl
         };
         SetValue(initial);
     }
-
+    private void UserValue(DesignerColorValue next) { HasUserChanges = true; SetValue(next); }
     public void RestoreOriginal() => SetValue(OriginalValue);
-    public void SetValue(DesignerColorValue next)
+    public void SetValue(DesignerColorValue next) => ApplyValue(next, false, false);
+    private void ApplyValue(DesignerColorValue next, bool keepHex, bool keepChannels)
     {
         synchronizing++;
         try
         {
-            value = next; hex.Text = next.ToHexString();
-            red.Text = next.R.ToString(CultureInfo.InvariantCulture); green.Text = next.G.ToString(CultureInfo.InvariantCulture);
-            blue.Text = next.B.ToString(CultureInfo.InvariantCulture); alpha.Text = next.A.ToString(CultureInfo.InvariantCulture);
-            picker.Color = Native(next); currentBrush.Color = Native(next); valueLabel.Text = next.ToHexString(); error.Text = "";
-            for (int n = 0; n < swatches.Count; n++)
+            if (value != next) ValueChangeCount++;
+            value = next;
+            if (!keepHex) hex.Text = next.ToHexString();
+            if (!keepChannels)
             {
-                bool selected = DesignerColorValue.Parse(Palette[n]) == next;
-                swatches[n].BorderThickness = new(selected ? 3 : 1);
-                swatches[n].BorderBrush = ControlTheme.Brush(selected ? "#005A9E" : "#909090");
+                red.Text = next.R.ToString(CultureInfo.InvariantCulture); green.Text = next.G.ToString(CultureInfo.InvariantCulture);
+                blue.Text = next.B.ToString(CultureInfo.InvariantCulture); alpha.Text = next.A.ToString(CultureInfo.InvariantCulture);
             }
+            if (FromNative(picker.Color) != next) picker.Color = Native(next);
+            currentBrush.Color = Native(next); valueLabel.Text = next.ToHexString(); error.Text = "";
+            int index = Array.IndexOf(PaletteValues, next);
+            if (index != selectedSwatch)
+            {
+                if (selectedSwatch >= 0) { swatches[selectedSwatch].BorderThickness = new(1); swatches[selectedSwatch].BorderBrush = normalBorder; PaletteUpdateCount++; }
+                if (index >= 0) { swatches[index].BorderThickness = new(3); swatches[index].BorderBrush = selectedBorder; PaletteUpdateCount++; }
+                selectedSwatch = index;
+            }
+            RememberText();
         }
         finally { synchronizing--; }
         StateChanged?.Invoke();
     }
+    private void RememberText()
+    { observedHex = hex.Text; observedRed = red.Text; observedGreen = green.Text; observedBlue = blue.Text; observedAlpha = alpha.Text; }
     private void Edited(bool fromHex)
     {
-        if (synchronizing != 0) return;
-        DesignerColorValue next;
-        if (fromHex)
-        {
-            if (DesignerColorValue.TryParse(hex.Text, out next) && next != value) { SetValue(next); return; }
-        }
-        else if (TryChannels(out next) && next != value) { SetValue(next); return; }
+        if (synchronizing != 0 || (hex.Text == observedHex && red.Text == observedRed && green.Text == observedGreen && blue.Text == observedBlue && alpha.Text == observedAlpha)) return;
+        HasUserChanges = true; RememberText();
+        // Preserve the active draft and caret. Normalizing six typed digits would
+        // otherwise insert '#' mid-entry and prevent typing an eight-digit ARGB value.
+        if (fromHex && DesignerColorValue.TryParse(hex.Text, out var parsed)) { ApplyValue(parsed, true, false); return; }
+        if (!fromHex && TryChannels(out var channels)) { ApplyValue(channels, false, true); return; }
         _ = TryRead(out _, out string message); error.Text = message; StateChanged?.Invoke();
     }
     private bool TryChannels(out DesignerColorValue color)
@@ -163,7 +179,7 @@ public sealed class ReportColorEditor : UserControl
     public IEnumerable<KeyValuePair<string, FrameworkElement>> Elements()
     {
         foreach (var element in elements) yield return element;
-        if (spectrum is null || !spectrum.IsLoaded) spectrum = FindSpectrum(picker);
+        if (picker.IsLoaded && (spectrum is null || !spectrum.IsLoaded)) spectrum = FindSpectrum(picker);
         if (spectrum is not null) yield return new("color-spectrum", spectrum);
     }
     private static FrameworkElement? FindSpectrum(DependencyObject root)
@@ -184,13 +200,11 @@ public sealed class ReportColorEditor : UserControl
         for (int n = 0; n < 3; n++) board.RowDefinitions.Add(new());
         var white = ControlTheme.Brush("#FFFFFF"); var gray = ControlTheme.Brush("#C0C0C0");
         for (int y = 0; y < 3; y++) for (int x = 0; x < 7; x++)
-        {
-            var cell = new Border { Background = (x + y) % 2 == 0 ? white : gray }; Grid.SetColumn(cell, x); Grid.SetRow(cell, y); board.Children.Add(cell);
-        }
-        var color = new Border { Background = brush, BorderBrush = ControlTheme.Brush("#909090"), BorderThickness = new(1) };
+        { var cell = new Border { Background = (x + y) % 2 == 0 ? white : gray }; Grid.SetColumn(cell, x); Grid.SetRow(cell, y); board.Children.Add(cell); }
+        var color = new Border { Background = brush, BorderBrush = normalBorder, BorderThickness = new(1) };
         Grid.SetColumnSpan(color, 7); Grid.SetRowSpan(color, 3); board.Children.Add(color);
         elements[id] = ControlTheme.Identify(board, id, title + " color preview"); panel.Children.Add(board); return panel;
     }
-    private static Color Native(DesignerColorValue value) => Color.FromArgb(value.A, value.R, value.G, value.B);
+    private static Color Native(DesignerColorValue color) => Color.FromArgb(color.A, color.R, color.G, color.B);
     private static DesignerColorValue FromNative(Color color) => new(color.A, color.R, color.G, color.B);
 }
