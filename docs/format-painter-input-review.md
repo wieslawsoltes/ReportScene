@@ -13,10 +13,15 @@ activation/cancellation. Exact saved report, undo, locked targets and pixel
 requirements remain.
 
 The same run also failed existing font-size/paper screenshot observations in
-shard 2 and a preview vertical-offset assertion in shard 6. Those failures are
-retained, not relabeled as passes or hidden by retries. They are not claimed to
-be caused by the Format Painter double-tap defect. Combined-head acceptance
-must run every existing case unchanged apart from the added input checks.
+shard 2 and the initial preview candidate-count assertion in shard 6 (0
+observed, at least 500 required). The retained final preview snapshot later
+contains 501 candidates and one completed recording; the failure occurred
+before wheel input, not at a scroll-offset assertion. The font and compact-paper
+PNGs also still show the initial Professional invoice rather than the loaded
+fixture. These failures are retained, not relabeled as passes or hidden by
+retries. They are not claimed to be caused by the Format Painter double-tap
+defect. Combined-head acceptance must run every existing case unchanged apart
+from the added input checks.
 
 The branch now incorporates the native authoring recording bounds from #22.
 The overlapping ConformanceSuite line retains both the eight recording cases
