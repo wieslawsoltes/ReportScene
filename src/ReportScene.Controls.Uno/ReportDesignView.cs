@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -27,6 +28,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     private bool showFullPage;
     public bool ShowFullPage { get => showFullPage; set { if (showFullPage == value) return; showFullPage = value; Refresh(); } }
     public DesignerSession Session { get; }
+    public DesignerFormatPainter FormatPainter { get; }
     public ReportRenderer Renderer { get; }
     public bool ShowGrid { get => surface.ShowGrid; set { if (surface.ShowGrid == value) return; surface.ShowGrid = value; surface.Invalidate(); ViewChanged?.Invoke(); } }
     public bool ShowRulers { get => surface.ShowRulers; set { if (surface.ShowRulers == value) return; surface.ShowRulers = value; surface.Invalidate(); ViewChanged?.Invoke(); } }
@@ -46,6 +48,9 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public RectD LastPaintViewport => surface.LastViewport;
     public int LastDrawnObjectCount => surface.LastDrawnObjectCount;
     public GridPaintStatistics LastGridStatistics => surface.LastGridStatistics;
+    public RectD LastRecordingClip => surface.LastRecordingClip;
+    public double LastRecordingMilliseconds => surface.LastRecordingMilliseconds;
+    public long DeferredRenderCount => surface.DeferredRenderCount;
     public event Action<ReportItem>? EditRequested;
     public event Action<Exception>? Failed;
     public event Action? ViewChanged;
@@ -53,6 +58,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public ReportDesignView(DesignerSession session, ReportRenderer renderer)
     {
         Session = session; Renderer = renderer; activity = new(session); IsTabStop = true;
+        FormatPainter = new(session);
         surface = new(session, renderer, VisibleViewport) { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
         scroll = new() { Content = surface, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Enabled, VerticalScrollMode = ScrollMode.Enabled, Background = ControlTheme.Brush("#C3C3C3") };
         Content = scroll; ControlTheme.Identify(this, "report-design-view", "Report design surface");
@@ -62,6 +68,8 @@ public sealed class ReportDesignView : UserControl, IDisposable
         surface.PointerWheelChanged += (_, e) => { if ((e.KeyModifiers & VirtualKeyModifiers.Control) != 0) { Zoom *= e.GetCurrentPoint(surface).Properties.MouseWheelDelta > 0 ? 1.1 : 1 / 1.1; e.Handled = true; } };
         // Native layout and scrolling, not a recording canvas clip, define which
         // objects need repainting. No idle polling or model mutation is involved.
+        surface.Loaded += (_, _) => surface.Invalidate();
+        scroll.Loaded += (_, _) => surface.Invalidate();
         surface.SizeChanged += (_, _) => surface.Invalidate();
         scroll.SizeChanged += (_, _) => surface.Invalidate();
         scroll.ViewChanged += (_, _) => surface.Invalidate();
@@ -106,6 +114,11 @@ public sealed class ReportDesignView : UserControl, IDisposable
         var pointer = e.GetCurrentPoint(surface);
         if (!pointer.Properties.IsLeftButtonPressed && pointer.PointerDevice.PointerDeviceType == Windows.Devices.Input.PointerDeviceType.Mouse) return;
         Focus(FocusState.Pointer); start = new(pointer.Position.X / PointScale, pointer.Position.Y / PointScale);
+        if (FormatPainter.IsActive)
+        {
+            if (surface.Layout.HitTest(start.X, start.Y) is { } target) FormatPainter.Apply([target.Item.Id]);
+            e.Handled = true; return; // Painting never starts a resize, drag or marquee.
+        }
         clickSelection = null; pointerMoved = false;
         additive = (e.KeyModifiers & (VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift)) != 0;
         resizeHandle = surface.Layout.HitSelectedHandle(Session.SelectedIds, start.X, start.Y, 5 / PointScale)?.Handle;
@@ -161,7 +174,10 @@ public sealed class ReportDesignView : UserControl, IDisposable
             switch (e.Key)
             {
                 case VirtualKey.Delete: Session.DeleteSelection(); break;
-                case VirtualKey.Escape: Cancel(); Session.Select(null); break;
+                case VirtualKey.Escape:
+                    if (FormatPainter.IsActive) FormatPainter.Cancel();
+                    else { Cancel(); Session.Select(null); }
+                    break;
                 case VirtualKey.Left: Session.Move(-1, 0); break;
                 case VirtualKey.Right: Session.Move(1, 0); break;
                 case VirtualKey.Up: Session.Move(0, -1); break;
@@ -177,7 +193,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     {
         if (disposed) return; disposed = true;
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectionChanged;
-        surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); surface.GridPainter.Clear(); base.Dispose();
+        FormatPainter.Dispose(); surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); surface.GridPainter.Clear(); base.Dispose();
     }
     private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer, Func<RectD?> visibleViewport) : SKCanvasElement
     {
@@ -186,6 +202,9 @@ public sealed class ReportDesignView : UserControl, IDisposable
         public TextLayoutCache TextLayouts { get; } = new(renderer.Metrics);
         public ReportGridPainter GridPainter { get; } = new();
         public GridPaintStatistics LastGridStatistics { get; private set; }
+        public RectD LastRecordingClip { get; private set; }
+        public double LastRecordingMilliseconds { get; private set; }
+        public long DeferredRenderCount { get; private set; }
         public double PointScale { get; set; } = 1;
         public bool ShowGrid { get; set; } = true;
         public bool ShowRulers { get; set; } = true;
@@ -198,13 +217,24 @@ public sealed class ReportDesignView : UserControl, IDisposable
         private string? lastError;
         protected override void RenderOverride(SKCanvas canvas, Size area)
         {
-            canvas.Save(); canvas.Scale((float)PointScale); RenderCount++; LastDrawnObjectCount = 0; LastGridStatistics = default;
+            long started = Stopwatch.GetTimestamp();
+            canvas.Save(); canvas.Scale((float)PointScale); LastDrawnObjectCount = 0; LastGridStatistics = default;
+            LastViewport = LastRecordingClip = default;
             using var paint = new SKPaint { IsAntialias = false };
             using var dash = SKPathEffect.CreateDash([2, 2], 0);
             try
             {
                 var paper = Layout.Paper;
-                LastViewport = visibleViewport() ?? new RectD(0, 0, Layout.Width, Layout.Height);
+                // Never record the entire document as a fallback while native
+                // geometry is unavailable. Loaded/SizeChanged/ViewChanged schedule
+                // the next recording; no idle retry timer is needed.
+                if (visibleViewport() is not { } visible) { DeferredRenderCount++; return; }
+                LastViewport = visible;
+                var recordingClip = ReportViewportClip.Apply(canvas, visible);
+                LastRecordingClip = new(recordingClip.Left, recordingClip.Top,
+                    (double)recordingClip.Right - recordingClip.Left, (double)recordingClip.Bottom - recordingClip.Top);
+                RenderCount++;
+                if (visible.Width == 0 || visible.Height == 0) return;
                 var viewport = ReportRenderer.Rect(LastViewport);
                 bool Visible(DesignObject entry) => DesignerPaintCulling.IsVisible(entry, LastViewport, PointScale);
                 paint.Color = ReportRenderer.Color("#989898"); canvas.DrawRect(ReportRenderer.Rect(paper.Offset(3, 3)), paint);
@@ -262,7 +292,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
                 lastError = null;
             }
             catch (Exception e) { if (lastError != e.Message) { lastError = e.Message; RenderFailed?.Invoke(e); } }
-            finally { canvas.Restore(); }
+            finally { canvas.Restore(); LastRecordingMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds; }
         }
         private void DrawRulers(SKCanvas canvas, SKPaint paint, SKRect viewport)
         {

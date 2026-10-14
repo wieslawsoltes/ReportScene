@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 import { state, ready, fresh, bounds, click, choose, fill, save, artifact, screenshot } from './uno-driver.mjs';
 
 function fixture(bookmarks = true) {
@@ -49,13 +50,8 @@ async function visibleTargetPixels(page, info) {
     const s = await state(page), paper = s.Commands['preview-paper'], target = s.PreviewHighlight, scale = s.Zoom * 96 / 72;
     const x = Math.floor(paper.X + (target.X + 4) * scale), y = Math.floor(paper.Y + (target.Y + target.Height - 4) * scale);
     const bytes = await screenshot(page, info.outputPath('visible-bookmark-target.png'));
-    return page.evaluate(async ({ base64, x, y }) => {
-      const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-      const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-      const [r, g, b] = context.getImageData(x, y, 1, 1).data;
-      return r > 100 && r < 160 && g > 155 && g < 200 && b < 100;
-    }, { base64: bytes.toString('base64'), x, y });
+    const [r, g, b] = screenshotPixels(bytes).pixel(x, y);
+    return r > 100 && r < 160 && g > 155 && g < 200 && b < 100;
   }, { message: 'The revealed bookmark is visibly painted and highlighted' }).toBe(true);
 }
 

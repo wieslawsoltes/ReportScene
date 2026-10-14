@@ -57,6 +57,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         DesignView.Failed += ShowError; PreviewView.Failed += ShowError; properties.Failed += ShowError;
         DesignView.ViewChanged += ViewChanged; PreviewView.ViewChanged += ViewChanged;
         DesignView.InteractionCompleted += () => SelectedChanged(this, EventArgs.Empty);
+        DesignView.FormatPainter.StateChanged += FormatPainterChanged;
         tree.Invoked += entry => Run(() => InvokeOutline(entry)); tree.ViewChanged += NotifyState;
         properties.ViewChanged += NotifyState;
         HorizontalContentAlignment = HorizontalAlignment.Stretch; VerticalContentAlignment = VerticalAlignment.Stretch;
@@ -98,6 +99,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private static StackPanel Horizontal(params UIElement[] children) { var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 }; foreach (var child in children) stack.Children.Add(child); return stack; }
     private void SetPreview(bool enabled)
     {
+        if (enabled) DesignView.FormatPainter.Cancel();
         previewMode = enabled; DesignView.Visibility = enabled ? Visibility.Collapsed : Visibility.Visible; PreviewView.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         UpdateStatus(); UpdateTabSelection(); NotifyState();
     }
@@ -197,6 +199,12 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         if (commands.TryGetValue("matrix-edit", out var matrix) && matrix is Control m) m.IsEnabled = Session.Selection.OfType<MatrixItem>().Any(i => !i.Locked);
         SyncStatusZoom();
         if (preserveMessage) return;
+        if (DesignView.FormatPainter.IsActive)
+        {
+            status.Text = $"Format Painter · {DesignView.FormatPainter.SourceName} · click an unlocked object · Escape to cancel"
+                + (DesignView.FormatPainter.IsRepeating ? " · multiple objects" : "");
+            return;
+        }
         var count = Session.SelectedIds.Count;
         status.Text = previewMode ? $"Preview · page {PreviewView.PageIndex + 1} of {PreviewView.Report?.Pages.Count ?? 0} · Uno / Skia" : $"{Session.Page.Name} · {(count == 0 ? Session.SelectedBand?.Name ?? "No selection" : count + " object(s) selected")} · {DesignerGeometry.UnitLabel(displayUnit)} · Uno / Skia";
     }

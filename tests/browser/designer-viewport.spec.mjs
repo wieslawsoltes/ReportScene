@@ -62,7 +62,14 @@ test('authoring viewport paints distant content at multiple scales and scrolls w
       return { x: r.X + r.Width / 2, y: r.Y + r.Height / 2 };
     }, [16, 136, 64]);
     expect((await state(page)).DesignLayoutBuilds).toBe(beforeScroll.DesignLayoutBuilds);
-    observations.push({ zoom, viewport: (await state(page)).DesignPaintViewport, drawn: (await state(page)).DesignDrawnObjects });
+    const current = await state(page), clip = current.DesignRecordingClip, logical = current.DesignPaintViewport;
+    expect(clip.X).toBeLessThanOrEqual(logical.X); expect(clip.Y).toBeLessThanOrEqual(logical.Y);
+    expect(clip.Width).toBeLessThanOrEqual(logical.Width + .01); expect(clip.Height).toBeLessThanOrEqual(logical.Height + .01);
+    expect(clip.Width * current.Zoom * 96 / 72).toBeLessThanOrEqual(current.Commands['design-viewport'].Width + 4.1);
+    expect(clip.Height * current.Zoom * 96 / 72).toBeLessThanOrEqual(current.Commands['design-viewport'].Height + 4.1);
+    observations.push({ zoom, viewport: logical, recordingClip: clip, drawn: current.DesignDrawnObjects,
+      gridPoints: current.DesignGridPoints, gridSubmissions: current.DesignGridSubmissions,
+      recordingMilliseconds: current.DesignRecordingMilliseconds, deferredRenders: current.DesignDeferredRenders });
   }
   expect((await state(page)).ContentRevision).toBe(initial.ContentRevision); expect((await state(page)).HistoryCount).toBe(initial.HistoryCount);
   expect((await state(page)).Dirty).toBe(false); expect((await state(page)).Diagnostics).toEqual([]); expect(await save(page)).toEqual(original);

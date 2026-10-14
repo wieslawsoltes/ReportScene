@@ -33,6 +33,7 @@ public sealed partial class ReportDesignerControl
     {
         if (updatingRibbon || Session.HasActiveDrag) return;
         var selected = Session.Selection.ToArray(); bool editable = selected.Any(i => !i.Locked); var first = selected.FirstOrDefault();
+        SyncFormatPainterButton(selected.Length == 1);
         updatingRibbon = true;
         try
         {
@@ -49,30 +50,31 @@ public sealed partial class ReportDesignerControl
             }
             Choice("font-family", first is not null && selected.All(i => i.Style.FontFamily == first.Style.FontFamily) ? first.Style.FontFamily : null);
             Choice("font-size", first is not null && selected.All(i => i.Style.FontSize == first.Style.FontSize) ? first.Style.FontSize.ToString("0.###", CultureInfo.InvariantCulture) : null);
-            foreach (var (id, name, predicate) in new (string, string, Func<ItemStyle, bool>)[] { ("bold", "Bold", s => s.Bold), ("italic", "Italic", s => s.Italic), ("underline", "Underline", s => s.Underline) })
+            foreach (var (id, name, predicate) in TextEmphasisChoices)
             {
                 if (!commands.TryGetValue(id, out var element) || element is not ToggleButton button) continue;
                 bool? value = first is null ? false : selected.All(i => predicate(i.Style) == predicate(first.Style)) ? predicate(first.Style) : null;
                 button.IsEnabled = editable; button.IsChecked = value;
-                button.Background = ControlTheme.Brush(value == true ? "#CDE6F7" : value is null ? "#E3E3E3" : "#00FFFFFF");
+                button.Background = value == true ? formattingActiveBrush : value is null ? formattingMixedBrush : formattingInactiveBrush;
                 ToolTipService.SetToolTip(button, name + (value is null ? " (mixed selection)" : ""));
             }
-            foreach (var (id, align) in new[] { ("text-left", TextAlign.Left), ("text-center", TextAlign.Center), ("text-right", TextAlign.Right) })
+            foreach (var (id, align) in HorizontalAlignmentChoices)
                 if (commands.TryGetValue(id, out var element) && element is Button button)
-                { button.IsEnabled = editable; button.Background = ControlTheme.Brush(first is not null && selected.All(i => i.Style.Alignment == align) ? "#CDE6F7" : "#00FFFFFF"); }
-            foreach (string id in new[] { "fill-color", "text-color", "border-color" })
+                { button.IsEnabled = editable; button.Background = first is not null && selected.All(i => i.Style.Alignment == align) ? formattingActiveBrush : formattingInactiveBrush; }
+            foreach (string id in ColorChoiceIds)
                 if (commands.TryGetValue(id, out var element) && element is Control control) control.IsEnabled = editable;
+            SyncAppearance(selected, editable);
         }
         finally { updatingRibbon = false; }
     }
     private void BuildRibbon()
     {
-        ribbon.Children.Clear();
+        ribbon.Children.Clear(); borderWidthChoice = null;
         if (previewMode) { BuildPreviewRibbon(); UpdateStatus(); UpdateTabSelection(); return; }
         switch (activeRibbon)
         {
             case "Home":
-                Group("Clipboard", AsyncCommand("paste", "Paste", "paste", PasteAsync, true), Vertical(AsyncCommand("cut", "Cut", "cut", CutAsync), AsyncCommand("copy", "Copy", "copy", CopyAsync)));
+                Group("Clipboard", AsyncCommand("paste", "Paste", "paste", PasteAsync, true), Vertical(AsyncCommand("cut", "Cut", "cut", CutAsync), AsyncCommand("copy", "Copy", "copy", CopyAsync)), FormatPainterButton());
                 var font = new ReportComboBox { Width = 151, Height = 25, MinHeight = 0, FontSize = 11, Padding = new(5, 0, 0, 0), CornerRadius = new(0) };
                 foreach (var family in new[] { "Arial", "Calibri", "Times New Roman", "Courier New", "Open Sans" }) font.Items.Add(family);
                 font.SelectionChanged += (_, _) => { if (!updatingRibbon && font.SelectedItem is string family) Run(() => Session.UpdateSelection("Font family", i => i with { Style = i.Style with { FontFamily = family } })); };
@@ -82,9 +84,12 @@ public sealed partial class ReportDesignerControl
                 commands["font-family"] = ControlTheme.Identify(font, "font-family", "Font family"); commands["font-size"] = ControlTheme.Identify(size, "font-size", "Font size in points");
                 Group("Text", Vertical(Horizontal(font, size), Horizontal(FormatButton("bold", "Bold", "B"), FormatButton("italic", "Italic", "I"), FormatButton("underline", "Underline", "U"),
                     Command("text-left", "Align text left", "left", () => TextAlignment(TextAlign.Left), text: false), Command("text-center", "Center text", "center", () => TextAlignment(TextAlign.Center), text: false), Command("text-right", "Align text right", "right", () => TextAlignment(TextAlign.Right), text: false))));
-                Group("Paragraph", Vertical(Command("vertical-top", "Top", "left", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Top } })), Command("vertical-center", "Middle", "center", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Center } }))), Command("vertical-bottom", "Bottom", "right", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Bottom } })));
+                Group("Paragraph", Vertical(ControlTheme.Label("Vertical alignment", 10), Horizontal(
+                    AppearanceButton("vertical-top", "Align text top", "text-top", () => Session.SetSelectionVerticalAlignment(Model.VerticalAlign.Top)),
+                    AppearanceButton("vertical-center", "Align text middle", "text-middle", () => Session.SetSelectionVerticalAlignment(Model.VerticalAlign.Center)),
+                    AppearanceButton("vertical-bottom", "Align text bottom", "text-bottom", () => Session.SetSelectionVerticalAlignment(Model.VerticalAlign.Bottom)))));
                 Group("Border & fill", Vertical(AsyncCommand("fill-color", "Fill color", "shape", () => NativeColorAsync(ColorPart.Fill)), AsyncCommand("text-color", "Text color", "text", () => NativeColorAsync(ColorPart.Text))),
-                    Vertical(Command("border", "Border", "rectangle", () => Session.UpdateSelection("Toggle border", i => i with { Style = i.Style with { BorderWidth = i.Style.BorderWidth > 0 ? 0 : 1 } })), AsyncCommand("border-color", "Border color", "rectangle", () => NativeColorAsync(ColorPart.Border))));
+                    Vertical(AppearanceButton("border", "Border", "rectangle", Session.ToggleSelectionBorder, showText: true), AsyncCommand("border-color", "Border color", "rectangle", () => NativeColorAsync(ColorPart.Border))), BorderWidthChoice());
                 Group("Styles", Vertical(Command("style-heading", "Heading", "text", () => ApplyStyle(new() { FontSize = 16, Bold = true, Foreground = "#244F75" })), Command("style-body", "Body", "text", () => ApplyStyle(new() { FontSize = 10 }))));
                 Group("Report", Command("preview", "Preview", "preview", PreparePreview, true), AsyncCommand("save", "Save", "save", SaveAsync, true), AsyncCommand("matrix-edit", "Edit matrix", "table", EditSelectedMatrixAsync, true));
                 break;
@@ -123,13 +128,21 @@ public sealed partial class ReportDesignerControl
         }
         SyncRibbonSelection(); UpdateStatus(); UpdateTabSelection();
     }
+    private ReportZoomSelector? designZoomChoice, previewZoomChoice;
     private UIElement ZoomChoice(bool preview)
     {
-        var choice = new ReportComboBox { Width = 88, MinHeight = 0, Height = 25, Padding = new(5, 0, 0, 0), FontSize = 11, CornerRadius = new(0) };
-        foreach (var n in new[] { 25, 50, 75, 85, 100, 125, 150, 200, 300, 400 }) choice.Items.Add(n + "%");
-        choice.SelectedItem = Math.Round((preview ? PreviewView.Zoom : DesignView.Zoom) * 100).ToString(CultureInfo.InvariantCulture) + "%";
-        choice.SelectionChanged += (_, _) => { if (choice.SelectedItem is string text && double.TryParse(text.TrimEnd('%'), NumberStyles.Float, CultureInfo.InvariantCulture, out var n)) { if (preview) PreviewView.Zoom = n / 100; else DesignView.Zoom = n / 100; UpdateStatus(); } };
-        commands[preview ? "preview-zoom" : "design-zoom"] = ControlTheme.Identify(choice, preview ? "preview-zoom" : "design-zoom", "Zoom"); return choice;
+        var selector = new ReportZoomSelector();
+        selector.SetZoom(preview ? PreviewView.Zoom : DesignView.Zoom);
+        if (preview) previewZoomChoice = selector; else designZoomChoice = selector;
+        selector.ZoomRequested += value =>
+        {
+            if (disposed || previewMode != preview || !ReferenceEquals(preview ? previewZoomChoice : designZoomChoice, selector)) return;
+            if (preview) PreviewView.Zoom = value; else DesignView.Zoom = value;
+            UpdateStatus();
+        };
+        string id = preview ? "preview-zoom" : "design-zoom";
+        commands[id] = ControlTheme.Identify(selector.Editor, id, "Zoom");
+        return selector;
     }
     private UIElement SamplesChoice()
     {

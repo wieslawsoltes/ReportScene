@@ -38,6 +38,11 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public long DesignLayoutBuilds { get; init; }
     public RectD DesignPaintViewport { get; init; }
     public int DesignDrawnObjects { get; init; }
+    public RectD DesignRecordingClip { get; init; }
+    public double DesignRecordingMilliseconds { get; init; }
+    public long DesignDeferredRenders { get; init; }
+    public int DesignGridPoints { get; init; }
+    public int DesignGridSubmissions { get; init; }
     public int ReplacementScanCount { get; init; }
     public long OutlineCreatedNodes { get; init; }
     public long OutlineUpdates { get; init; }
@@ -132,6 +137,7 @@ public sealed partial class ReportDesignerControl
         void Input(string id, FrameworkElement element)
         {
             if (element is Control control) inputs[id + "-enabled"] = control.IsEnabled.ToString();
+            if (element is ReportRepeatToggleButton repeat) inputs[id + "-input-trace"] = repeat.InputTrace;
             switch (element)
             {
                 case TextBox text: inputs[id] = text.Text; break;
@@ -179,6 +185,9 @@ public sealed partial class ReportDesignerControl
             PreviewSelectedBookmark = PreviewView.SelectedBookmarkKey, PreviewHighlight = PreviewView.HighlightBounds, PreviewRevealPending = PreviewView.RevealPending,
             SearchQueryScans = searchSession?.QueryScanCount ?? 0, SearchMatches = searchSession?.Matches.Count ?? 0, RecoveryPending = recovery.HasPending,
             DesignLayoutBuilds = DesignView.LayoutBuildCount, DesignPaintViewport = DesignView.LastPaintViewport, DesignDrawnObjects = DesignView.LastDrawnObjectCount,
+            DesignRecordingClip = DesignView.LastRecordingClip, DesignRecordingMilliseconds = DesignView.LastRecordingMilliseconds,
+            DesignDeferredRenders = DesignView.DeferredRenderCount,
+            DesignGridPoints = DesignView.LastGridStatistics.Points, DesignGridSubmissions = DesignView.LastGridStatistics.Submissions,
             ReplacementScanCount = Session.LastReplacementScanCount,
             OutlineCreatedNodes = tree.CreatedNodeCount, OutlineUpdates = tree.UpdateCount, OutlineSnapshotBuilds = outlineSnapshotBuilds,
             OutlineContextCount = tree.ContextCount, OutlineContextKey = tree.ContextKey, OutlineProjectedCount = tree.ProjectedCount,

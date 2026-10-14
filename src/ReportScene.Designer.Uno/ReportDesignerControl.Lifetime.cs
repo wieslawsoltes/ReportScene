@@ -17,6 +17,8 @@ public sealed partial class ReportDesignerControl
     private void HandleShortcuts(object sender, KeyRoutedEventArgs e)
     {
         if (disposed) return;
+        if (e.Key == VirtualKey.Escape && DesignView.FormatPainter.IsActive)
+        { DesignView.FormatPainter.Cancel(); e.Handled = true; return; }
         bool ctrl = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
         if (e.Key == VirtualKey.F5) { Run(PreparePreview); e.Handled = true; return; }
         if (!ctrl) return;
@@ -48,6 +50,7 @@ public sealed partial class ReportDesignerControl
         if (disposed) return; disposed = true; recoveryTimer.Stop(); workspaceOperations?.Dispose();
         preferenceTimer.Stop(); preferences.Changed -= PreferencesChanged; preferences.Dispose();
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectedChanged; KeyDown -= HandleShortcuts;
+        DesignView.FormatPainter.StateChanged -= FormatPainterChanged;
         DesignView.ViewChanged -= ViewChanged; PreviewView.ViewChanged -= ViewChanged;
         PreviewView.ViewChanged -= SyncPreviewNavigator; pageNavigator = null;
         searchSession = null; prepared = null; PreviewView.Report = null; commands.Clear(); objectIndices.Clear();
