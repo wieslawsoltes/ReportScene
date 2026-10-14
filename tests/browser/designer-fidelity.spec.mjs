@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 import { state, ready, fresh, bounds, click, fill, choose, save, artifact, screenshot } from './uno-driver.mjs';
 import { loadDesignerFixture, selectObject, typeProperty, propertyBounds, filterProperties } from './designer-fixture.mjs';
 
@@ -61,18 +62,18 @@ test('formatting controls track single and mixed selections and undo without inv
   expect((await state(page)).Inputs['font-size-value']).toBe('14'); expect((await state(page)).Inputs.bold).toBe('True');
   // The template already reserves a glyph column. SelectedItem alone cannot prove
   // that a narrow font-size control actually paints its digits rather than clipping them.
-  const fontBounds = await bounds(page, 'font-size');
-  const fontPixels = await screenshot(page, info.outputPath('visible-font-size.png'));
-  const digitPixels = await page.evaluate(async ({ base64, r }) => {
-    const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-    const data = context.getImageData(Math.ceil(r.X + 5), Math.ceil(r.Y + 4), 16, Math.max(1, Math.floor(r.Height - 8))).data;
+  // Native state can precede the compositor's presented frame. Keep the
+  // original crop, darkness threshold and assertion deadline; observe pixels
+  // without replaying input or decoding screenshots on the app's UI thread.
+  await expect.poll(async () => {
+    const r = await bounds(page, 'font-size');
+    const pixels = screenshotPixels(await screenshot(page, info.outputPath('visible-font-size.png')));
+    const left = Math.ceil(r.X + 5), top = Math.ceil(r.Y + 4), height = Math.max(1, Math.floor(r.Height - 8));
     let count = 0;
-    for (let n = 0; n < data.length; n += 4) if (Math.max(data[n], data[n + 1], data[n + 2]) < 140) count++;
+    for (let y = top; y < top + height; y++) for (let x = left; x < left + 16; x++)
+      if (Math.max(...pixels.pixel(x, y).slice(0, 3)) < 140) count++;
     return count;
-  }, { base64: fontPixels.toString('base64'), r: fontBounds });
-  expect(digitPixels, 'Selected font-size digits must be painted inside the content area, excluding border and arrow').toBeGreaterThan(4);
+  }, { message: 'Selected font-size digits must be painted inside the content area, excluding border and arrow' }).toBeGreaterThan(4);
   await selectObject(page, 'b'); await expect.poll(async () => (await state(page)).Inputs['font-family-value']).toBe('Courier New');
   expect((await state(page)).Inputs['font-size-value']).toBe('9'); expect((await state(page)).Inputs.italic).toBe('True');
   await selectObject(page, 'a', true); await expect.poll(async () => (await state(page)).SelectedCount).toBe(2);

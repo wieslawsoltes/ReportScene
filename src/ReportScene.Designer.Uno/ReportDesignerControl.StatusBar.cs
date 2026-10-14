@@ -34,7 +34,11 @@ public sealed partial class ReportDesignerControl
         if (DesignView is null || PreviewView is null) return;
         double value = previewMode ? PreviewView.Zoom : DesignView.Zoom;
         updatingStatusZoom = true;
-        try { statusZoom.Value = value; statusZoomText.Text = value.ToString("P0"); }
+        try
+        {
+            statusZoom.Value = value; statusZoomText.Text = value.ToString("P0");
+            designZoomChoice?.SetZoom(DesignView.Zoom); previewZoomChoice?.SetZoom(PreviewView.Zoom);
+        }
         finally { updatingStatusZoom = false; }
     }
 }

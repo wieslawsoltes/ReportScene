@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 import { ready, state, fresh, bounds, click, choose, save, artifact, screenshot } from './uno-driver.mjs';
 
 test('prepared checkbox stroke stays painted when its nominal rectangle is outside the native viewport', async ({ page }, info) => {
@@ -31,13 +32,8 @@ test('prepared checkbox stroke stays painted when its nominal rectangle is outsi
   await expect.poll(async () => {
     const s = await state(page), v = s.Commands['preview-viewport'];
     const bytes = await screenshot(page, info.outputPath('prepared-offscreen-checkbox-stroke.png'));
-    return page.evaluate(async ({ base64, x, y }) => {
-      const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-      const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-      const actual = Array.from(context.getImageData(Math.floor(x), Math.floor(y), 1, 1).data);
-      return [16, 136, 64].every((value, i) => Math.abs(value - actual[i]) <= 8);
-    }, { base64: bytes.toString('base64'), x: v.X + 12, y: v.Y + v.Height / 2 });
+    const actual = screenshotPixels(bytes).pixel(v.X + 12, v.Y + v.Height / 2);
+    return [16, 136, 64].every((value, i) => Math.abs(value - actual[i]) <= 8);
   }, { message: 'A real green checkbox stroke is visible; a blank white frame cannot pass' }).toBe(true);
   expect((await state(page)).PreviewIndexBuilds).toBe(indexBuilds);
   expect((await state(page)).ContentRevision).toBe(initial.ContentRevision);

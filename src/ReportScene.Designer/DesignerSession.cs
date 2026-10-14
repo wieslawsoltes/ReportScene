@@ -56,7 +56,7 @@ public sealed partial class DesignerSession
     public void SelectMany(IEnumerable<string> ids, bool additive = false)
     { if (!additive) selected.Clear(); foreach (var id in ids) selected.Add(id); SelectionChanged?.Invoke(this, EventArgs.Empty); }
     private void Notify() { Changed?.Invoke(this, EventArgs.Empty); SelectionChanged?.Invoke(this, EventArgs.Empty); }
-    private void Execute(string name, Action redo, Action undo, string[]? afterSelection = null)
+    private void Execute(string name, Action redo, Action undo, string[]? afterSelection = null, Action<DesignerRevision>? committed = null)
     {
         if (dragOriginal is not null) throw new InvalidOperationException("Complete or cancel the active drag before another edit.");
         var before = selected.ToArray(); var after = afterSelection ?? before; redo();
@@ -64,7 +64,12 @@ public sealed partial class DesignerSession
         var edit = new Edit(name, redo, undo, revision, ++sequence, before, after);
         history.Add(edit); position++; revision = edit.After;
         if (history.Count > 256) { history.RemoveAt(0); position--; }
-        selected.Clear(); selected.UnionWith(after); Notify();
+        selected.Clear(); selected.UnionWith(after);
+        // An internal operation owner receives only this exact committed identity,
+        // before public observers can make a different edit. Never retain the
+        // callback in history: undo/redo must not revive the original tool.
+        committed?.Invoke(CaptureRevision());
+        Notify();
     }
     public void Undo()
     {
