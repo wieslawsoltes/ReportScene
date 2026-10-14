@@ -7,19 +7,27 @@ public readonly record struct GridPaintStatistics(int Points, int Submissions);
 
 /// <summary>
 /// Draws the same row-major point lattice as individual DrawPoint calls in bounded
-/// native batches. Own one instance per UI/rendering thread. No page, canvas or paint
-/// is retained. The two reusable buffers together retain at most 8191 SKPoints.
+/// native batches, using square meshes for eligible paints. Own one instance per
+/// rendering thread. No page, canvas or paint is retained. Point buffers retain at
+/// most 8191 centers; optional mesh buffers have a separate byte bound.
 /// </summary>
-public sealed class ReportGridPainter
+public sealed partial class ReportGridPainter
 {
     public const int BatchSize = 4096;
     private SKPoint[]? batch;
     private SKPoint[]? tail;
     public int RetainedPointCapacity => (batch?.Length ?? 0) + (tail?.Length ?? 0);
-    public void Clear() { batch = null; tail = null; }
+    public void Clear() { batch = null; tail = null; ClearMesh(); }
 
     public GridPaintStatistics Draw(SKCanvas canvas, RectD bounds, RectD viewport, double spacing, SKPaint paint,
         int maximumPoints = 1_048_576, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(canvas); ArgumentNullException.ThrowIfNull(paint);
+        return DrawCore(canvas, bounds, viewport, spacing, paint, maximumPoints, cancellationToken, CanUseSquareMesh(canvas, paint));
+    }
+
+    private GridPaintStatistics DrawCore(SKCanvas canvas, RectD bounds, RectD viewport, double spacing, SKPaint paint,
+        int maximumPoints, CancellationToken cancellationToken, bool squareMesh)
     {
         ArgumentNullException.ThrowIfNull(canvas); ArgumentNullException.ThrowIfNull(paint);
         Validate(bounds); Validate(viewport);
@@ -45,7 +53,7 @@ public sealed class ReportGridPainter
                 batch[count++] = new((float)x, (float)y);
                 if (count != BatchSize) continue;
                 cancellationToken.ThrowIfCancellationRequested();
-                canvas.DrawPoints(SKPointMode.Points, batch, paint); calls++; count = 0;
+                Submit(canvas, batch, paint, squareMesh); calls++; count = 0;
             }
         }
         if (count > 0)
@@ -53,7 +61,7 @@ public sealed class ReportGridPainter
             cancellationToken.ThrowIfCancellationRequested();
             if (tail?.Length != count) tail = new SKPoint[count];
             Array.Copy(batch, tail, count);
-            canvas.DrawPoints(SKPointMode.Points, tail, paint); calls++;
+            Submit(canvas, tail, paint, squareMesh); calls++;
         }
         return new(total, calls);
     }
