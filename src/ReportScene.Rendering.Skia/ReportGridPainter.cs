@@ -41,6 +41,10 @@ public sealed partial class ReportGridPainter
         if (firstX >= endX || firstY >= endY) return default;
         if (!double.IsFinite(firstX) || !double.IsFinite(firstY) || firstX + spacing <= firstX || firstY + spacing <= firstY)
             throw new ArgumentException("The grid spacing cannot advance within these coordinates.");
+        // An initially advancing addition can stop after crossing a binary64
+        // exponent boundary. Reject an under-resolved lattice before allocating
+        // or submitting anything, rather than repeating a coordinate to the budget.
+        ValidateAdvance(firstX, endX, spacing); ValidateAdvance(firstY, endY, spacing);
         double columns = Math.Ceiling((endX - firstX) / spacing), rows = Math.Ceiling((endY - firstY) / spacing);
         if (columns * rows > maximumPoints) throw new ArgumentException("Visible grid exceeds the configured point budget.");
         batch ??= new SKPoint[BatchSize]; int count = 0, total = 0, calls = 0;
@@ -64,6 +68,12 @@ public sealed partial class ReportGridPainter
             Submit(canvas, tail, paint, squareMesh); calls++;
         }
         return new(total, calls);
+    }
+    private static void ValidateAdvance(double first, double end, double spacing)
+    {
+        double magnitude = Math.Max(Math.Abs(first), Math.Abs(end));
+        if (spacing < Math.BitIncrement(magnitude) - magnitude)
+            throw new ArgumentException("The grid spacing is smaller than the coordinate precision over this viewport.");
     }
     private static void Validate(RectD r)
     {
