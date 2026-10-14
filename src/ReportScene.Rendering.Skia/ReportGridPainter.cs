@@ -23,7 +23,7 @@ public sealed partial class ReportGridPainter
         int maximumPoints = 1_048_576, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(canvas); ArgumentNullException.ThrowIfNull(paint);
-        return DrawCore(canvas, bounds, viewport, spacing, paint, maximumPoints, cancellationToken, CanUseSquareMesh(canvas, paint));
+        return DrawCore(canvas, bounds, viewport, spacing, paint, maximumPoints, cancellationToken, CanUseSquareMesh(canvas, paint, spacing));
     }
 
     private GridPaintStatistics DrawCore(SKCanvas canvas, RectD bounds, RectD viewport, double spacing, SKPaint paint,

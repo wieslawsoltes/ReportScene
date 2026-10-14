@@ -35,3 +35,24 @@ https://github.com/mono/SkiaSharp/blob/v3.119.2/binding/SkiaSharp/SKVertices.cs
 Final-head conformance and all 72 browser scenarios across eight shards, zero
 retries/skips/flaky results, are acceptance gates. No completed result is claimed
 by this design note. The earlier repeat/authoring failures remain recorded.
+
+## Acceptance corrections from run 38542423395
+
+The first combined candidate FAILED four native cases and the repeat-input
+scenario; it is not accepted. Two native failures were true 15%-zoom raster
+mismatches. The default local square width at that zoom is five points, while
+grid spacing is four; the device lattice spacing is less than one pixel.
+Meshes now require nonoverlapping squares and at least one device pixel of
+spacing on both axes. Lower zoom and wider strokes retain DrawPoints; no dot
+is removed and the original exact-raster tests still compare every pixel.
+The path assertion for 15% now correctly requires that fallback. An additional
+case covers overlapping semitransparent squares of widths four, five and eight.
+
+Two other failures came from the test's nonblank predicate: pure red has red
+channel 255, just like white. The predicate now requires any RGB channel below
+the same threshold. The byte-for-byte image equality requirement is unchanged.
+Both native and actual WebAssembly conformance must pass these assertions.
+
+No measured hardware GPU or whole-application speedup is inferred. Final-head
+acceptance still requires every existing browser scenario, build and package
+consumer, without increasing timeouts or adding retries.

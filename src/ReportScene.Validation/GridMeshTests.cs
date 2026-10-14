@@ -14,8 +14,13 @@ public static class GridMeshTests
             {
                 foreach (byte alpha in new byte[] { 255, 127 })
                     foreach (float offset in new[] { 0f, .125f, .5f })
-                        Compare(zoom, offset, new SKPaint { Color = new(123, 143, 163, alpha), StrokeWidth = (float)(72 / (zoom * 96)), IsAntialias = false }, true);
+                        Compare(zoom, offset, new SKPaint { Color = new(123, 143, 163, alpha), StrokeWidth = (float)(72 / (zoom * 96)), IsAntialias = false }, zoom >= .5);
             });
+        yield return Test("overlapping translucent squares retain exact point blending", () =>
+        {
+            foreach (float width in new[] { 4f, 5f, 8f })
+                Compare(1, .125f, new SKPaint { Color = new(120, 50, 80, 127), StrokeWidth = width }, false);
+        });
         yield return Test("unsupported round antialiased and hairline paints retain points", () =>
         {
             Compare(.85, .125f, new SKPaint { Color = SKColors.Red, StrokeWidth = 2, StrokeCap = SKStrokeCap.Round }, false);
@@ -99,7 +104,7 @@ public static class GridMeshTests
     private static void Equal(SKSurface a, SKSurface b)
     {
         using var ia = a.Snapshot(); using var ib = b.Snapshot(); using var ba = SKBitmap.FromImage(ia); using var bb = SKBitmap.FromImage(ib);
-        Conformance.Equal(true, ba.Pixels.Any(c => c.Red < 240));
+        Conformance.Equal(true, ba.Pixels.Any(c => Math.Min(c.Red, Math.Min(c.Green, c.Blue)) < 240));
         Conformance.Equal(true, ba.Bytes.SequenceEqual(bb.Bytes));
     }
 }

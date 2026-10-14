@@ -14,11 +14,15 @@ public sealed partial class ReportGridPainter
 
     // Preserve DrawPoints semantics for effects or transforms not covered by the
     // exact square-raster contract. No configuration or timer is needed.
-    private static bool CanUseSquareMesh(SKCanvas canvas, SKPaint paint)
+    private static bool CanUseSquareMesh(SKCanvas canvas, SKPaint paint, double spacing)
     {
         var m = canvas.TotalMatrix;
         return !paint.IsAntialias && paint.StrokeCap != SKStrokeCap.Round
             && float.IsFinite(paint.StrokeWidth) && paint.StrokeWidth > 0
+            // Overlapping squares and a subpixel lattice do not have the same
+            // raster/overdraw semantics as individual point primitives. Keep
+            // the proven point path instead of changing low-zoom grid pixels.
+            && paint.StrokeWidth < spacing && spacing * m.ScaleX >= 1 && spacing * m.ScaleY >= 1
             && paint.Shader is null && paint.PathEffect is null && paint.MaskFilter is null
             && paint.ImageFilter is null && paint.ColorFilter is null && paint.BlendMode == SKBlendMode.SrcOver
             && m.SkewX == 0 && m.SkewY == 0 && m.ScaleX > 0 && m.ScaleY > 0
