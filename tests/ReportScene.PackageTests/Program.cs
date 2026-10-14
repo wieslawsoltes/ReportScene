@@ -107,6 +107,19 @@ Check(bookmarks.Count == 2 && bookmarks.ItemsExamined == 2 && bookmarks.Entries.
 Check(bookmarks.Entries[1].Bounds == new RectD(20, 20, 5, 5), "prepared outline clipping");
 Check(bookmarks.Find("bookmark:0:1") == bookmarks.Entries[1] && bookmarks.Find("BOOKMARK:0:1") is null, "ordinal occurrence identity lookup");
 Check(ReportPreviewReveal.Calculate(new(320, 250, 40, 30), 300, 200, 100, 200, 1000, 1000) == new PreviewScrollTarget(176, 296), "minimal two-axis preview reveal");
+var formatting = new DesignerSession(new() { Pages = [new() { Bands = [new() { Items = [
+    new TextItem { Id = "style-source", Style = new() { FontSize = 18, Bold = true } }, new TextItem { Id = "style-target", Text = "Keep" }
+] }] }] });
+formatting.Select("style-source"); using var painter = new DesignerFormatPainter(formatting);
+Check(painter.Begin(), "format painter capture");
+Check(painter.Apply(["style-target"]) == new DesignerFormattingResult(1, 1) && !painter.IsActive, "format painter atomic one-shot");
+Check(formatting.Selection.Single() is TextItem { Text: "Keep", Style.FontSize: 18, Style.Bold: true }, "format painter retains content");
+formatting.Undo(); Check(!formatting.IsDirty && formatting.SelectedIds.Single() == "style-source", "format painter exact undo selection");
+formatting.Select("style-target"); formatting.SetSelectionBorderWidth(2.375);
+Check(formatting.Selection.Single().Style.BorderWidth == 2.375, "precise border width command");
+formatting.ToggleSelectionBorder(); Check(formatting.Selection.Single().Style.BorderWidth == 0, "coherent border presence toggle");
+formatting.SetSelectionVerticalAlignment(VerticalAlign.Bottom);
+Check(formatting.Selection.Single().Style.VerticalAlignment == VerticalAlign.Bottom && formatting.Selection.Single() is TextItem { Text: "Keep" }, "vertical alignment preserves content");
 Console.WriteLine($"{passed}/{passed} isolated package-consumer checks passed.");
 
 sealed class PackagePreferenceStore : IDesignerPreferenceStore

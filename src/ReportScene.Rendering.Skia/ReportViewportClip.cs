@@ -24,8 +24,8 @@ public static class ReportViewportClip
             || !double.IsFinite(viewport.Width) || !double.IsFinite(viewport.Height)
             || !double.IsFinite(viewport.Right) || !double.IsFinite(viewport.Bottom)
             || viewport.Width < 0 || viewport.Height < 0
-            || !float.IsFinite((float)viewport.X) || !float.IsFinite((float)viewport.Y)
-            || !float.IsFinite((float)viewport.Right) || !float.IsFinite((float)viewport.Bottom))
+            || Math.Abs(viewport.X) > float.MaxValue || Math.Abs(viewport.Y) > float.MaxValue
+            || Math.Abs(viewport.Right) > float.MaxValue || Math.Abs(viewport.Bottom) > float.MaxValue)
             throw new ArgumentException("Viewport edges must be finite and representable by Skia.", nameof(viewport));
         if (viewport.Width == 0 || viewport.Height == 0) return SKRect.Empty;
         static float Lower(double value) { float result = (float)value; return result > value ? MathF.BitDecrement(result) : result; }

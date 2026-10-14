@@ -28,6 +28,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     private bool showFullPage;
     public bool ShowFullPage { get => showFullPage; set { if (showFullPage == value) return; showFullPage = value; Refresh(); } }
     public DesignerSession Session { get; }
+    public DesignerFormatPainter FormatPainter { get; }
     public ReportRenderer Renderer { get; }
     public bool ShowGrid { get => surface.ShowGrid; set { if (surface.ShowGrid == value) return; surface.ShowGrid = value; surface.Invalidate(); ViewChanged?.Invoke(); } }
     public bool ShowRulers { get => surface.ShowRulers; set { if (surface.ShowRulers == value) return; surface.ShowRulers = value; surface.Invalidate(); ViewChanged?.Invoke(); } }
@@ -57,6 +58,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public ReportDesignView(DesignerSession session, ReportRenderer renderer)
     {
         Session = session; Renderer = renderer; activity = new(session); IsTabStop = true;
+        FormatPainter = new(session);
         surface = new(session, renderer, VisibleViewport) { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
         scroll = new() { Content = surface, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Enabled, VerticalScrollMode = ScrollMode.Enabled, Background = ControlTheme.Brush("#C3C3C3") };
         Content = scroll; ControlTheme.Identify(this, "report-design-view", "Report design surface");
@@ -112,6 +114,11 @@ public sealed class ReportDesignView : UserControl, IDisposable
         var pointer = e.GetCurrentPoint(surface);
         if (!pointer.Properties.IsLeftButtonPressed && pointer.PointerDevice.PointerDeviceType == Windows.Devices.Input.PointerDeviceType.Mouse) return;
         Focus(FocusState.Pointer); start = new(pointer.Position.X / PointScale, pointer.Position.Y / PointScale);
+        if (FormatPainter.IsActive)
+        {
+            if (surface.Layout.HitTest(start.X, start.Y) is { } target) FormatPainter.Apply([target.Item.Id]);
+            e.Handled = true; return; // Painting never starts a resize, drag or marquee.
+        }
         clickSelection = null; pointerMoved = false;
         additive = (e.KeyModifiers & (VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift)) != 0;
         resizeHandle = surface.Layout.HitSelectedHandle(Session.SelectedIds, start.X, start.Y, 5 / PointScale)?.Handle;
@@ -167,7 +174,10 @@ public sealed class ReportDesignView : UserControl, IDisposable
             switch (e.Key)
             {
                 case VirtualKey.Delete: Session.DeleteSelection(); break;
-                case VirtualKey.Escape: Cancel(); Session.Select(null); break;
+                case VirtualKey.Escape:
+                    if (FormatPainter.IsActive) FormatPainter.Cancel();
+                    else { Cancel(); Session.Select(null); }
+                    break;
                 case VirtualKey.Left: Session.Move(-1, 0); break;
                 case VirtualKey.Right: Session.Move(1, 0); break;
                 case VirtualKey.Up: Session.Move(0, -1); break;
@@ -183,7 +193,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     {
         if (disposed) return; disposed = true;
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectionChanged;
-        surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); surface.GridPainter.Clear(); base.Dispose();
+        FormatPainter.Dispose(); surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); surface.GridPainter.Clear(); base.Dispose();
     }
     private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer, Func<RectD?> visibleViewport) : SKCanvasElement
     {

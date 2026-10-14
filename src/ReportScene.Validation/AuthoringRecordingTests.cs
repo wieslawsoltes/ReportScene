@@ -72,7 +72,11 @@ public static class AuthoringRecordingTests
         yield return Test("invalid clips are rejected before changing the canvas", () =>
         {
             using var surface = SKSurface.Create(new SKImageInfo(100, 100));
-            foreach (var r in new[] { new RectD(double.NaN, 0, 0, 0), new RectD(0, 0, -1, 1), new RectD(0, 0, double.PositiveInfinity, 1), new RectD(double.MaxValue, 0, 1, 1) })
+            foreach (var r in new[] { new RectD(double.NaN, 0, 0, 0), new RectD(0, 0, -1, 1), new RectD(0, 0, double.PositiveInfinity, 1), new RectD(double.MaxValue, 0, 1, 1),
+                // These binary64 edges cast to finite float.MaxValue, but rounding
+                // outward would step to infinity without an exact range guard.
+                new RectD(0, 0, (double)float.MaxValue + Math.ScaleB(1d, 102), 1),
+                new RectD(-(double)float.MaxValue - Math.ScaleB(1d, 102), 0, 1, 1) })
                 Conformance.Throws<ArgumentException>(() => ReportViewportClip.Apply(surface.Canvas, r));
             Conformance.Equal(false, surface.Canvas.IsClipEmpty);
         });

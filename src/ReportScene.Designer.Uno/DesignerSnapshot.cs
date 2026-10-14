@@ -137,6 +137,7 @@ public sealed partial class ReportDesignerControl
         void Input(string id, FrameworkElement element)
         {
             if (element is Control control) inputs[id + "-enabled"] = control.IsEnabled.ToString();
+            if (element is ReportRepeatToggleButton repeat) inputs[id + "-input-trace"] = repeat.InputTrace;
             switch (element)
             {
                 case TextBox text: inputs[id] = text.Text; break;
