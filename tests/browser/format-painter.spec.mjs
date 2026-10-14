@@ -53,16 +53,26 @@ test('native format painter copies appearance with one click and exact undo with
 test('native format painter repeat mode skips locked targets and Escape cancels without another edit', async ({ page }, info) => {
   await ready(page); await load(page); await selectObject(page, 'b'); await click(page, 'tab-layout'); await click(page, 'lock-objects');
   await click(page, 'tab-home'); await selectObject(page, 'a'); const original = await save(page), before = await state(page);
-  async function repeat() {
-    const r = await bounds(page, 'format-painter'); await page.mouse.dblclick(r.X + r.Width / 2, r.Y + r.Height / 2); await fresh(page);
-    await artifact(info, 'repeat-native-input.json', { inputs: (await state(page)).Inputs, status: (await state(page)).Status });
+  async function repeat(offsetX = 0) {
+    const r = await bounds(page, 'format-painter'), x = r.X + r.Width / 2 + offsetX;
+    expect(x).toBeGreaterThan(r.X); expect(x).toBeLessThan(r.X + r.Width);
+    await page.mouse.dblclick(x, r.Y + r.Height / 2); await fresh(page);
+    await artifact(info, `repeat-native-input-${offsetX ? 'rearmed' : 'initial'}.json`, {
+      inputs: (await state(page)).Inputs, status: (await state(page)).Status, point: { x, y: r.Y + r.Height / 2 }
+    });
     await active(page, true); await expect.poll(async () => (await state(page)).Status).toContain('multiple objects');
+    await expect.poll(async () => (await state(page)).Inputs['format-painter-input-trace'])
+      .toMatch(/double-tap>press>release>toggle-suppressed>click-suppressed$/);
   }
   await repeat();
   // The next ordinary click cancels; the double-tap release must not consume it.
   await click(page, 'format-painter'); await active(page, false);
   expect((await state(page)).HistoryCount).toBe(before.HistoryCount);
-  await repeat();
+  // The pinned native recognizer pairs taps within 10 DIPs / 500 ms. Keep
+  // cancellation immediate, but start the next distinct double-click 12 DIPs
+  // away inside the same button, so it cannot pair with that cancel click.
+  // This is real spatial input separation, not a sleep, retry or model command.
+  await repeat(12);
   await rawObjectClick(page, 'b'); await active(page, true); expect(await save(page)).toEqual(original);
   expect((await state(page)).HistoryCount).toBe(before.HistoryCount); expect((await state(page)).Objects.find(o => o.Id === 'a').Selected).toBe(true);
   await selectObject(page, 'c'); await active(page, true);

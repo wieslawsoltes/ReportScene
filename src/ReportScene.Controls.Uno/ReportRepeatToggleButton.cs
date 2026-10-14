@@ -45,13 +45,22 @@ public sealed class ReportRepeatToggleButton : ToggleButton
     protected override void OnPointerPressed(PointerRoutedEventArgs e)
     {
         Trace("press");
-        completingDoubleTap = false;
+        // Uno recognizes a double tap on the second DOWN, before this override
+        // runs (verified by InputTrace). Its paired release/click still needs
+        // the suppression set by that recognition; do not clear it here.
         base.OnPointerPressed(e);
     }
     protected override void OnPointerReleased(PointerRoutedEventArgs e)
     {
         Trace("release");
-        base.OnPointerReleased(e);
+        try { base.OnPointerReleased(e); }
+        finally { completingDoubleTap = false; } // Also retire a cancelled release.
+    }
+    protected override void OnPointerCanceled(PointerRoutedEventArgs e)
+    {
+        Trace("cancel");
+        completingDoubleTap = false;
+        base.OnPointerCanceled(e);
     }
     protected override void OnKeyDown(KeyRoutedEventArgs e)
     {

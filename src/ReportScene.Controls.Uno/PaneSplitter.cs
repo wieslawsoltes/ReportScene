@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using ReportScene.Designer;
 using Windows.Foundation;
 using Windows.System;
 
@@ -10,6 +11,7 @@ namespace ReportScene.Controls.Uno;
 public sealed class PaneSplitter : UserControl
 {
     private readonly Border line = new() { Background = ControlTheme.Brush("#D0D0D0"), BorderThickness = new(0) };
+    private readonly DesignerPaneResetGesture resetGesture = new();
     private UIElement? reference;
     private Point start;
     private double value = 280, original;
@@ -49,21 +51,33 @@ public sealed class PaneSplitter : UserControl
             if (point.PointerDevice.PointerDeviceType == Windows.Devices.Input.PointerDeviceType.Mouse && !point.Properties.IsLeftButtonPressed) return;
             reference = Parent as UIElement ?? this; start = e.GetCurrentPoint(reference).Position; original = Value; pointer = e.Pointer;
             dragging = CapturePointer(e.Pointer); Focus(FocusState.Pointer);
-            if (dragging) InteractionStarted?.Invoke(); else pointer = null;
+            if (dragging) { resetGesture.Begin(); InteractionStarted?.Invoke(); }
+            else { pointer = null; resetGesture.Interrupt(); }
             e.Handled = true;
         };
         PointerMoved += (_, e) =>
         {
             if (!dragging || pointer?.PointerId != e.Pointer.PointerId) return;
-            var point = e.GetCurrentPoint(reference).Position; double delta = Orientation == Orientation.Vertical ? point.X - start.X : point.Y - start.Y;
+            var point = e.GetCurrentPoint(reference).Position;
+            resetGesture.Move(point.X - start.X, point.Y - start.Y);
+            double delta = Orientation == Orientation.Vertical ? point.X - start.X : point.Y - start.Y;
             Value = original + (Reverse ? -delta : delta); e.Handled = true;
         };
         PointerReleased += (_, e) => { if (pointer?.PointerId == e.Pointer.PointerId) End(false); e.Handled = true; };
         PointerCanceled += (_, _) => End(true);
-        PointerCaptureLost += (_, _) => { if (dragging) End(false); };
-        DoubleTapped += (_, e) => { End(false); ResetRequested?.Invoke(); e.Handled = true; };
+        PointerCaptureLost += (_, _) => { if (dragging) End(true); };
+        Unloaded += (_, _) => { End(true); resetGesture.Interrupt(); };
+        DoubleTapped += (_, e) =>
+        {
+            resetGesture.RequestReset(); e.Handled = true;
+            // A double-tap may precede the second press or follow its release.
+            // Never reset on press: Escape and a subsequent drag still own the
+            // opening size. This one queued observation also supports late taps.
+            DispatcherQueue.TryEnqueue(() => { if (resetGesture.TryCompleteReset()) ResetRequested?.Invoke(); });
+        };
         KeyDown += (_, e) =>
         {
+            resetGesture.Interrupt();
             if (e.Key == VirtualKey.Escape && dragging) { End(true); e.Handled = true; return; }
             double direction = e.Key switch
             {
@@ -77,11 +91,13 @@ public sealed class PaneSplitter : UserControl
     }
     private void End(bool cancel)
     {
-        if (!dragging) return;
+        if (!dragging) { if (cancel) resetGesture.Interrupt(); return; }
         // Keep transient-state guards active while restoring the visible value.
         if (cancel) Value = original;
+        bool reset = resetGesture.Complete(cancel);
         dragging = false; var captured = pointer; pointer = null;
         if (captured is not null) ReleasePointerCapture(captured);
         line.Background = ControlTheme.Brush("#D0D0D0"); InteractionCompleted?.Invoke(cancel);
+        if (reset) ResetRequested?.Invoke();
     }
 }

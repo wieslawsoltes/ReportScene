@@ -23,3 +23,19 @@ pixel/input requirements and 72 scenarios remain mandatory before merging.
 Primary references:
 - https://github.com/unoplatform/uno/blob/da217df2312e9e39676880f9cb4b8d519cc297e0/src/Uno.UI/UI/Xaml/Controls/Primitives/ButtonBase/ButtonBase.mux.cs
 - https://learn.microsoft.com/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.uielement.doubletapped
+
+## Final failure trace and correction
+
+Run 38542423395 retained the actual sequence
+`press>release>toggle>click-activate>double-tap>press>release>toggle>click-activate`.
+The recognizer emits DoubleTapped on the second down before the derived
+OnPointerPressed runs. Clearing suppression in that override erased the very
+flag needed by the following release. The corrected override preserves the
+flag; paired Click consumes it, and release completion, pointer cancellation,
+keyboard activation and unloading clear any unconsumed flag.
+
+All three existing native-input Format Painter scenarios remain unchanged,
+including double-click activation, next ordinary click cancellation, rearming,
+locked targets, keyboard activation, Escape, exact saved reports and undo.
+This is subject to the new full-head CI run, not retrospective acceptance of
+the failed run.
