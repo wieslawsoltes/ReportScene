@@ -30,7 +30,15 @@ retains separate initial/rearmed diagnostic artifacts rather than overwriting
 the first one. All target, lock, history, undo, saved-content and Escape checks
 remain. All 73 scenarios still run once across all eight shards.
 
-The production source tree is unchanged by this test-precondition correction.
+The new pane scenario's intentional double-click reset uses the same spatial
+precondition along the splitter's long axis, separating it from the preceding
+keyboard-sizing click. This prevents that setup from depending on whether a
+diagnostic publication happens before or after 500 ms. Both coordinates must
+remain inside the real splitter. The rapid click/second-held-press/move/Escape
+sequence is deliberately unchanged: it still tests adjacent input and cannot
+be hidden by waiting for the native double-tap window to expire.
+
+The production source tree is unchanged by these test-precondition corrections.
 Fresh whole-head acceptance is required; the earlier run remains a failure.
 
 Primary pinned source:

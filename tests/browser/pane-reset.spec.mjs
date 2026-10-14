@@ -15,7 +15,13 @@ test('pane double-click resets on release while rapid resize Escape preserves co
     let [x, y] = point(r); await page.mouse.click(x, y); await page.keyboard.press(arrow);
     await expect.poll(async () => (await state(page))[key]).toBe(normal + 8);
     r = await bounds(page, id); [x, y] = point(r);
-    await page.mouse.dblclick(x, y);
+    // A separate native reset gesture must not pair with the preceding
+    // keyboard-sizing click. Move >10 DIPs along the same splitter, without
+    // sleeping or changing its resize axis, before the genuine double-click.
+    const resetX = x + (id === 'sidebar-splitter' ? 0 : 12), resetY = y + (id === 'sidebar-splitter' ? 12 : 0);
+    expect(resetX).toBeGreaterThan(r.X); expect(resetX).toBeLessThan(r.X + r.Width);
+    expect(resetY).toBeGreaterThan(r.Y); expect(resetY).toBeLessThan(r.Y + r.Height);
+    await page.mouse.dblclick(resetX, resetY);
     await expect.poll(async () => (await state(page))[key], { message: 'A genuine native double click still resets layout' }).toBe(normal);
     r = await bounds(page, id); [x, y] = point(r);
     await page.mouse.click(x, y); await page.keyboard.press(arrow);
