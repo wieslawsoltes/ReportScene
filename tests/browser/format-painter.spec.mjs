@@ -55,6 +55,7 @@ test('native format painter repeat mode skips locked targets and Escape cancels 
   await click(page, 'tab-home'); await selectObject(page, 'a'); const original = await save(page), before = await state(page);
   async function repeat() {
     const r = await bounds(page, 'format-painter'); await page.mouse.dblclick(r.X + r.Width / 2, r.Y + r.Height / 2); await fresh(page);
+    await artifact(info, 'repeat-native-input.json', { inputs: (await state(page)).Inputs, status: (await state(page)).Status });
     await active(page, true); await expect.poll(async () => (await state(page)).Status).toContain('multiple objects');
   }
   await repeat();
