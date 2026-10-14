@@ -159,11 +159,14 @@ public sealed class ReportColorEditor : UserControl
             : ReferenceEquals(input, green) ? observedGreen : ReferenceEquals(input, blue) ? observedBlue : observedAlpha;
         if (synchronizing != 0 || input.Text == previous) return;
         bool fromHex = ReferenceEquals(input, hex);
-        HasUserChanges = true; RememberText();
-        // Preserve the active draft and caret. Normalizing six typed digits would
-        // otherwise insert '#' mid-entry and prevent typing an eight-digit ARGB value.
-        if (fromHex && DesignerColorValue.TryParse(hex.Text, out var parsed)) { ApplyValue(parsed, true, false); return; }
-        if (!fromHex && TryChannels(out var channels)) { ApplyValue(channels, false, true); return; }
+        RememberText();
+        // Invalid text is only a draft, not an accepted color choice. Otherwise
+        // Escape followed by Apply could flatten a mixed selection unintentionally.
+        // Preserve the active draft and caret while typing eight-digit ARGB values.
+        if (fromHex && DesignerColorValue.TryParse(hex.Text, out var parsed))
+        { HasUserChanges = true; ApplyValue(parsed, true, false); return; }
+        if (!fromHex && TryChannels(out var channels))
+        { HasUserChanges = true; ApplyValue(channels, false, true); return; }
         _ = TryRead(out _, out string message); error.Text = message; StateChanged?.Invoke();
     }
     private bool TryChannels(out DesignerColorValue color)

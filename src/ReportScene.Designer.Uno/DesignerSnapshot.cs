@@ -38,12 +38,17 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public long DesignLayoutBuilds { get; init; }
     public RectD DesignPaintViewport { get; init; }
     public int DesignDrawnObjects { get; init; }
+    public RectD DesignRecordingClip { get; init; }
+    public double DesignRecordingMilliseconds { get; init; }
+    public long DesignDeferredRenders { get; init; }
+    public int DesignGridPoints { get; init; }
+    public int DesignGridSubmissions { get; init; }
     public int ReplacementScanCount { get; init; }
     public long OutlineCreatedNodes { get; init; }
     public long OutlineUpdates { get; init; }
     public long OutlineSnapshotBuilds { get; init; }
-    public int OutlineContextCount { get; init; }
     public string OutlineContextKey { get; init; } = "";
+    public int OutlineContextCount { get; init; }
     public int OutlineProjectedCount { get; init; }
     public int OutlineVisibleRows { get; init; }
     public string OutlineFilter { get; init; } = "";
@@ -92,15 +97,16 @@ public sealed partial class ReportDesignerControl
     /// <summary>Read-only diagnostic data. Test drivers deliver real input, never invoke application commands.</summary>
     public DesignerSnapshot Snapshot()
     {
-        bool Visible(FrameworkElement element)
+        bool InVisibleTree(FrameworkElement element)
         {
-            if (!element.IsLoaded || element.ActualWidth <= 0 || element.ActualHeight <= 0) return false;
-            for (DependencyObject? p = element; p is not null; p = VisualTreeHelper.GetParent(p)) if (p is UIElement ui && ui.Visibility != Visibility.Visible) return false;
+            if (!element.IsLoaded) return false;
+            for (DependencyObject? p = element; p is not null; p = VisualTreeHelper.GetParent(p))
+                if (p is UIElement ui && ui.Visibility != Visibility.Visible) return false;
             return true;
         }
         ElementBounds? Bounds(FrameworkElement element)
         {
-            if (!Visible(element)) return null;
+            if (!InVisibleTree(element) || element.ActualWidth <= 0 || element.ActualHeight <= 0) return null;
             try { var p = element.TransformToVisual(null).TransformPoint(new(0, 0)); return new(p.X, p.Y, element.ActualWidth, element.ActualHeight); }
             catch (InvalidOperationException) { return null; }
         }
@@ -131,6 +137,7 @@ public sealed partial class ReportDesignerControl
         void Input(string id, FrameworkElement element)
         {
             if (element is Control control) inputs[id + "-enabled"] = control.IsEnabled.ToString();
+            if (element is ReportRepeatToggleButton repeat) inputs[id + "-input-trace"] = repeat.InputTrace;
             switch (element)
             {
                 case TextBox text: inputs[id] = text.Text; break;
@@ -153,8 +160,12 @@ public sealed partial class ReportDesignerControl
         }
         foreach (var pair in commands.Concat(tree.Elements()).Concat(PreviewView.OutlineElements()))
         {
-            if (Bounds(pair.Value) is not { } bounds) continue;
-            commandBounds[pair.Key] = bounds; Input(pair.Key, pair.Value);
+            if (Bounds(pair.Value) is { } bounds)
+            { commandBounds[pair.Key] = bounds; Input(pair.Key, pair.Value); }
+            // An empty validation TextBlock may legitimately measure zero width.
+            // Its native Text still exists; report it without inventing a clickable
+            // rectangle. Unloaded or collapsed controls remain excluded.
+            else if (pair.Value is TextBlock label && InVisibleTree(label)) Input(pair.Key, label);
         }
         if (Bounds(DesignView.CanvasElement) is { } designPaper) commandBounds["design-paper"] = designPaper;
         if (Bounds(DesignView.ViewportElement) is { } designViewport) commandBounds["design-viewport"] = designViewport;
@@ -174,6 +185,9 @@ public sealed partial class ReportDesignerControl
             PreviewSelectedBookmark = PreviewView.SelectedBookmarkKey, PreviewHighlight = PreviewView.HighlightBounds, PreviewRevealPending = PreviewView.RevealPending,
             SearchQueryScans = searchSession?.QueryScanCount ?? 0, SearchMatches = searchSession?.Matches.Count ?? 0, RecoveryPending = recovery.HasPending,
             DesignLayoutBuilds = DesignView.LayoutBuildCount, DesignPaintViewport = DesignView.LastPaintViewport, DesignDrawnObjects = DesignView.LastDrawnObjectCount,
+            DesignRecordingClip = DesignView.LastRecordingClip, DesignRecordingMilliseconds = DesignView.LastRecordingMilliseconds,
+            DesignDeferredRenders = DesignView.DeferredRenderCount,
+            DesignGridPoints = DesignView.LastGridStatistics.Points, DesignGridSubmissions = DesignView.LastGridStatistics.Submissions,
             ReplacementScanCount = Session.LastReplacementScanCount,
             OutlineCreatedNodes = tree.CreatedNodeCount, OutlineUpdates = tree.UpdateCount, OutlineSnapshotBuilds = outlineSnapshotBuilds,
             OutlineContextCount = tree.ContextCount, OutlineContextKey = tree.ContextKey, OutlineProjectedCount = tree.ProjectedCount,

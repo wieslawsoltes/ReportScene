@@ -1,15 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 import { state, ready, fresh, bounds, click, choose, save, artifact, screenshot } from './uno-driver.mjs';
 import { loadDesignerFixture, selectObject, typeProperty, filterProperties } from './designer-fixture.mjs';
 
 async function paperPixel(page, path) {
   const bytes = await screenshot(page, path);
-  return page.evaluate(async base64 => {
-    const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-    return Array.from(context.getImageData(700, 800, 1, 1).data);
-  }, bytes.toString('base64'));
+  return screenshotPixels(bytes).pixel(700, 800);
 }
 
 async function expectPaperPixel(page, info, full, name) {

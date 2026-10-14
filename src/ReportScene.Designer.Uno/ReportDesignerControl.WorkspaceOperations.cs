@@ -97,12 +97,7 @@ public sealed partial class ReportDesignerControl
         var file = new ReportExporter().Export(report, format, document: Session.Document); await host.SaveFileAsync(file);
         Operations.EnsureCurrent(revision); SetStatus($"Exported {file.Name} · {file.Content.Length:N0} bytes");
     }
-    private async Task PrintAsync()
-    {
-        var revision = Operations.CaptureRevision(); var report = prepared ?? Prepare(); prepared = report;
-        await host.PrintAsync(new ReportExporter().Export(report, ExportFormat.Html));
-        Operations.EnsureCurrent(revision); SetStatus("Opened the prepared report for printing.");
-    }
+    private Task PrintAsync() => PrintOptionsAsync();
     private async Task CopyAsync()
     { int count = await Operations.CopyAsync(host.SetClipboardTextAsync); SetStatus("Copied " + count + " object(s)"); }
     private Task CutAsync() => Operations.CutAsync(host.SetClipboardTextAsync);

@@ -95,8 +95,6 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      # More isolated machines, not more workers sharing a software-GPU process.
-      # Every scenario still runs once; all eight reports are required below.
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
@@ -108,9 +106,10 @@ jobs:
         with:
           name: browser-app
           path: artifacts/testsite/ReportScene
-      - name: Install browser test dependencies
+      - name: Install and validate browser inspection dependencies
         run: |
           npm install --prefix tests/browser
+          npm run test:pixels --prefix tests/browser
           cd tests/browser
           npx playwright install --with-deps chromium
       - name: Test the shared published build with native input

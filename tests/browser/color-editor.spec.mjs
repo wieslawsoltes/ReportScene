@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 import { ready, state, fresh, bounds, click, fill, save, artifact, screenshot } from './uno-driver.mjs';
 import { loadDesignerFixture, selectObject } from './designer-fixture.mjs';
 
@@ -17,14 +18,9 @@ async function previewPixel(page, info, expected, name) {
   await expect.poll(async () => {
     const r = await bounds(page, 'color-current-preview');
     const bytes = await screenshot(page, info.outputPath(name));
-    return page.evaluate(async ({ base64, r, expected }) => {
-      const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-      const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-      // The first checkerboard cell is white; avoid text, border and other cells.
-      const pixel = context.getImageData(Math.floor(r.X + 8), Math.floor(r.Y + 8), 1, 1).data;
-      return expected.every((value, i) => Math.abs(pixel[i] - value) <= 8);
-    }, { base64: bytes.toString('base64'), r, expected });
+    // The first checkerboard cell is white; avoid text, border and other cells.
+    const pixel = screenshotPixels(bytes).pixel(r.X + 8, r.Y + 8);
+    return expected.every((value, i) => Math.abs(pixel[i] - value) <= 8);
   }, { message: 'Actual checkerboard preview must paint the selected RGBA color' }).toBe(true);
 }
 

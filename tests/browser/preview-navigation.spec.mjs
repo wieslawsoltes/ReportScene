@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { ready, state, fresh, bounds, click, fill, choose, save, artifact, screenshot } from './uno-driver.mjs';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 
 function evidence(snapshot) {
   return { page: snapshot?.PreviewPage, zoom: snapshot?.Zoom, renderCount: snapshot?.RenderCount,
@@ -51,12 +52,8 @@ async function focusPaper(page) {
 }
 async function samplePixels(page, path, points) {
   const image = await screenshot(page, path);
-  return page.evaluate(async ({ base64, points }) => {
-    const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-    return points.map(([x, y]) => Array.from(context.getImageData(Math.floor(x), Math.floor(y), 1, 1).data));
-  }, { base64: image.toString('base64'), points });
+  const pixels = screenshotPixels(image);
+  return points.map(([x, y]) => pixels.pixel(x, y));
 }
 
 test('preview first last and strict page entry synchronize native controls without stale navigation or edits', async ({ page }, info) => {
@@ -121,17 +118,17 @@ test('whole-page fitting uses both viewport axes and preserves prepared content 
         && paper.X >= viewport.X && paper.Y >= viewport.Y && paper.X + paper.Width <= viewport.X + viewport.Width
         && paper.Y + paper.Height <= viewport.Y + viewport.Height);
     }, { message: 'The entire actual paper element fits inside the viewport with gutters' }).toBe(true);
-    const r = await bounds(page, 'preview-paper'), scale = (await state(page)).Zoom * 96 / 72;
     console.log('PREVIEW_FIT', width, JSON.stringify(evidence(await state(page))));
     let samples;
     await expect.poll(async () => {
+      const snapshot = await state(page), r = snapshot.Commands['preview-paper'], scale = snapshot.Zoom * 96 / 72;
       samples = await samplePixels(page, info.outputPath(`whole-page-${width}.png`), [
         [r.X + 10, r.Y + r.Height - 10], [r.X + 52 * scale, r.Y + (841.89 - 24) * scale]
       ]);
-      return Math.min(...samples[0].slice(0, 3));
-    }, { message: 'The fitted lower paper region is visibly white in the presented frame' }).toBeGreaterThan(245);
-    // Actual lower-page report content must survive too; a white control background
-    // cannot satisfy this assertion or hide a missing recorded footer.
+      return Math.min(...samples[0].slice(0, 3)) > 245 && samples[1].every((value, i) => value === [48, 94, 160, 255][i]);
+    }, { message: 'The same presented frame contains both fitted white paper and the exact blue footer' }).toBe(true);
+    // Layout/diagnostic state may precede presentation. Both original pixel
+    // requirements must hold together, not white from a stale pre-fit frame.
     expect(samples[1]).toEqual([48, 94, 160, 255]);
     await artifact(info, `whole-page-pixels-${width}.json`, samples);
     expect((await state(page)).PreviewIndexBuilds).toBe(builds); expect((await state(page)).PreparedPages).toBe(1);

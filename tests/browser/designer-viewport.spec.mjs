@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { ready, state, fresh, bounds, click, choose, save, artifact, screenshot } from './uno-driver.mjs';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 
 function fixture() {
   const text = (id, x, y, width, height, style) => ({ $type: 'text', id, name: id, text: '', bounds: { x, y, width, height }, style });
@@ -30,14 +31,10 @@ async function expectColor(page, info, file, sample, expected) {
     const s = await state(page), point = sample(s);
     if (!point) return false;
     const bytes = await screenshot(page, info.outputPath(file));
-    return page.evaluate(async ({ base64, point, expected }) => {
-      const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
-      if (point.x < 0 || point.y < 0 || point.x >= image.width || point.y >= image.height) return false;
-      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-      const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
-      const actual = Array.from(context.getImageData(Math.floor(point.x), Math.floor(point.y), 1, 1).data);
-      return expected.every((value, i) => Math.abs(actual[i] - value) <= 8);
-    }, { base64: bytes.toString('base64'), point, expected });
+    const pixels = screenshotPixels(bytes);
+    if (point.x < 0 || point.y < 0 || point.x >= pixels.width || point.y >= pixels.height) return false;
+    const actual = pixels.pixel(point.x, point.y);
+    return expected.every((value, i) => Math.abs(actual[i] - value) <= 8);
   }, { message: `Native authoring pixels match ${file}, not only object metadata` }).toBe(true);
 }
 
@@ -65,7 +62,14 @@ test('authoring viewport paints distant content at multiple scales and scrolls w
       return { x: r.X + r.Width / 2, y: r.Y + r.Height / 2 };
     }, [16, 136, 64]);
     expect((await state(page)).DesignLayoutBuilds).toBe(beforeScroll.DesignLayoutBuilds);
-    observations.push({ zoom, viewport: (await state(page)).DesignPaintViewport, drawn: (await state(page)).DesignDrawnObjects });
+    const current = await state(page), clip = current.DesignRecordingClip, logical = current.DesignPaintViewport;
+    expect(clip.X).toBeLessThanOrEqual(logical.X); expect(clip.Y).toBeLessThanOrEqual(logical.Y);
+    expect(clip.Width).toBeLessThanOrEqual(logical.Width + .01); expect(clip.Height).toBeLessThanOrEqual(logical.Height + .01);
+    expect(clip.Width * current.Zoom * 96 / 72).toBeLessThanOrEqual(current.Commands['design-viewport'].Width + 4.1);
+    expect(clip.Height * current.Zoom * 96 / 72).toBeLessThanOrEqual(current.Commands['design-viewport'].Height + 4.1);
+    observations.push({ zoom, viewport: logical, recordingClip: clip, drawn: current.DesignDrawnObjects,
+      gridPoints: current.DesignGridPoints, gridSubmissions: current.DesignGridSubmissions,
+      recordingMilliseconds: current.DesignRecordingMilliseconds, deferredRenders: current.DesignDeferredRenders });
   }
   expect((await state(page)).ContentRevision).toBe(initial.ContentRevision); expect((await state(page)).HistoryCount).toBe(initial.HistoryCount);
   expect((await state(page)).Dirty).toBe(false); expect((await state(page)).Diagnostics).toEqual([]); expect(await save(page)).toEqual(original);
