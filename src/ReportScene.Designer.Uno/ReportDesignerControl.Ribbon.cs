@@ -50,25 +50,26 @@ public sealed partial class ReportDesignerControl
             }
             Choice("font-family", first is not null && selected.All(i => i.Style.FontFamily == first.Style.FontFamily) ? first.Style.FontFamily : null);
             Choice("font-size", first is not null && selected.All(i => i.Style.FontSize == first.Style.FontSize) ? first.Style.FontSize.ToString("0.###", CultureInfo.InvariantCulture) : null);
-            foreach (var (id, name, predicate) in new (string, string, Func<ItemStyle, bool>)[] { ("bold", "Bold", s => s.Bold), ("italic", "Italic", s => s.Italic), ("underline", "Underline", s => s.Underline) })
+            foreach (var (id, name, predicate) in TextEmphasisChoices)
             {
                 if (!commands.TryGetValue(id, out var element) || element is not ToggleButton button) continue;
                 bool? value = first is null ? false : selected.All(i => predicate(i.Style) == predicate(first.Style)) ? predicate(first.Style) : null;
                 button.IsEnabled = editable; button.IsChecked = value;
-                button.Background = ControlTheme.Brush(value == true ? "#CDE6F7" : value is null ? "#E3E3E3" : "#00FFFFFF");
+                button.Background = value == true ? formattingActiveBrush : value is null ? formattingMixedBrush : formattingInactiveBrush;
                 ToolTipService.SetToolTip(button, name + (value is null ? " (mixed selection)" : ""));
             }
-            foreach (var (id, align) in new[] { ("text-left", TextAlign.Left), ("text-center", TextAlign.Center), ("text-right", TextAlign.Right) })
+            foreach (var (id, align) in HorizontalAlignmentChoices)
                 if (commands.TryGetValue(id, out var element) && element is Button button)
-                { button.IsEnabled = editable; button.Background = ControlTheme.Brush(first is not null && selected.All(i => i.Style.Alignment == align) ? "#CDE6F7" : "#00FFFFFF"); }
-            foreach (string id in new[] { "fill-color", "text-color", "border-color" })
+                { button.IsEnabled = editable; button.Background = first is not null && selected.All(i => i.Style.Alignment == align) ? formattingActiveBrush : formattingInactiveBrush; }
+            foreach (string id in ColorChoiceIds)
                 if (commands.TryGetValue(id, out var element) && element is Control control) control.IsEnabled = editable;
+            SyncAppearance(selected, editable);
         }
         finally { updatingRibbon = false; }
     }
     private void BuildRibbon()
     {
-        ribbon.Children.Clear();
+        ribbon.Children.Clear(); borderWidthChoice = null;
         if (previewMode) { BuildPreviewRibbon(); UpdateStatus(); UpdateTabSelection(); return; }
         switch (activeRibbon)
         {
@@ -83,9 +84,12 @@ public sealed partial class ReportDesignerControl
                 commands["font-family"] = ControlTheme.Identify(font, "font-family", "Font family"); commands["font-size"] = ControlTheme.Identify(size, "font-size", "Font size in points");
                 Group("Text", Vertical(Horizontal(font, size), Horizontal(FormatButton("bold", "Bold", "B"), FormatButton("italic", "Italic", "I"), FormatButton("underline", "Underline", "U"),
                     Command("text-left", "Align text left", "left", () => TextAlignment(TextAlign.Left), text: false), Command("text-center", "Center text", "center", () => TextAlignment(TextAlign.Center), text: false), Command("text-right", "Align text right", "right", () => TextAlignment(TextAlign.Right), text: false))));
-                Group("Paragraph", Vertical(Command("vertical-top", "Top", "left", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Top } })), Command("vertical-center", "Middle", "center", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Center } }))), Command("vertical-bottom", "Bottom", "right", () => Session.UpdateSelection("Vertical alignment", i => i with { Style = i.Style with { VerticalAlignment = Model.VerticalAlign.Bottom } })));
+                Group("Paragraph", Vertical(ControlTheme.Label("Vertical alignment", 10), Horizontal(
+                    AppearanceButton("vertical-top", "Align text top", "text-top", () => Session.SetSelectionVerticalAlignment(Model.VerticalAlign.Top)),
+                    AppearanceButton("vertical-center", "Align text middle", "text-middle", () => Session.SetSelectionVerticalAlignment(Model.VerticalAlign.Center)),
+                    AppearanceButton("vertical-bottom", "Align text bottom", "text-bottom", () => Session.SetSelectionVerticalAlignment(Model.VerticalAlign.Bottom)))));
                 Group("Border & fill", Vertical(AsyncCommand("fill-color", "Fill color", "shape", () => NativeColorAsync(ColorPart.Fill)), AsyncCommand("text-color", "Text color", "text", () => NativeColorAsync(ColorPart.Text))),
-                    Vertical(Command("border", "Border", "rectangle", () => Session.UpdateSelection("Toggle border", i => i with { Style = i.Style with { BorderWidth = i.Style.BorderWidth > 0 ? 0 : 1 } })), AsyncCommand("border-color", "Border color", "rectangle", () => NativeColorAsync(ColorPart.Border))));
+                    Vertical(AppearanceButton("border", "Border", "rectangle", Session.ToggleSelectionBorder, showText: true), AsyncCommand("border-color", "Border color", "rectangle", () => NativeColorAsync(ColorPart.Border))), BorderWidthChoice());
                 Group("Styles", Vertical(Command("style-heading", "Heading", "text", () => ApplyStyle(new() { FontSize = 16, Bold = true, Foreground = "#244F75" })), Command("style-body", "Body", "text", () => ApplyStyle(new() { FontSize = 10 }))));
                 Group("Report", Command("preview", "Preview", "preview", PreparePreview, true), AsyncCommand("save", "Save", "save", SaveAsync, true), AsyncCommand("matrix-edit", "Edit matrix", "table", EditSelectedMatrixAsync, true));
                 break;
