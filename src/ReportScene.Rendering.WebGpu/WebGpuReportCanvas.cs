@@ -80,11 +80,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         r.Left * state.ScaleX + state.X, r.Top * state.ScaleY + state.Y,
         r.Right * state.ScaleX + state.X, r.Bottom * state.ScaleY + state.Y);
     private Vector2 Map(float x, float y) => new(x * state.ScaleX + state.X, y * state.ScaleY + state.Y);
-    private static SKRect Intersection(SKRect a, SKRect b)
-    {
-        float left = Math.Max(a.Left, b.Left), top = Math.Max(a.Top, b.Top);
-        return new(left, top, Math.Max(left, Math.Min(a.Right, b.Right)), Math.Max(top, Math.Min(a.Bottom, b.Bottom)));
-    }
+    private static SKRect Intersection(SKRect a, SKRect b) => ReportViewportClip.Intersect(a, b);
     public override void ClipRect(SKRect rect, SKClipOperation operation = SKClipOperation.Intersect, bool antialias = false)
     {
         if (operation != SKClipOperation.Intersect) throw new NotSupportedException("Report drawing uses rectangular intersection clips.");
@@ -120,7 +116,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     }
     private void Add(GpuPrimitive primitive, GpuTexture? texture = null)
     {
-        if (primitive.Color.W <= 0 || state.Clip.IsEmpty) return;
+        if (primitive.Color.W <= 0 || !ReportViewportClip.HasPositiveArea(state.Clip)) return;
         var q = primitive.Quad;
         var clip = primitive.Clip;
         if (!float.IsFinite(q.X) || !float.IsFinite(q.Y) || !float.IsFinite(q.Z) || !float.IsFinite(q.W))
@@ -210,7 +206,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     public override void DrawPath(SKPath path, SKPaint paint)
     {
         ArgumentNullException.ThrowIfNull(path);
-        if (path.IsEmpty) return;
+        if (path.IsEmpty || !ReportViewportClip.HasPositiveArea(state.Clip)) return;
         // Opaque round-joined polylines (icons/check marks) are direct analytic
         // GPU segments. Compound contours, joins and curves retain exact Skia
         // coverage through a bounded mask; they are never flattened imprecisely.
@@ -253,11 +249,11 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     {
         ArgumentNullException.ThrowIfNull(image);
         var rect = Map(destination);
-        if (rect.IsEmpty) return;
+        if (!ReportViewportClip.HasPositiveArea(rect)) return;
         var coverage = rect;
         coverage.Inflate(1.5f / Math.Min(pixelsX, pixelsY), 1.5f / Math.Min(pixelsX, pixelsY));
         var visible = Intersection(coverage, state.Clip);
-        if (visible.IsEmpty) return;
+        if (!ReportViewportClip.HasPositiveArea(visible)) return;
         using var paint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         if (image.Width > textures.ImageTileSize || image.Height > textures.ImageTileSize)
         {
@@ -326,7 +322,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     }
     public override void DrawText(SkiaTextMeasurer metrics, string text, float x, float baseline, ItemStyle style, SKPaint paint)
     {
-        if (string.IsNullOrEmpty(text) || state.Clip.IsEmpty || paint.Color.Alpha == 0) return;
+        if (string.IsNullOrEmpty(text) || !ReportViewportClip.HasPositiveArea(state.Clip) || paint.Color.Alpha == 0) return;
         var shaped = Shape(metrics, text, style);
         float scale = RasterScale();
         using var font = metrics.CreateFont(style);
@@ -347,7 +343,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
             for (int i = 0; i < count; i++)
             {
                 var ink = bounds[i];
-                if (ink.IsEmpty) continue;
+                if (!ReportViewportClip.HasPositiveArea(ink)) continue;
                 // Match GpuTextureCache.RasterBounds exactly, including floor /
                 // ceil and the transparent filtering guard around overhanging ink.
                 const int guard = GpuTextureCache.CoverageGuard;
@@ -357,7 +353,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
                 float originX = x + point.X, originY = baseline + point.Y;
                 var target = Map(new SKRect(originX + raster.Left / scale, originY + raster.Top / scale,
                     originX + raster.Right / scale, originY + raster.Bottom / scale));
-                if (Intersection(target, state.Clip).IsEmpty) continue;
+                if (!ReportViewportClip.HasPositiveArea(Intersection(target, state.Clip))) continue;
                 var coverage = textures.GetGlyph(font, glyphs[i], paint.Color);
                 DrawCoverage(coverage, originX, originY, scale, paint.Color);
             }
@@ -381,7 +377,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     }
     private void DrawCoverage(GpuCoverage coverage, float x, float baseline, float scale, SKColor color)
     {
-        if (coverage.Bounds.IsEmpty) return;
+        if (!ReportViewportClip.HasPositiveArea(coverage.Bounds)) return;
         var b = coverage.Bounds;
         var rect = Map(new SKRect(x + b.Left / scale, baseline + b.Top / scale, x + b.Right / scale, baseline + b.Bottom / scale));
         using var paint = new SKPaint { Color = coverage.IsColor ? SKColors.White : color, IsAntialias = false };

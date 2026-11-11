@@ -9,6 +9,21 @@ namespace ReportScene.Rendering.Skia;
 /// </summary>
 public static class ReportViewportClip
 {
+    /// <summary>
+    /// Tests geometric area, including rectangles away from the origin.
+    /// SKRect.IsEmpty only identifies the all-zero sentinel in SkiaSharp.
+    /// </summary>
+    public static bool HasPositiveArea(SKRect rect) => rect.Right > rect.Left && rect.Bottom > rect.Top;
+
+    /// <summary>Intersects positive-area bounds, returning the canonical empty rectangle for disjoint or touching edges.</summary>
+    public static SKRect Intersect(SKRect a, SKRect b)
+    {
+        if (!HasPositiveArea(a) || !HasPositiveArea(b)) return SKRect.Empty;
+        float left = Math.Max(a.Left, b.Left), top = Math.Max(a.Top, b.Top);
+        float right = Math.Min(a.Right, b.Right), bottom = Math.Min(a.Bottom, b.Bottom);
+        return right > left && bottom > top ? new(left, top, right, bottom) : SKRect.Empty;
+    }
+
     public static SKRect Apply(SKCanvas canvas, RectD viewport)
     {
         ArgumentNullException.ThrowIfNull(canvas);

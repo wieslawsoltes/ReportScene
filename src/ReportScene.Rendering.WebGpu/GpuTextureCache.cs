@@ -133,7 +133,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         Span<ushort> glyphIds = stackalloc ushort[1] { glyph };
         Span<SKRect> measured = stackalloc SKRect[1];
         rasterFont.GetGlyphWidths(glyphIds, Span<float>.Empty, measured);
-        if (measured[0].IsEmpty) return Empty;
+        if (!ReportViewportClip.HasPositiveArea(measured[0])) return Empty;
         var bounds = RasterBounds(measured[0], 1);
         int width = checked((int)bounds.Width), height = checked((int)bounds.Height);
         if (width > AtlasSize || height > AtlasSize) EnsureBudget(checked((long)width * height * 4));
@@ -316,9 +316,10 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         }
         using var outline = outlineBuilder.Detach();
         var geometry = outline.TightBounds;
-        if (geometry.IsEmpty) return Empty;
+        if (!ReportViewportClip.HasPositiveArea(geometry)) return Empty;
         if (clip is { } visible)
         {
+            if (!ReportViewportClip.HasPositiveArea(visible)) return Empty;
             // Antialias coverage extends past the geometric edge. Retain the
             // small fringe; the GPU still applies the exact viewport clip.
             visible.Inflate(Guard / rasterScale, Guard / rasterScale);

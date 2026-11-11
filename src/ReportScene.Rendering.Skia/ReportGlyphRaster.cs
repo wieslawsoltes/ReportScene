@@ -33,7 +33,7 @@ public static class ReportGlyphRaster
     {
         ArgumentNullException.ThrowIfNull(font);
         if (!float.IsFinite(bounds.Left) || !float.IsFinite(bounds.Top) || !float.IsFinite(bounds.Right) || !float.IsFinite(bounds.Bottom)
-            || !float.IsFinite(bounds.Width) || !float.IsFinite(bounds.Height) || bounds.IsEmpty
+            || !float.IsFinite(bounds.Width) || !float.IsFinite(bounds.Height) || !ReportViewportClip.HasPositiveArea(bounds)
             || bounds.Width != MathF.Truncate(bounds.Width) || bounds.Height != MathF.Truncate(bounds.Height))
             throw new ArgumentException("Glyph raster bounds must describe a finite, positive pixel rectangle.", nameof(bounds));
         var bitmap = ReportImageRaster.Create(checked((int)bounds.Width), checked((int)bounds.Height));

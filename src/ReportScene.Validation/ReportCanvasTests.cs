@@ -14,6 +14,27 @@ public static class ReportCanvasTests
         TestResult Test(string name, Action action)
         { try { action(); return new("report canvas: " + name, true); } catch (Exception error) { return new("report canvas: " + name, false, error.ToString()); } }
 
+        yield return Test("positive-area clips reject offscreen and degenerate bounds away from the origin", () =>
+        {
+            var clip = new SKRect(10, 20, 30, 40);
+            Conformance.Equal(true, ReportViewportClip.HasPositiveArea(clip));
+            foreach (var bounds in new[] {
+                new SKRect(10, 20, 10, 20), new SKRect(10, 20, 30, 20), new SKRect(10, 20, 10, 40),
+                new SKRect(30, 20, 10, 40), new SKRect(10, 40, 30, 20), SKRect.Empty })
+            {
+                Conformance.Equal(false, ReportViewportClip.HasPositiveArea(bounds));
+                Conformance.Equal(SKRect.Empty, ReportViewportClip.Intersect(bounds, clip));
+            }
+            foreach (var bounds in new[] {
+                new SKRect(10, 100, 30, 120), new SKRect(100, 20, 120, 40),
+                new SKRect(30, 20, 50, 40), new SKRect(10, 40, 30, 60) })
+            {
+                Conformance.Equal(SKRect.Empty, ReportViewportClip.Intersect(bounds, clip));
+                Conformance.Equal(SKRect.Empty, ReportViewportClip.Intersect(clip, bounds));
+            }
+            Conformance.Equal(new SKRect(20, 30, 30, 40), ReportViewportClip.Intersect(clip, new SKRect(20, 30, 50, 60)));
+        });
+
         yield return Test("nested clips, affine transforms and translucent painter order", () =>
         {
             using var surface = SKSurface.Create(new SKImageInfo(96, 96));

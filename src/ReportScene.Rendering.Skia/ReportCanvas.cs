@@ -33,8 +33,9 @@ public abstract class ReportCanvas
         ArgumentNullException.ThrowIfNull(paint);
         if (!float.IsFinite(dash) || dash <= 0) throw new ArgumentOutOfRangeException(nameof(dash));
         if (!float.IsFinite(gap) || gap <= 0) throw new ArgumentOutOfRangeException(nameof(gap));
-        if (rect.IsEmpty) return;
+        if (!ReportViewportClip.HasPositiveArea(rect)) return;
         var clip = LocalClipBounds;
+        if (!ReportViewportClip.HasPositiveArea(clip)) return;
         var matrix = TotalMatrix;
         double scale = Math.Max(.00001, Math.Min(Math.Abs(matrix.ScaleX), Math.Abs(matrix.ScaleY)));
         float outset = (float)(Math.Max(0, paint.StrokeWidth) * .5 + 2 / scale);
@@ -120,6 +121,7 @@ public sealed class SkiaReportCanvas : ReportCanvas
     {
         if (!float.IsFinite(dash) || dash <= 0) throw new ArgumentOutOfRangeException(nameof(dash));
         if (!float.IsFinite(gap) || gap <= 0) throw new ArgumentOutOfRangeException(nameof(gap));
+        if (!ReportViewportClip.HasPositiveArea(rect)) return;
         using var stroke = paint.Clone();
         using var effect = SKPathEffect.CreateDash([dash, gap], 0);
         stroke.PathEffect = effect;
