@@ -12,7 +12,7 @@ export default defineConfig({
     viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1, browserName: 'chromium',
     // Exercise real WebGPU pipelines on Dawn's software Vulkan adapter in CI.
     // These runs validate pixels and behavior; they are not hardware GPU benchmarks.
-    launchOptions: { args: [
+    launchOptions: { executablePath: process.env.REPORTSCENE_BROWSER_EXECUTABLE, args: [
       '--enable-webgpu', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist',
       '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
       '--use-webgpu-adapter=swiftshader', '--enable-features=Vulkan',

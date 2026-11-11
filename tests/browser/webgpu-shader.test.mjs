@@ -21,7 +21,7 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
   let browser;
   const consoleMessages = [];
   try {
-    browser = await chromium.launch({ headless: true, args: [
+    browser = await chromium.launch({ headless: true, executablePath: process.env.REPORTSCENE_BROWSER_EXECUTABLE, args: [
       '--enable-webgpu', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist',
       '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--use-webgpu-adapter=swiftshader',
       '--enable-features=Vulkan', '--disable-vulkan-surface'
@@ -92,7 +92,7 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
         primitive([8, 77, 48, 6], [0, 1, 1, 1], 3, {
           stroke: 3, cap: 2, data: [8, 80, 56, 80], quad: [4, 76, 56, 8]
         });
-        primitive([80, 64, 48, 48], [1, .5, 0, 1], 5, { data: [0, Math.PI / 2, 0, 0] });
+        primitive([80.25, 64.25, 48, 48], [1, .5, 0, 1], 5, { data: [0, Math.PI / 2, 0, 0] });
         primitive([144, 64, 80, 64], [1, 1, 1, 1], 6, {
           aa: 0, clip: [144, 64, 216, 128], data: [148.5, 68.5, 8, 8], extra: [2, 2, 0, 0], padding: 0
         });
@@ -175,6 +175,7 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
         sample('line body', 32, 80, [0, 255, 255, 255]);
         sample('round line cap', 6, 80, [0, 255, 255, 255]);
         sample('pie included quadrant', 112, 96, [255, 128, 0, 255]);
+        sample('pie radial edge fractional coverage', 112, 88, [191, 96, 0, 191], 2);
         sample('pie excludes upper quadrant', 112, 78, [0, 0, 0, 0]);
         sample('pie excludes lower-left quadrant', 94, 96, [0, 0, 0, 0]);
         sample('procedural grid dot', 148, 68, [255, 255, 255, 255]);
@@ -188,6 +189,7 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
         sample('glyph mask multiplies premultiplied tint', 72, 168, [64, 32, 0, 64]);
         sample('rectangle stroke interior edge', 112, 160, [255, 255, 0, 255]);
         sample('rectangle stroke exterior extension', 110, 160, [255, 255, 0, 255]);
+        sample('rectangle miter outer corner', 110, 142, [255, 255, 0, 255]);
         sample('rectangle stroke leaves center empty', 128, 160, [0, 0, 0, 0]);
         sample('analytic fractional-pixel coverage', 160, 160, [191, 191, 191, 191], 2);
         sample('analytic edge outside', 159, 160, [0, 0, 0, 0]);

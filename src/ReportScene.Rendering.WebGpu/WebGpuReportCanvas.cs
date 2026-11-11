@@ -114,7 +114,8 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
             Quad = new(quad.Left, quad.Top, quad.Width, quad.Height),
             Clip = new(state.Clip.Left, state.Clip.Top, state.Clip.Right, state.Clip.Bottom),
             Color = Premultiplied(paint.Color),
-            Shape = new(kind, stroke, paint.IsAntialias ? 1 : 0, 0)
+            Shape = new(kind, stroke, paint.IsAntialias ? 1 : 0,
+                paint.StrokeJoin switch { SKStrokeJoin.Round => 2, SKStrokeJoin.Bevel => 1, _ => paint.StrokeMiter < 1.414214f ? 1 : 0 })
         };
     }
     private void Add(GpuPrimitive primitive, GpuTexture? texture = null)
@@ -146,7 +147,32 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         {
             using var builder = new SKPathBuilder(); builder.AddRect(rect); using var path = builder.Detach(); DrawPath(path, paint); return;
         }
-        Add(Primitive(Map(rect), paint, 0));
+        var primitive = Primitive(Map(rect), paint, 0);
+        if (primitive.Shape.Y < 0) Add(primitive);
+        else AddRectangleStroke(primitive);
+    }
+
+    private void AddRectangleStroke(GpuPrimitive primitive)
+    {
+        // Keep the exact signed-distance geometry while avoiding shading the
+        // transparent center of large page, table and selection outlines.
+        float pad = primitive.Shape.Y + (primitive.Shape.Z > .5f ? 1.5f / Math.Min(pixelsX, pixelsY) : 0);
+        var rect = primitive.Rect;
+        float left = rect.X + pad, top = rect.Y + pad;
+        float right = rect.X + rect.Z - pad, bottom = rect.Y + rect.W - pad;
+        if (right <= left || bottom <= top) { Add(primitive); return; }
+        var outer = primitive.Quad;
+        void Strip(float x, float y, float width, float height)
+        {
+            var part = primitive;
+            part.Quad = new(x, y, width, height);
+            Add(part);
+        }
+        // Disjoint strips prevent double blending even for translucent strokes.
+        Strip(outer.X, outer.Y, outer.Z, top - outer.Y);
+        Strip(outer.X, bottom, outer.Z, outer.Y + outer.W - bottom);
+        Strip(outer.X, top, left - outer.X, bottom - top);
+        Strip(right, top, outer.X + outer.Z - right, bottom - top);
     }
     public override void DrawRoundRect(SKRect rect, float radiusX, float radiusY, SKPaint paint)
     {

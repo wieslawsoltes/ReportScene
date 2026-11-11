@@ -48,6 +48,7 @@ The backend uses Uno's `WebGpuCanvasContext.Api`, device and queue. Its target f
 ### Quality
 
 - Analytic signed-distance coverage provides fractional-pixel antialiasing for geometric edges, avoiding fixed-resolution page rasterization at zoom.
+- Pie sectors antialias their radial edges as well as their ellipse boundary. Rectangle outlines preserve miter, bevel and round joins; large outlines use disjoint edge strips to avoid shading transparent interiors or blending corners twice.
 - Physical pixel density and zoom determine glyph raster resolution. Raster scales round upward in eighth-unit steps to limit cache churn without undersampling.
 - HarfBuzz glyph IDs and positions come from the same metrics owner used by report preparation. Individual characters are not independently reshaped.
 - Glyph atlas allocations include two transparent guard pixels, preventing neighboring glyphs from bleeding into filtered samples.
@@ -107,11 +108,11 @@ These counters describe CPU-side submission work. They are not GPU execution tim
 
 The initial drawing-contract commit `31eeda45c3201a080f80bc8c7bcfe14c5016e401` passed the GitHub core conformance job, differential benchmarks, all 54 isolated core package-consumer checks, the desktop build and the Uno package-consumer build. This proves the compatibility refactor against the baseline dependencies; it is not a substitute for the full migration checks.
 
-The full Uno 7 / Skia 4 commit `1b6d63994914a04fe86d1eec95fe506bab82a722` also passed core conformance, benchmarks and core package consumers. Its standalone production WGSL suite passed all 37 pixel assertions. The first application compile exposed a removed Skia typeface identity property; the cache now uses a managed monotonic identity and is being revalidated.
+The full Uno 7 / Skia 4 commit `5f35f5fe41490fa9bfd42e9a11dc262ea683485a` passed core conformance, benchmarks, all 54 core package checks, the desktop build, all 14 reusable packages, browser publication and all 37 original production-shader pixel assertions in [run 43109136759](https://github.com/wieslawsoltes/ReportScene/actions/runs/43109136759). Skia 4 typeface identity and immutable path-builder changes and Uno 7 layout signatures are integrated. The actual application browser scenarios currently report a blank presented window after successful WebGPU initialization/submission; this presentation failure is under investigation and the existing pixel assertions remain mandatory.
 
 The migration runs the same gates against Uno 7 / Skia 4, plus:
 
-- an independent WGSL compile/pipeline/readback job with 37 pixel assertions over 15 primitives and two ordered draw calls, including nonzero `firstInstance`;
+- an independent WGSL compile/pipeline/readback job with 39 pixel assertions over 15 primitives and two ordered draw calls, including nonzero `firstInstance`, a fractional pie radial edge and a mitered rectangle corner;
 - native browser evidence for successful WebGPU submission, viewport-sized targets at high zoom, scroll/layout reuse and idle stability;
 - a browser with WebGPU deliberately unavailable, requiring a visible error, splash release and zero GPU report submissions;
 - all existing report editing, preparation, navigation, rendering, import/export and package tests.

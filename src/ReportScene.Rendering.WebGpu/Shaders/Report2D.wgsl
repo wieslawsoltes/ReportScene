@@ -97,7 +97,15 @@ fn segment_distance(point: vec2f, a: vec2f, b: vec2f, half_width: f32, cap: f32)
         let tau = 6.28318530718;
         let relative = angle - p.data.x;
         let turn = relative - floor(relative / tau) * tau;
-        if (turn > p.data.y && p.data.y < tau - 0.0001) { discard; }
+        if (p.data.y < tau - 0.0001) {
+            let start_ray = vec2f(cos(p.data.x), sin(p.data.x)) * half_size;
+            let end_ray = vec2f(cos(p.data.x + p.data.y), sin(p.data.x + p.data.y)) * half_size;
+            let start_point = start_ray * clamp(dot(local, start_ray) / max(dot(start_ray, start_ray), 0.0001), 0, 1);
+            let end_point = end_ray * clamp(dot(local, end_ray) / max(dot(end_ray, end_ray), 0.0001), 0, 1);
+            let edge_distance = min(length(local - start_point), length(local - end_point));
+            let angular_distance = select(edge_distance, -edge_distance, turn <= p.data.y);
+            distance = max(distance, angular_distance);
+        }
     } else if (kind == 6u) {
         // An entire visible dot lattice is one primitive, independent of dot count.
         let cell = (point - p.data.xy) / p.data.zw;
@@ -105,6 +113,19 @@ fn segment_distance(point: vec2f, a: vec2f, b: vec2f, half_width: f32, cap: f32)
         distance = box_distance(point - nearest, max(p.extra.xy * 0.5, vec2f(0.0001)));
         return color * coverage(distance, p.shape.z);
     }
-    if (kind != 3u && kind != 4u && p.shape.y >= 0) { distance = abs(distance) - p.shape.y; }
+    if (kind == 0u && p.shape.y >= 0 && p.shape.w < 1.5) {
+        let half_stroke = p.shape.y;
+        var outer = box_distance(local, half_size + vec2f(half_stroke));
+        if (p.shape.w > 0.5) {
+            let corner = abs(local) - half_size;
+            outer = max(outer, (corner.x + corner.y - half_stroke) * 0.70710678118);
+        }
+        distance = outer;
+        if (all(half_size > vec2f(half_stroke))) {
+            distance = max(outer, -box_distance(local, half_size - vec2f(half_stroke)));
+        }
+    } else if (kind != 3u && kind != 4u && p.shape.y >= 0) {
+        distance = abs(distance) - p.shape.y;
+    }
     return color * coverage(distance, p.shape.z);
 }
