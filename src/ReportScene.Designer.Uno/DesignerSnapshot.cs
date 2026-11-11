@@ -38,6 +38,7 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public int SearchMatches { get; init; }
     public bool RecoveryPending { get; init; }
     public long DesignLayoutBuilds { get; init; }
+    public DesignViewportSnapshot DesignViewport { get; init; }
     public RectD DesignPaintViewport { get; init; }
     public int DesignDrawnObjects { get; init; }
     public RectD DesignRecordingClip { get; init; }
@@ -187,7 +188,8 @@ public sealed partial class ReportDesignerControl
             PreviewOutlineFilter = PreviewView.OutlineFilter, PreviewOutlineProjectedCount = PreviewView.OutlineProjectedCount,
             PreviewSelectedBookmark = PreviewView.SelectedBookmarkKey, PreviewHighlight = PreviewView.HighlightBounds, PreviewRevealPending = PreviewView.RevealPending,
             SearchQueryScans = searchSession?.QueryScanCount ?? 0, SearchMatches = searchSession?.Matches.Count ?? 0, RecoveryPending = recovery.HasPending,
-            DesignLayoutBuilds = DesignView.LayoutBuildCount, DesignPaintViewport = DesignView.LastPaintViewport, DesignDrawnObjects = DesignView.LastDrawnObjectCount,
+            DesignLayoutBuilds = DesignView.LayoutBuildCount, DesignViewport = DesignView.ViewportSnapshot,
+            DesignPaintViewport = DesignView.LastPaintViewport, DesignDrawnObjects = DesignView.LastDrawnObjectCount,
             DesignRecordingClip = DesignView.LastRecordingClip, DesignRecordingMilliseconds = DesignView.LastRecordingMilliseconds,
             DesignDeferredRenders = DesignView.DeferredRenderCount,
             DesignGridPoints = DesignView.LastGridStatistics.Points, DesignGridSubmissions = DesignView.LastGridStatistics.Submissions,

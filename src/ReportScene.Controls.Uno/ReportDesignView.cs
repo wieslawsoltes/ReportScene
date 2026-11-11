@@ -12,6 +12,10 @@ using Windows.System;
 
 namespace ReportScene.Controls.Uno;
 
+/// <summary>Native scroll geometry and the ScrollViewer animation state.</summary>
+public readonly record struct DesignViewportSnapshot(double Width, double Height, double ExtentWidth, double ExtentHeight,
+    double HorizontalOffset, double VerticalOffset, bool IsIntermediate);
+
 public sealed class ReportDesignView : UserControl, IDisposable
 {
     private readonly DesignerCanvas surface;
@@ -24,7 +28,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     private string? clickSelection;
     private bool pointerMoved;
     private double zoom = .85;
-    private bool showFullPage;
+    private bool showFullPage, scrollIsIntermediate;
     public bool ShowFullPage { get => showFullPage; set { if (showFullPage == value) return; showFullPage = value; Refresh(); } }
     public DesignerSession Session { get; }
     public DesignerFormatPainter FormatPainter { get; }
@@ -46,6 +50,8 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public long LayoutBuildCount { get; private set; } = 1;
     public FrameworkElement CanvasElement => surface;
     public FrameworkElement ViewportElement => scroll;
+    public DesignViewportSnapshot ViewportSnapshot => new(scroll.ViewportWidth, scroll.ViewportHeight, scroll.ExtentWidth, scroll.ExtentHeight,
+        scroll.HorizontalOffset, scroll.VerticalOffset, scrollIsIntermediate);
     public RectD LastPaintViewport => surface.LastViewport;
     public int LastDrawnObjectCount => surface.LastDrawnObjectCount;
     public GridPaintStatistics LastGridStatistics => surface.LastGridStatistics;
@@ -74,7 +80,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
         scroll.Loaded += (_, _) => surface.Invalidate();
         surface.SizeChanged += (_, _) => surface.Invalidate();
         scroll.SizeChanged += (_, _) => surface.Invalidate();
-        scroll.ViewChanged += (_, _) => surface.Invalidate();
+        scroll.ViewChanged += (_, e) => { scrollIsIntermediate = e.IsIntermediate; surface.Invalidate(); };
         surface.RenderFailed += e => Failed?.Invoke(e);
         surface.RendererStateChanged += () => { RenderingStateChanged?.Invoke(); ViewChanged?.Invoke(); }; KeyDown += OnKeyDown;
         Session.Changed += SessionChanged; Session.SelectionChanged += SelectionChanged; SizeSurface();
