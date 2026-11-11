@@ -29,7 +29,7 @@ internal unsafe sealed class GpuTexture : IDisposable
 
 /// <param name="Uv">Normalized texture coordinates, including the transparent guard pixels.</param>
 /// <param name="Bounds">Coverage rectangle in raster pixels, relative to the glyph baseline or path origin.</param>
-internal readonly record struct GpuCoverage(GpuTexture Texture, SKRect Uv, SKRect Bounds);
+internal readonly record struct GpuCoverage(GpuTexture Texture, SKRect Uv, SKRect Bounds, bool IsColor = false);
 
 /// <param name="SourceBounds">The tile's interior bounds in original image pixels.</param>
 internal readonly record struct GpuImageTile(GpuTexture Texture, SKRect Uv, SKRect SourceBounds);
@@ -43,7 +43,8 @@ internal readonly record struct GpuImageTile(GpuTexture Texture, SKRect Uv, SKRe
 internal unsafe sealed class GpuTextureCache : IDisposable
 {
     private const int ImageGutter = 4;
-    private const int AtlasSize = 2048, MaximumAtlasPages = 4, Guard = 2, MaximumGlyphs = 65536, MaximumImages = 1024, MaximumMasks = 2048;
+    internal const int CoverageGuard = ReportGlyphRaster.CoverageGuard;
+    private const int AtlasSize = 2048, MaximumAtlasPages = 4, Guard = CoverageGuard, MaximumGlyphs = 65536, MaximumImages = 1024, MaximumMasks = 2048;
     private readonly WebGpuCanvasContext context;
     private readonly BindGroupLayout* textureLayout;
     private readonly Sampler* sampler;
@@ -114,14 +115,14 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         TextureUploads = 0; UploadedBytes = 0;
     }
 
-    public GpuCoverage GetGlyph(SKFont rasterFont, ushort glyph)
+    public GpuCoverage GetGlyph(SKFont rasterFont, ushort glyph, SKColor foreground)
     {
         CheckFrame();
         ArgumentNullException.ThrowIfNull(rasterFont);
         if (!float.IsFinite(rasterFont.Size) || rasterFont.Size <= 0
             || !float.IsFinite(rasterFont.ScaleX) || !float.IsFinite(rasterFont.SkewX))
             throw new ArgumentException("Glyph raster parameters must be finite and the font size must be positive.", nameof(rasterFont));
-        var key = GlyphKey.Create(rasterFont, glyph);
+        var key = GlyphKey.Create(rasterFont, glyph, foreground, out bool intrinsicColor);
         if (glyphs.TryGetValue(key, out var cached))
         {
             cached.Page.LastFrame = frame;
@@ -136,24 +137,14 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         var bounds = RasterBounds(measured[0], 1);
         int width = checked((int)bounds.Width), height = checked((int)bounds.Height);
         if (width > AtlasSize || height > AtlasSize) EnsureBudget(checked((long)width * height * 4));
-        using var bitmap = Bitmap(width, height);
-        using (var canvas = new SKCanvas(bitmap))
-        using (var paint = new SKPaint { Color = SKColors.White, IsAntialias = true })
-        using (var builder = new SKTextBlobBuilder())
-        {
-            Span<SKPoint> positions = stackalloc SKPoint[1] { SKPoint.Empty };
-            builder.AddPositionedRun(glyphIds, rasterFont, positions);
-            using var blob = builder.Build() ?? throw new InvalidOperationException("The glyph text blob could not be created.");
-            canvas.DrawText(blob, -bounds.Left, -bounds.Top, paint);
-            canvas.Flush();
-        }
+        using var bitmap = ReportGlyphRaster.Rasterize(rasterFont, glyph, bounds, foreground, intrinsicColor);
 
         if (width > AtlasSize || height > AtlasSize)
         {
             // Very large report headings retain their actual raster resolution.
             // These exceptional textures are pinned until the next frame.
             var texture = CreateTemporary(bitmap);
-            var coverage = new GpuCoverage(texture, new(0, 0, 1, 1), bounds);
+            var coverage = new GpuCoverage(texture, new(0, 0, 1, 1), bounds, intrinsicColor);
             largeGlyphs.Add(key, coverage);
             return coverage;
         }
@@ -172,7 +163,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         selected.LastFrame = frame;
         Upload(selected.Texture, 0, x, y, width, height, bitmap.GetPixels().ToPointer(), bitmap.RowBytes, checked(bitmap.RowBytes * height));
         var result = new GpuCoverage(selected.Texture,
-            new((float)x / AtlasSize, (float)y / AtlasSize, (float)(x + width) / AtlasSize, (float)(y + height) / AtlasSize), bounds);
+            new((float)x / AtlasSize, (float)y / AtlasSize, (float)(x + width) / AtlasSize, (float)(y + height) / AtlasSize), bounds, intrinsicColor);
         selected.Keys.Add(key);
         glyphs.Add(key, new(selected, result));
         return result;
@@ -551,25 +542,30 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         imageBytes = maskBytes = temporaryBytes = 0;
     }
 
-    private sealed class TypefaceIdentity
+    private sealed class TypefaceIdentity(SKTypeface face)
     {
         public long Value { get; } = Interlocked.Increment(ref nextTypefaceId);
+        public bool IntrinsicColor { get; } = ReportGlyphRaster.HasIntrinsicColor(face);
     }
-    private static long FontIdentity(SKFont font)
+    private static TypefaceIdentity? FontIdentity(SKFont font)
     {
         // Native handles may be recycled after a metrics owner evicts a face.
         // A weak managed identity prevents stale atlas entries from aliasing a
         // subsequently allocated typeface without retaining native font objects.
         var face = font.Typeface;
-        return face is null ? 0 : TypefaceIds.GetValue(face, static _ => new()).Value;
+        return face is null ? null : TypefaceIds.GetValue(face, static value => new(value));
     }
-    private readonly record struct GlyphKey(long Typeface, ushort Glyph, float Size, float ScaleX, float SkewX, int Flags)
+    private readonly record struct GlyphKey(long Typeface, ushort Glyph, float Size, float ScaleX, float SkewX, int Flags, SKColor Foreground)
     {
-        public static GlyphKey Create(SKFont font, ushort glyph) => new(FontIdentity(font), glyph,
-            font.Size, font.ScaleX, font.SkewX,
-            (font.Embolden ? 1 : 0) | (font.Subpixel ? 2 : 0) | (font.LinearMetrics ? 4 : 0)
-            | (font.ForceAutoHinting ? 8 : 0) | (font.EmbeddedBitmaps ? 16 : 0) | (font.BaselineSnap ? 32 : 0)
-            | ((int)font.Edging << 8) | ((int)font.Hinting << 12));
+        public static GlyphKey Create(SKFont font, ushort glyph, SKColor foreground, out bool intrinsicColor)
+        {
+            var face = FontIdentity(font);
+            intrinsicColor = face?.IntrinsicColor is true;
+            return new(face?.Value ?? 0, glyph, font.Size, font.ScaleX, font.SkewX,
+                (font.Embolden ? 1 : 0) | (font.Subpixel ? 2 : 0) | (font.LinearMetrics ? 4 : 0)
+                | (font.ForceAutoHinting ? 8 : 0) | (font.EmbeddedBitmaps ? 16 : 0) | (font.BaselineSnap ? 32 : 0)
+                | ((int)font.Edging << 8) | ((int)font.Hinting << 12), intrinsicColor ? foreground : default);
+        }
     }
     private readonly record struct PathKey(ulong A, ulong B, ulong C, ulong D)
     {

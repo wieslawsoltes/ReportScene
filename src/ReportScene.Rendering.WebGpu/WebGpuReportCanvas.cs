@@ -331,12 +331,36 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         float scale = RasterScale();
         using var font = metrics.CreateFont(style);
         font.Size *= scale;
-        for (int i = 0; i < shaped.Codepoints.Length; i++)
+        if (!float.IsFinite(font.Size) || font.Size <= 0)
+            throw new ArgumentException("Glyph raster size must be finite and positive.", nameof(style));
+        // Bound queries precede atlas lookup: clipped lines and long text runs
+        // must not pin invisible glyphs or exhaust the visible-frame atlas budget.
+        // Reuse fixed stack storage for arbitrarily long shaped runs.
+        const int batchSize = 128;
+        Span<ushort> glyphs = stackalloc ushort[batchSize];
+        Span<SKRect> bounds = stackalloc SKRect[batchSize];
+        for (int offset = 0; offset < shaped.Codepoints.Length; offset += batchSize)
         {
-            var glyph = checked((ushort)shaped.Codepoints[i]);
-            var point = shaped.Points[i];
-            var coverage = textures.GetGlyph(font, glyph);
-            DrawCoverage(coverage, x + point.X, baseline + point.Y, scale, paint.Color);
+            int count = Math.Min(batchSize, shaped.Codepoints.Length - offset);
+            for (int i = 0; i < count; i++) glyphs[i] = checked((ushort)shaped.Codepoints[offset + i]);
+            font.GetGlyphWidths(glyphs[..count], Span<float>.Empty, bounds[..count]);
+            for (int i = 0; i < count; i++)
+            {
+                var ink = bounds[i];
+                if (ink.IsEmpty) continue;
+                // Match GpuTextureCache.RasterBounds exactly, including floor /
+                // ceil and the transparent filtering guard around overhanging ink.
+                const int guard = GpuTextureCache.CoverageGuard;
+                var raster = new SKRect((float)Math.Floor(ink.Left) - guard, (float)Math.Floor(ink.Top) - guard,
+                    (float)Math.Ceiling(ink.Right) + guard, (float)Math.Ceiling(ink.Bottom) + guard);
+                var point = shaped.Points[offset + i];
+                float originX = x + point.X, originY = baseline + point.Y;
+                var target = Map(new SKRect(originX + raster.Left / scale, originY + raster.Top / scale,
+                    originX + raster.Right / scale, originY + raster.Bottom / scale));
+                if (Intersection(target, state.Clip).IsEmpty) continue;
+                var coverage = textures.GetGlyph(font, glyphs[i], paint.Color);
+                DrawCoverage(coverage, originX, originY, scale, paint.Color);
+            }
         }
     }
     private static SKShaper.Result Shape(SkiaTextMeasurer metrics, string text, ItemStyle style)
@@ -360,11 +384,11 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         if (coverage.Bounds.IsEmpty) return;
         var b = coverage.Bounds;
         var rect = Map(new SKRect(x + b.Left / scale, baseline + b.Top / scale, x + b.Right / scale, baseline + b.Bottom / scale));
-        using var paint = new SKPaint { Color = color, IsAntialias = false };
+        using var paint = new SKPaint { Color = coverage.IsColor ? SKColors.White : color, IsAntialias = false };
         var p = Primitive(rect, paint, 4);
         var uv = coverage.Uv;
         p.Uv = new(uv.Left, uv.Top, uv.Right, uv.Bottom);
-        p.Extra.W = 1;
+        p.Extra.W = coverage.IsColor ? 0 : 1;
         Add(p, coverage.Texture);
     }
 
