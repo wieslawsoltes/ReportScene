@@ -55,6 +55,7 @@ Native render-pass attachments explicitly set `DepthSlice = uint.MaxValue`, the 
 - HarfBuzz glyph IDs and positions come from the same metrics owner used by report preparation. Individual characters are not independently reshaped.
 - Glyph atlas allocations include two transparent guard pixels, preventing neighboring glyphs from bleeding into filtered samples.
 - Glyph ink bounds are tested against the visible clip before rasterization or atlas lookup, including overhang and the filtering guard. Long clipped text cannot pin invisible glyphs and exhaust the visible frame's atlas budget.
+- Rectangle culling tests positive geometric area explicitly. Skia 4's `SKRect.IsEmpty` only recognizes the all-zero sentinel; a disjoint intersection at another origin must still be rejected before texture allocation. Text, image and path coverage share this rule.
 - Ordinary glyph coverage remains reusable across text colors. Color-capable OpenType faces retain premultiplied RGBA coverage, including intrinsic palette/bitmap colors and foreground-index layers; only those faces include foreground color in the cache key.
 - Images decode into sRGB premultiplied RGBA pixels. Small images use full mip chains with linear mip interpolation; large images select a global mip resolution and upload only visible tiles.
 - Mip generation averages premultiplied channels and includes odd-sized source edges.
@@ -114,6 +115,8 @@ The design and preview views expose `GpuSnapshot` and `RenderingError`. Designer
 - primitive count, draw-call count, texture uploads, uploaded bytes and atlas-page count;
 - device texture dimension limit, tile size, retained image/mask bytes and CPU image staging bytes.
 
+Native viewport and popup observations also include a monotonic `ViewChangeVersion` and `IsIntermediate`. Browser input waits for a new native scroll event after dispatching a wheel, then final offsets and coherent screen geometry. A diagnostic publication counter alone cannot acknowledge an input still waiting in the native queue. Positioning corrections calibrate wheel-to-DIP gain from acknowledged, unclamped motion; final geometry and pixel tolerances remain unchanged.
+
 These counters describe CPU-side submission work. They are not GPU execution timings, compositor presentation acknowledgements, hardware acceleration certification, or frames-per-second benchmarks. Texture upload counters exclude shared resource initialization outside that frame.
 
 ## Validation
@@ -122,7 +125,7 @@ The initial drawing-contract commit `31eeda45c3201a080f80bc8c7bcfe14c5016e401` p
 
 The full Uno 7 / Skia 4 commit `5f35f5fe41490fa9bfd42e9a11dc262ea683485a` passed core conformance, benchmarks, all 54 core package checks, the desktop build, all 14 reusable packages, browser publication and all 37 original production-shader pixel assertions in [run 43109136759](https://github.com/wieslawsoltes/ReportScene/actions/runs/43109136759). Skia 4 typeface identity and immutable path-builder changes and Uno 7 layout signatures are integrated. Subsequent actual-application evidence identified the Chromium software-presentation configuration and native 2D depth-slice sentinel issues described above; both have explicit fixes and stronger validation gates.
 
-The expanded core suite includes 850 checks, with eight image staging, color and mip-transition checks and two deterministic glyph-coverage checks. Browser conformance executes the platform-applicable subset; its recorded count comes from the actual WebAssembly application. The complete application gate requires all 77 scenarios across eight shards. Existing browser pixel assertions, required scenario names and the zero-retry policy remain mandatory. See [validation and reproducibility](validation.md) for commands, package checks and artifact contents, and the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks) for current revision-specific results.
+The expanded core suite includes 851 checks, with eight image staging, color and mip-transition checks, two deterministic glyph-coverage checks and a positive-area clipping regression. Browser conformance executes the platform-applicable subset; its recorded count comes from the actual WebAssembly application. The complete application gate requires all 77 scenarios across eight shards. Existing browser pixel assertions, required scenario names and the zero-retry policy remain mandatory. See [validation and reproducibility](validation.md) for commands, package checks and artifact contents, and the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks) for current revision-specific results.
 
 The migration runs the same gates against Uno 7 / Skia 4, plus:
 
@@ -133,6 +136,7 @@ The migration runs the same gates against Uno 7 / Skia 4, plus:
 - a native browser scenario rendering 200pt text at 400% zoom, requiring visible glyph pixels and bounded atlas pages while many distinct glyphs lie outside the text box;
 - core raster checks for odd-size mip edges, long/narrow coordinate overflow, premultiplied transparent pixels, adjacent tile gutters, full-patch equivalence across mip transitions, sRGB conversion and invalid input;
 - exact premultiplied color-font palette/foreground opacity checks and reusable monochrome coverage checks;
+- geometric clipping checks for disjoint, edge-touching, inverted and zero-area rectangles away from the origin;
 - a browser with WebGPU deliberately unavailable, requiring a visible error, splash release and zero GPU report submissions;
 - all existing report editing, preparation, navigation, rendering, import/export and package tests.
 
