@@ -4,7 +4,7 @@
 
 The browser and desktop heads and all Uno-dependent libraries now target Uno Platform 7. Interactive design, preview and original vector icons draw through `WebGpuCanvasElement` using a new native WebGPU renderer. Report preparation, document editing and export remain shared across the application.
 
-This migration is tracked in [PR #26](https://github.com/wieslawsoltes/ReportScene/pull/26). The baseline is `425c01db1b44f19418a8af408da01ab0dff3010d`. Validation below distinguishes completed results from work still running.
+This migration is tracked in [PR #26](https://github.com/wieslawsoltes/ReportScene/pull/26). The baseline is `425c01db1b44f19418a8af408da01ab0dff3010d`. The PR checks and their retained artifacts identify the tested revision for every validation result.
 
 ## Versions and project changes
 
@@ -54,6 +54,8 @@ Native render-pass attachments explicitly set `DepthSlice = uint.MaxValue`, the 
 - Physical pixel density and zoom determine glyph raster resolution. Raster scales round upward in eighth-unit steps to limit cache churn without undersampling.
 - HarfBuzz glyph IDs and positions come from the same metrics owner used by report preparation. Individual characters are not independently reshaped.
 - Glyph atlas allocations include two transparent guard pixels, preventing neighboring glyphs from bleeding into filtered samples.
+- Glyph ink bounds are tested against the visible clip before rasterization or atlas lookup, including overhang and the filtering guard. Long clipped text cannot pin invisible glyphs and exhaust the visible frame's atlas budget.
+- Ordinary glyph coverage remains reusable across text colors. Color-capable OpenType faces retain premultiplied RGBA coverage, including intrinsic palette/bitmap colors and foreground-index layers; only those faces include foreground color in the cache key.
 - Images decode into sRGB premultiplied RGBA pixels. Small images use full mip chains with linear mip interpolation; large images select a global mip resolution and upload only visible tiles.
 - Mip generation averages premultiplied channels and includes odd-sized source edges.
 - Image tiles include four neighboring source pixels on each side, with a second aligned mip. The global tiled chain uses exact 2:1 reductions with edge padding and fractional final UV spans, so selecting the next level cannot shift odd-sized images. Internal quads are disjoint and only the whole-image boundary receives geometric antialiasing, preventing alpha seams.
@@ -61,6 +63,8 @@ Native render-pass attachments explicitly set `DepthSlice = uint.MaxValue`, the 
 - Barcode modules preserve the existing non-antialiased geometric mode.
 
 The renderer preserves the application's color convention; this migration does not introduce an HDR or wide-gamut output contract.
+
+Color glyph opacity is applied once to the completed premultiplied raster. A deterministic, original COLR/CPAL fixture verifies both palette and foreground-index layers. SkiaSharp 4.151.1 applies partially transparent paint twice to COLR foreground-index layers when drawing a text blob directly. The interactive renderer corrects this by rasterizing with opaque foreground RGB and then multiplying RGBA by the requested opacity. Direct Skia exports retain their native behavior for that specific color-font case. The fixture and its generator are included under the repository license; no third-party font is redistributed.
 
 ### Procedural grid
 
@@ -118,7 +122,7 @@ The initial drawing-contract commit `31eeda45c3201a080f80bc8c7bcfe14c5016e401` p
 
 The full Uno 7 / Skia 4 commit `5f35f5fe41490fa9bfd42e9a11dc262ea683485a` passed core conformance, benchmarks, all 54 core package checks, the desktop build, all 14 reusable packages, browser publication and all 37 original production-shader pixel assertions in [run 43109136759](https://github.com/wieslawsoltes/ReportScene/actions/runs/43109136759). Skia 4 typeface identity and immutable path-builder changes and Uno 7 layout signatures are integrated. Subsequent actual-application evidence identified the Chromium software-presentation configuration and native 2D depth-slice sentinel issues described above; both have explicit fixes and stronger validation gates.
 
-The expanded local core suite passes 848/848 checks, including eight new image staging, color and mip-transition checks. The complete application gates are being rerun with these changes. Existing browser pixel assertions, required scenario counts and zero-retry policy remain mandatory.
+The expanded core suite includes 850 checks, with eight image staging, color and mip-transition checks and two deterministic glyph-coverage checks. Browser conformance executes the platform-applicable subset; its recorded count comes from the actual WebAssembly application. The complete application gate requires all 77 scenarios across eight shards. Existing browser pixel assertions, required scenario names and the zero-retry policy remain mandatory. See [validation and reproducibility](validation.md) for commands, package checks and artifact contents, and the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks) for current revision-specific results.
 
 The migration runs the same gates against Uno 7 / Skia 4, plus:
 
@@ -126,7 +130,9 @@ The migration runs the same gates against Uno 7 / Skia 4, plus:
 - the same production shader rendered into an actual `GPUCanvasContext`, requiring exact offscreen/canvas byte equality and matching browser screenshot samples;
 - native browser evidence for successful WebGPU submission, viewport-sized targets at high zoom, scroll/layout reuse and idle stability;
 - a native browser scenario using a transparent 9001 × 257 image at minified and original pixel sizes, scrolling across tile boundaries and inspecting screenshot pixels and cache bounds;
+- a native browser scenario rendering 200pt text at 400% zoom, requiring visible glyph pixels and bounded atlas pages while many distinct glyphs lie outside the text box;
 - core raster checks for odd-size mip edges, long/narrow coordinate overflow, premultiplied transparent pixels, adjacent tile gutters, full-patch equivalence across mip transitions, sRGB conversion and invalid input;
+- exact premultiplied color-font palette/foreground opacity checks and reusable monochrome coverage checks;
 - a browser with WebGPU deliberately unavailable, requiring a visible error, splash release and zero GPU report submissions;
 - all existing report editing, preparation, navigation, rendering, import/export and package tests.
 

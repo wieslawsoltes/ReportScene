@@ -1,6 +1,6 @@
 # Validation and reproducibility
 
-`Validate` gates Pages deployment on core conformance, differential benchmark evidence, isolated package consumption, Uno desktop compilation and the actual Uno WebAssembly application with browser interaction tests. Failed or incomplete required jobs do not deploy.
+`Validate` gates Pages deployment on core conformance, differential benchmark evidence, isolated package consumption, Uno 7 desktop compilation, production WGSL/canvas validation and the actual Uno WebAssembly application with browser interaction tests. Failed or incomplete required jobs do not deploy. The [Uno 7 and WebGPU migration guide](uno7-webgpu-migration.md) documents the renderer, resource bounds and platform changes.
 
 ## Core and asynchronous contracts
 
@@ -20,9 +20,9 @@ Preference tests cover strict generated JSON/defaults/version/limits, preferred-
 
 ## Isolated package consumption
 
-`scripts/pack-core.sh` builds eleven core packages and restores a separate package-only consumer with a fresh cache and local ReportScene feed. Thirty-five executable checks cover existing data/matrix/engine/serialization/history/index/search/async APIs plus preference serialization/defaults, pure viewport layout, optional coalesced storage, report independence and real native preference files.
+`scripts/pack-core.sh` builds eleven core packages and restores a separate package-only consumer with a fresh cache and local ReportScene feed. Fifty-four executable checks cover data/matrix/engine/serialization/history/index/search/async APIs, preferences, viewport layout, optional coalesced storage, report independence and real native preference files.
 
-The desktop job downloads those core packages, compiles the application, and runs `scripts/pack-uno.sh`. Both Uno libraries opt into packing; the script requires thirteen nupkgs, checks their assemblies and compiles an independent consumer without source ProjectReferences. It exercises public property-grid, multi-context outline, splitter, options/matrix/subreport, data-preview, optional preference-store designer and report-surface APIs. NuGet source mapping pins all `ReportScene.*` packages to this build; framework dependencies come from external feeds. This compile check is not interactive package-only desktop execution on every OS.
+The desktop job downloads those core packages, compiles the application, and runs `scripts/pack-uno.sh`. The WebGPU renderer, controls and designer libraries opt into packing; the script requires fourteen nupkgs, checks their assemblies and compiles an independent consumer without source ProjectReferences. It exercises public property-grid, multi-context outline, splitter, options/matrix/subreport, data-preview, optional preference-store designer and report-surface APIs. NuGet source mapping pins all `ReportScene.*` packages to this build; framework dependencies come from external feeds. This compile check is not interactive package-only desktop execution on every OS.
 
 To run locally after `scripts/pack-core.sh`, copy `artifacts/packages` to `artifacts/core-input/packages`, then run `bash scripts/pack-uno.sh`.
 
@@ -36,17 +36,25 @@ Preferences add pure viewport calculations, unchanged-update notifications and c
 
 ## Actual browser execution
 
-The workflow publishes WebAssembly once and uploads `browser-app`. Four isolated runners download the same artifact, serve it under `/ReportScene/`, and run `--shard=1/4`, `2/4`, `3/4`, or `4/4`. Each uses one Chromium/software-rendering worker, independent browser contexts and zero retries. The aggregate requires all four reports, rejects failures/retries/skips/flaky outcomes and missing named scenarios, and requires at least 42 scenarios. `fail-fast: false` permits evidence collection from every shard; it never turns failure into success.
+The workflow publishes WebAssembly once and uploads `browser-app`. Eight isolated runners download the same artifact, serve it under `/ReportScene/`, and run Playwright shards `1/8` through `8/8`. Each uses one Chromium/software-Vulkan worker, independent browser contexts and zero retries. The aggregate requires all eight reports, rejects failures/retries/skips/flaky outcomes and missing named scenarios, and requires at least 77 scenarios. `fail-fast: false` permits evidence collection from every shard; it never turns failure into success.
 
 Native-input scenarios preserve the reporting, editing, export/search, matrix, XML, startup, subreport and delayed-host coverage. Thirteen designer scenarios test compact panes, nested outlines and node reuse, selection/mixed formatting, property validation, units, eight handles and locking, layout reuse, page properties and visible paper pixels, group-click behavior, authoring text cache, explorer contexts/keyboard navigation, jitter and metadata lifecycle.
 
 Six preference scenarios additionally test native draft/Apply/Cancel/defaults/validation, persisted reload, viewport-only constraints and cancelled clamped drags, invalid stored data and explicit repair, quota failure with editing still available and explicit retry, and direct View/pane/sort notifications. Settings tests compare report serialization/history, actual native control state, visible pane geometry and real storage. Fault injection changes only the host storage API, not diagnostic application commands or report content.
 
-All report changes arrive through actual pointer/keyboard/file input. Read-only diagnostics expose native bounds/state and persistence/work counters; no diagnostic method dispatches commands. Startup checks require loading handoff, loader removal, actual nonblank screenshots and progressing state. ComboBox selection uses visible clipped popup bounds and real scrolling; resize tests wait for committed rather than transient geometry.
+All report changes arrive through actual pointer/keyboard/file input. Read-only diagnostics expose native bounds/state and persistence/work counters; no diagnostic method dispatches commands. Startup checks require a native WebGPU report submission, loading handoff, loader removal, actual nonblank screenshots and progressing state. Uncaptured native GPU errors and device loss fail the active document's tests. ComboBox selection uses visible clipped popup bounds and real scrolling; coordinate-sensitive wheel and pane gestures wait for committed native layout and final scroll events.
+
+GPU-specific scenarios inspect viewport-sized targets at high zoom, layout reuse while scrolling, demand-driven idle behavior, a visible unsupported-WebGPU state, a transparent 9001 × 257 image across filtered tile boundaries, and clipped 200pt text at 400% zoom. The text scenario requires visible black glyphs, no rendering error and bounded atlas allocation even with many distinct characters outside the text box. Resource counters establish bounded visible-content residency; they do not measure GPU execution time.
+
+## Production shader and canvas validation
+
+An independent job compiles `Report2D.wgsl` and renders its 128-byte instance contract with explicit bind layouts, clipping and premultiplied blending. Thirty-nine pixel assertions cover geometric edges, rectangle joins, radial pie antialiasing, glyph alpha, images, procedural grids and degenerate lines. Two ordered draws exercise nonzero `firstInstance`.
+
+The same commands render into a real `GPUCanvasContext`. Every canvas readback byte must match the offscreen texture, and all 39 presented screenshot samples must match composition over white. Device loss or a blank presentation fails this gate. CI selects a software Vulkan configuration that supports canvas/shared-image interop; successful offscreen rendering alone is insufficient.
 
 ## Artifacts and limitations
 
-`core-validation` contains conformance/benchmark logs and JSON, packages, a tracked-source archive/revision/checksum and sample exports. `uno-packages` contains all thirteen packages and its consumer log. `browser-evidence-1/2/3/4` retain raw states/screenshots/HTTP logs, and `blob-report-1/2/3/4` retain mergeable results. `browser-validation` contains the merged report/JSON. Only the shard running WebAssembly conformance reports its actual count; other shards cannot infer it.
+`core-validation` contains conformance/benchmark logs and JSON, packages, a tracked-source archive/revision/checksum and sample exports. `uno-packages` contains all fourteen packages and its consumer log. `browser-evidence-1` through `browser-evidence-8` retain raw states/screenshots/HTTP logs, and the eight `blob-report` artifacts retain mergeable results. `browser-validation` contains the merged report/JSON. `webgpu-shader-validation` contains raw/presented PNGs, readback samples, adapter metadata and console evidence. Only the shard running WebAssembly conformance reports its actual count; other shards cannot infer it.
 
 Record final counts, commit/tree identities and merge/deployment outcomes only after the corresponding jobs finish. Hardware GPU throughput, peak/native memory, browser input latency, interactive desktop qualification on all OSes, every driver, mobile/accessibility parity and exhaustive FastReport comparison remain unverified. Settings and report-host tests do not establish physical-disk/browser durability, and abrupt close can lose unacknowledged debounced settings. A controlled host can await the explicit preferences flush.
 
