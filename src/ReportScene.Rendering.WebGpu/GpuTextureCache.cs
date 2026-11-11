@@ -1,3 +1,4 @@
+using ReportScene.Rendering.Skia;
 using System.Runtime.CompilerServices;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
@@ -30,6 +31,9 @@ internal unsafe sealed class GpuTexture : IDisposable
 /// <param name="Bounds">Coverage rectangle in raster pixels, relative to the glyph baseline or path origin.</param>
 internal readonly record struct GpuCoverage(GpuTexture Texture, SKRect Uv, SKRect Bounds);
 
+/// <param name="SourceBounds">The tile's interior bounds in original image pixels.</param>
+internal readonly record struct GpuImageTile(GpuTexture Texture, SKRect Uv, SKRect SourceBounds);
+
 /// <summary>
 /// Bounded CPU-coverage/GPU-texture cache shared by a renderer on one device.
 /// Glyphs use their shaped glyph identifiers; text is never reshaped one character
@@ -38,6 +42,7 @@ internal readonly record struct GpuCoverage(GpuTexture Texture, SKRect Uv, SKRec
 /// </summary>
 internal unsafe sealed class GpuTextureCache : IDisposable
 {
+    private const int ImageGutter = 4;
     private const int AtlasSize = 2048, MaximumAtlasPages = 4, Guard = 2, MaximumGlyphs = 65536, MaximumImages = 1024, MaximumMasks = 2048;
     private readonly WebGpuCanvasContext context;
     private readonly BindGroupLayout* textureLayout;
@@ -49,10 +54,13 @@ internal unsafe sealed class GpuTextureCache : IDisposable
     private readonly List<AtlasPage> pages = [];
     private readonly Dictionary<GlyphKey, GlyphEntry> glyphs = [];
     private readonly Dictionary<GlyphKey, GpuCoverage> largeGlyphs = [];
-    private readonly Dictionary<uint, ImageEntry> images = [];
+    private readonly Dictionary<ImageKey, ImageEntry> images = [];
     private readonly Dictionary<PathKey, ImageEntry> masks = [];
     private readonly List<GpuTexture> temporary = [];
     private long imageBytes, maskBytes, temporaryBytes;
+    private SKBitmap? stagingMip;
+    private uint stagedImage;
+    private int stagedLevel;
     private ulong frame;
     private bool disposed;
 
@@ -63,6 +71,9 @@ internal unsafe sealed class GpuTextureCache : IDisposable
     public long RetainedImageBytes => imageBytes;
     public long RetainedMaskBytes => maskBytes;
     public long TemporaryBytes => temporaryBytes;
+    public int MaximumTextureDimension => maximumDimension;
+    public int ImageTileSize => Math.Min(2048, maximumDimension - ImageGutter * 2) & ~1;
+    public long RetainedStagingBytes => stagingMip is { } bitmap ? (long)bitmap.RowBytes * bitmap.Height : 0;
 
     public GpuTextureCache(WebGpuCanvasContext context, BindGroupLayout* textureLayout, Sampler* sampler,
         long maximumImageBytes = 256L * 1024 * 1024)
@@ -171,7 +182,8 @@ internal unsafe sealed class GpuTextureCache : IDisposable
     {
         CheckFrame();
         ArgumentNullException.ThrowIfNull(image);
-        if (images.TryGetValue(image.UniqueId, out var cached))
+        var key = new ImageKey(image.UniqueId, -1, 0, 0);
+        if (images.TryGetValue(key, out var cached))
         {
             cached.LastFrame = frame;
             return cached.Texture;
@@ -180,9 +192,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         int levels = 1 + (int)Math.Floor(Math.Log2(Math.Max(image.Width, image.Height)));
         long bytes = TextureBytes(image.Width, image.Height, levels);
         EnsureBudget(bytes, addImage: true);
-        using var bitmap = Bitmap(image.Width, image.Height);
-        if (!image.ReadPixels(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, 0, 0, SKImageCachingHint.Allow))
-            throw new InvalidOperationException("The report image could not be decoded into RGBA pixels.");
+        using var bitmap = ReportImageRaster.Decode(image);
         var texture = Create(image.Width, image.Height, levels);
         try
         {
@@ -200,11 +210,93 @@ internal unsafe sealed class GpuTextureCache : IDisposable
                 }
             }
             finally { if (!ReferenceEquals(current, bitmap)) current.Dispose(); }
-            images.Add(image.UniqueId, new(texture, bytes, frame));
+            images.Add(key, new(texture, bytes, frame));
             imageBytes += bytes;
             return texture;
         }
         catch { texture.Dispose(); throw; }
+    }
+
+    /// <summary>
+    /// Returns a viewport-selected tile from a globally filtered image level.
+    /// Four source-level pixels surround its interior on every side; the even
+    /// texture dimensions permit a second mip with an aligned two-pixel gutter.
+    /// Tile coordinates address a ceil-sized level with exact power-of-two source
+    /// strides. Fractional UVs preserve the original odd-sized image boundary.
+    /// </summary>
+    public GpuImageTile GetImageTile(SKImage image, int mipLevel, int tileX, int tileY)
+    {
+        CheckFrame();
+        ArgumentNullException.ThrowIfNull(image);
+        ValidateSourceImage(image);
+        int maximumLevel = (int)Math.Ceiling(Math.Log2(Math.Max(image.Width, image.Height)));
+        if (mipLevel < 0 || mipLevel > maximumLevel) throw new ArgumentOutOfRangeException(nameof(mipLevel));
+        ArgumentOutOfRangeException.ThrowIfNegative(tileX); ArgumentOutOfRangeException.ThrowIfNegative(tileY);
+        int levelWidth = ReportImageRaster.GetAlignedLevelDimension(image.Width, mipLevel);
+        int levelHeight = ReportImageRaster.GetAlignedLevelDimension(image.Height, mipLevel);
+        long ox = (long)tileX * ImageTileSize, oy = (long)tileY * ImageTileSize;
+        if (ox >= levelWidth || oy >= levelHeight) throw new ArgumentOutOfRangeException(nameof(tileX), "The tile lies outside the selected image level.");
+        int x = (int)ox, y = (int)oy;
+        int coreWidth = Math.Min(ImageTileSize, levelWidth - x), coreHeight = Math.Min(ImageTileSize, levelHeight - y);
+        int width = (coreWidth + ImageGutter * 2 + 1) & ~1, height = (coreHeight + ImageGutter * 2 + 1) & ~1;
+        var key = new ImageKey(image.UniqueId, mipLevel, tileX, tileY);
+        GpuTexture texture;
+        if (images.TryGetValue(key, out var found))
+        {
+            found.LastFrame = frame;
+            texture = found.Texture;
+        }
+        else
+        {
+            long bytes = TextureBytes(width, height, 2);
+            EnsureBudget(bytes, addImage: true);
+            var globalLevel = GetStagingMip(image, mipLevel);
+            using var pixels = ExtractTile(globalLevel, x, y, width, height);
+            using var nextLevel = ReportImageRaster.ExtractTileNextMip(globalLevel, x, y, width, height, ImageGutter);
+            texture = Create(width, height, 2);
+            try
+            {
+                Upload(texture, 0, 0, 0, width, height, pixels.GetPixels().ToPointer(), pixels.RowBytes, checked(pixels.RowBytes * height));
+                Upload(texture, 1, 0, 0, nextLevel.Width, nextLevel.Height, nextLevel.GetPixels().ToPointer(), nextLevel.RowBytes, checked(nextLevel.RowBytes * nextLevel.Height));
+                images.Add(key, new(texture, bytes, frame));
+                imageBytes += bytes;
+            }
+            catch { texture.Dispose(); throw; }
+        }
+        long scale = 1L << mipLevel;
+        long left = (long)x * scale, top = (long)y * scale;
+        long right = Math.Min(image.Width, ((long)x + coreWidth) * scale);
+        long bottom = Math.Min(image.Height, ((long)y + coreHeight) * scale);
+        return new(texture,
+            new((float)ImageGutter / width, (float)ImageGutter / height,
+                (float)((ImageGutter + (double)(right - left) / scale) / width),
+                (float)((ImageGutter + (double)(bottom - top) / scale) / height)),
+            new(left, top, right, bottom));
+    }
+
+    private SKBitmap GetStagingMip(SKImage image, int level)
+    {
+        if (stagingMip is null || stagedImage != image.UniqueId || stagedLevel > level)
+        {
+            stagingMip?.Dispose(); stagingMip = null; stagedImage = 0; stagedLevel = 0;
+            stagingMip = ReportImageRaster.Decode(image);
+            stagedImage = image.UniqueId;
+        }
+        while (stagedLevel < level)
+        {
+            var next = ReportImageRaster.DownsampleAligned(stagingMip);
+            stagingMip.Dispose(); stagingMip = next; stagedLevel++;
+        }
+        return stagingMip;
+    }
+
+    private static SKBitmap ExtractTile(SKBitmap source, int originX, int originY, int width, int height) =>
+        ReportImageRaster.ExtractTile(source, originX, originY, width, height, ImageGutter);
+
+    private static void ValidateSourceImage(SKImage image)
+    {
+        if (image.Width <= 0 || image.Height <= 0 || (long)image.Width * image.Height > ReportImageRaster.MaximumDecodedPixels)
+            throw new InvalidOperationException("Decoded image exceeds the 32-megapixel report image budget.");
     }
 
     /// <summary>
@@ -302,9 +394,9 @@ internal unsafe sealed class GpuTextureCache : IDisposable
     private void EnsureBudget(long incoming, bool addImage = false, bool addMask = false)
     {
         if (incoming > imageBudget) throw new InvalidOperationException("One report texture exceeds the configured GPU image budget.");
-        ImageEntry? OldestImage(out uint key)
+        ImageEntry? OldestImage(out ImageKey key)
         {
-            key = 0; ImageEntry? result = null;
+            key = default; ImageEntry? result = null;
             foreach (var pair in images)
                 if (pair.Value.LastFrame != frame && (result is null || pair.Value.LastFrame < result.LastFrame))
                 { key = pair.Key; result = pair.Value; }
@@ -318,7 +410,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
                 { key = pair.Key; result = pair.Value; }
             return result;
         }
-        void EvictImage(uint key, ImageEntry entry)
+        void EvictImage(ImageKey key, ImageEntry entry)
         { images.Remove(key); imageBytes -= entry.Bytes; entry.Texture.Dispose(); }
         void EvictMask(PathKey key, ImageEntry entry)
         { masks.Remove(key); maskBytes -= entry.Bytes; entry.Texture.Dispose(); }
@@ -430,13 +522,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
             throw new InvalidOperationException($"Report texture dimensions must be between 1 and {maximumDimension} pixels.");
     }
 
-    private static SKBitmap Bitmap(int width, int height)
-    {
-        var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
-        if (bitmap.GetPixels() == IntPtr.Zero) { bitmap.Dispose(); throw new InvalidOperationException("Report texture staging allocation failed."); }
-        bitmap.Erase(SKColors.Transparent);
-        return bitmap;
-    }
+    private static SKBitmap Bitmap(int width, int height) => ReportImageRaster.Create(width, height);
 
     private static long TextureBytes(int width, int height, int levels)
     {
@@ -449,37 +535,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         return result;
     }
 
-    private static SKBitmap Downsample(SKBitmap source)
-    {
-        int width = Math.Max(1, source.Width / 2), height = Math.Max(1, source.Height / 2);
-        var target = Bitmap(width, height);
-        byte* input = (byte*)source.GetPixels().ToPointer();
-        byte* output = (byte*)target.GetPixels().ToPointer();
-        // Area-average premultiplied channels. Integer partition boundaries
-        // include every source pixel, including odd-sized edge rows and columns.
-        for (int y = 0; y < height; y++)
-        {
-            int top = y * source.Height / height, bottom = (y + 1) * source.Height / height;
-            for (int x = 0; x < width; x++)
-            {
-                int left = x * source.Width / width, right = (x + 1) * source.Width / width;
-                int count = (right - left) * (bottom - top);
-                int red = 0, green = 0, blue = 0, alpha = 0;
-                for (int sy = top; sy < bottom; sy++)
-                    for (int sx = left; sx < right; sx++)
-                    {
-                        byte* pixel = input + sy * source.RowBytes + sx * 4;
-                        red += pixel[0]; green += pixel[1]; blue += pixel[2]; alpha += pixel[3];
-                    }
-                byte* destination = output + y * target.RowBytes + x * 4;
-                destination[0] = (byte)((red + count / 2) / count);
-                destination[1] = (byte)((green + count / 2) / count);
-                destination[2] = (byte)((blue + count / 2) / count);
-                destination[3] = (byte)((alpha + count / 2) / count);
-            }
-        }
-        return target;
-    }
+    private static SKBitmap Downsample(SKBitmap source) => ReportImageRaster.Downsample(source);
 
     public void Dispose()
     {
@@ -490,6 +546,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         foreach (var entry in masks.Values) entry.Texture.Dispose();
         foreach (var texture in temporary) texture.Dispose();
         White.Dispose();
+        stagingMip?.Dispose(); stagingMip = null;
         pages.Clear(); glyphs.Clear(); images.Clear(); masks.Clear(); temporary.Clear(); largeGlyphs.Clear();
         imageBytes = maskBytes = temporaryBytes = 0;
     }
@@ -557,6 +614,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         }
     }
     private sealed record GlyphEntry(AtlasPage Page, GpuCoverage Coverage);
+    private readonly record struct ImageKey(uint Image, int Level, int X, int Y);
     private sealed class ImageEntry(GpuTexture texture, long bytes, ulong lastFrame)
     {
         public GpuTexture Texture { get; } = texture;

@@ -45,6 +45,8 @@ The same code still interprets text, pictures, shapes, checkboxes, all existing 
 
 The backend uses Uno's `WebGpuCanvasContext.Api`, device and queue. Its target format is used verbatim when creating the pipeline. Blend factors are `One` and `OneMinusSrcAlpha` for premultiplied output. Device-scoped pipelines and texture caches are shared by icons, design and preview; each viewport owns its submission buffers. Recording and submission serialize shared cache access.
 
+Native render-pass attachments explicitly set `DepthSlice = uint.MaxValue`, the undefined sentinel required for a 2D texture. A zero-initialized C# descriptor otherwise submits a defined depth slice and WebGPU rejects the pass. The application browser tests also reject native uncaptured GPU errors and device loss in the current document, independently of successful queue-submit counters.
+
 ### Quality
 
 - Analytic signed-distance coverage provides fractional-pixel antialiasing for geometric edges, avoiding fixed-resolution page rasterization at zoom.
@@ -52,8 +54,9 @@ The backend uses Uno's `WebGpuCanvasContext.Api`, device and queue. Its target f
 - Physical pixel density and zoom determine glyph raster resolution. Raster scales round upward in eighth-unit steps to limit cache churn without undersampling.
 - HarfBuzz glyph IDs and positions come from the same metrics owner used by report preparation. Individual characters are not independently reshaped.
 - Glyph atlas allocations include two transparent guard pixels, preventing neighboring glyphs from bleeding into filtered samples.
-- Images use premultiplied RGBA pixels, linear magnification and full mip chains with linear mip interpolation for minification.
+- Images decode into sRGB premultiplied RGBA pixels. Small images use full mip chains with linear mip interpolation; large images select a global mip resolution and upload only visible tiles.
 - Mip generation averages premultiplied channels and includes odd-sized source edges.
+- Image tiles include four neighboring source pixels on each side, with a second aligned mip. The global tiled chain uses exact 2:1 reductions with edge padding and fractional final UV spans, so selecting the next level cannot shift odd-sized images. Internal quads are disjoint and only the whole-image boundary receives geometric antialiasing, preventing alpha seams.
 - Complex contours, joins, caps and path effects retain exact coverage through bounded CPU-generated masks sampled by the GPU. Visible clipping bounds mask allocation. Simple opaque round polylines are direct analytic segments.
 - Barcode modules preserve the existing non-antialiased geometric mode.
 
@@ -81,6 +84,8 @@ Errors are visible in the native UI, including the unsupported-WebGPU path. Brow
 | Glyph key count | 65,536 entries |
 | Images and complex-path masks | Shared 256 MiB budget, excluding CPU decode/staging buffers |
 | Image cache | 1,024 entries |
+| Image tile interior | At most 2048 × 2048 pixels, reduced when the device limit requires it |
+| Image decode/staging | 32 megapixel source limit; one retained global mip (up to 128 MB), with a smaller next mip during downsampling |
 | Complex-path cache | 2,048 entries |
 | Shape-run cache | 2,048 runs and 131,072 retained text/family characters per metrics owner |
 | Primitive stream | At most 262,144 instances, 32 MiB before batching metadata |
@@ -90,7 +95,9 @@ Errors are visible in the native UI, including the unsupported-WebGPU path. Brow
 
 Resources referenced by the current recording are pinned until submission. Cold resources can be evicted between recordings; the queue retains prior submitted references. Oversized content produces an object or renderer diagnostic rather than unbounded allocation. These are safety bounds, not expected steady-state memory consumption.
 
-A source image dimension larger than the device's texture limit is currently diagnosed; image tiling is not implemented. A path requiring an inverse fill or image/mask filter needs an explicit effect pass. Current ReportScene objects do not request those features.
+Large image dimensions can exceed the device's texture limit because each visible tile stays within it. The shared GPU image budget covers both complete images and tiles. CPU decode/staging is accounted separately from GPU residency: the largest permitted source plus next mip can approach 192 MB for a one-pixel-wide image, with about 21 MB of tile staging. The encoded-image/native decoder cache is also separate. Very long, narrow sources use widened arithmetic when computing mip partitions, even though their total area is bounded.
+
+A path requiring an inverse fill or image/mask filter needs an explicit effect pass. Current ReportScene objects do not request those features.
 
 ## Diagnostics
 
@@ -100,7 +107,8 @@ The design and preview views expose `GpuSnapshot` and `RenderingError`. Designer
 - submitted frame count;
 - target pixel dimensions and visible DIP bounds;
 - CPU record/upload/submission duration;
-- primitive count, draw-call count, texture uploads, uploaded bytes and atlas-page count.
+- primitive count, draw-call count, texture uploads, uploaded bytes and atlas-page count;
+- device texture dimension limit, tile size, retained image/mask bytes and CPU image staging bytes.
 
 These counters describe CPU-side submission work. They are not GPU execution timings, compositor presentation acknowledgements, hardware acceleration certification, or frames-per-second benchmarks. Texture upload counters exclude shared resource initialization outside that frame.
 
@@ -108,16 +116,23 @@ These counters describe CPU-side submission work. They are not GPU execution tim
 
 The initial drawing-contract commit `31eeda45c3201a080f80bc8c7bcfe14c5016e401` passed the GitHub core conformance job, differential benchmarks, all 54 isolated core package-consumer checks, the desktop build and the Uno package-consumer build. This proves the compatibility refactor against the baseline dependencies; it is not a substitute for the full migration checks.
 
-The full Uno 7 / Skia 4 commit `5f35f5fe41490fa9bfd42e9a11dc262ea683485a` passed core conformance, benchmarks, all 54 core package checks, the desktop build, all 14 reusable packages, browser publication and all 37 original production-shader pixel assertions in [run 43109136759](https://github.com/wieslawsoltes/ReportScene/actions/runs/43109136759). Skia 4 typeface identity and immutable path-builder changes and Uno 7 layout signatures are integrated. The actual application browser scenarios currently report a blank presented window after successful WebGPU initialization/submission; this presentation failure is under investigation and the existing pixel assertions remain mandatory.
+The full Uno 7 / Skia 4 commit `5f35f5fe41490fa9bfd42e9a11dc262ea683485a` passed core conformance, benchmarks, all 54 core package checks, the desktop build, all 14 reusable packages, browser publication and all 37 original production-shader pixel assertions in [run 43109136759](https://github.com/wieslawsoltes/ReportScene/actions/runs/43109136759). Skia 4 typeface identity and immutable path-builder changes and Uno 7 layout signatures are integrated. Subsequent actual-application evidence identified the Chromium software-presentation configuration and native 2D depth-slice sentinel issues described above; both have explicit fixes and stronger validation gates.
+
+The expanded local core suite passes 848/848 checks, including eight new image staging, color and mip-transition checks. The complete application gates are being rerun with these changes. Existing browser pixel assertions, required scenario counts and zero-retry policy remain mandatory.
 
 The migration runs the same gates against Uno 7 / Skia 4, plus:
 
 - an independent WGSL compile/pipeline/readback job with 39 pixel assertions over 15 primitives and two ordered draw calls, including nonzero `firstInstance`, a fractional pie radial edge and a mitered rectangle corner;
+- the same production shader rendered into an actual `GPUCanvasContext`, requiring exact offscreen/canvas byte equality and matching browser screenshot samples;
 - native browser evidence for successful WebGPU submission, viewport-sized targets at high zoom, scroll/layout reuse and idle stability;
+- a native browser scenario using a transparent 9001 × 257 image at minified and original pixel sizes, scrolling across tile boundaries and inspecting screenshot pixels and cache bounds;
+- core raster checks for odd-size mip edges, long/narrow coordinate overflow, premultiplied transparent pixels, adjacent tile gutters, full-patch equivalence across mip transitions, sRGB conversion and invalid input;
 - a browser with WebGPU deliberately unavailable, requiring a visible error, splash release and zero GPU report submissions;
 - all existing report editing, preparation, navigation, rendering, import/export and package tests.
 
-The standalone shader test writes `pixels.png`, `results.json`, `console.json`, and failure diagnostics to its CI artifact. It tests the production shader directly and complements the actual Uno application scenarios.
+The standalone shader test writes `pixels.png`, `presented.png`, `results.json`, `console.json`, and failure diagnostics to its CI artifact. It tests the production shader directly and complements the actual Uno application scenarios. The real-canvas extension passed at commit `fee204018a73d092df6b3b747100a4c45bae47d0` in [run 43111580394](https://github.com/wieslawsoltes/ReportScene/actions/runs/43111580394).
+
+The initial browser failure matched [Chromium issue 575926500](https://issues.chromium.org/issues/575926500): selecting the software WebGPU adapter with incompatible canvas/shared-image flags allowed offscreen checks but lost the device during presentation. CI now selects software Vulkan with `--use-vulkan=swiftshader`, retains software ANGLE, and validates both canvas readback and actual presentation. No application ownership workaround or waived pixel assertion is involved.
 
 ### Commands
 

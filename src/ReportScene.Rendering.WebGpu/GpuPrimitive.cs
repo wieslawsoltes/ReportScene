@@ -4,7 +4,14 @@ using System.Runtime.InteropServices;
 namespace ReportScene.Rendering.WebGpu;
 
 /// <summary>Submission counters, not GPU timings. Texture counts include shared-cache misses for this frame.</summary>
-public readonly record struct WebGpuRenderStatistics(int PrimitiveCount, int DrawCalls, int TextureUploads, long UploadedBytes, int AtlasPages);
+public readonly record struct WebGpuRenderStatistics(int PrimitiveCount, int DrawCalls, int TextureUploads, long UploadedBytes, int AtlasPages)
+{
+    public int MaximumTextureDimension { get; init; }
+    public int ImageTileSize { get; init; }
+    public long CachedImageBytes { get; init; }
+    public long CachedPathMaskBytes { get; init; }
+    public long ImageStagingBytes { get; init; }
+}
 
 /// <summary>Eight aligned vec4 fields; the exact 128-byte layout is shared with Report2D.wgsl.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

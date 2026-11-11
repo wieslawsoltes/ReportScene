@@ -84,6 +84,11 @@ fn segment_distance(point: vec2f, a: vec2f, b: vec2f, half_width: f32, cap: f32)
     } else if (kind == 3u) {
         distance = segment_distance(point, p.data.xy, p.data.zw, max(p.shape.y, 0.0001), p.shape.w);
     } else if (kind == 4u) {
+        if (p.extra.z > 0.5) {
+            // Tiled image quads share one outer coverage boundary. Internal
+            // edges remain fully covered and are emitted exactly once.
+            distance = box_distance(point - p.data.xy - p.data.zw * 0.5, p.data.zw * 0.5);
+        }
         let ratio = (point - p.rect.xy) / max(p.rect.zw, vec2f(0.0001));
         let uv = mix(p.uv.xy, p.uv.zw, ratio);
         // Explicit gradients keep derivative use uniform across shape branches.

@@ -251,13 +251,70 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     }
     public override void DrawImage(SKImage image, SKRect destination, SKSamplingOptions sampling)
     {
+        ArgumentNullException.ThrowIfNull(image);
         var rect = Map(destination);
-        if (Intersection(rect, state.Clip).IsEmpty) return;
-        var texture = textures.GetImage(image);
+        if (rect.IsEmpty) return;
+        var coverage = rect;
+        coverage.Inflate(1.5f / Math.Min(pixelsX, pixelsY), 1.5f / Math.Min(pixelsX, pixelsY));
+        var visible = Intersection(coverage, state.Clip);
+        if (visible.IsEmpty) return;
         using var paint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        if (image.Width > textures.ImageTileSize || image.Height > textures.ImageTileSize)
+        {
+            DrawTiledImage(image, rect, visible, paint);
+            return;
+        }
+        var texture = textures.GetImage(image);
         var p = Primitive(rect, paint, 4);
         p.Uv = new(0, 0, 1, 1);
         Add(p, texture);
+    }
+
+    private void DrawTiledImage(SKImage image, SKRect rect, SKRect visible, SKPaint paint)
+    {
+        if (image.Width <= 0 || image.Height <= 0 || (long)image.Width * image.Height > ReportImageRaster.MaximumDecodedPixels)
+            throw new InvalidOperationException("Decoded image exceeds the 32-megapixel report image budget.");
+        // Select the same isotropic footprint used by the texture sampler. The
+        // global chain uses aligned 2:1 reductions and edge padding, so the next
+        // selected level is identical to the previous tile's filtered second mip.
+        double footprint = Math.Max(image.Width / ((double)rect.Width * pixelsX),
+            image.Height / ((double)rect.Height * pixelsY));
+        int maximumDimension = Math.Max(image.Width, image.Height);
+        int maximumLevel = maximumDimension <= 1 ? 0 : 1 + BitOperations.Log2((uint)(maximumDimension - 1));
+        int level = (int)Math.Clamp(Math.Floor(Math.Log2(Math.Max(1, footprint))), 0, maximumLevel);
+        int levelWidth = ReportImageRaster.GetAlignedLevelDimension(image.Width, level);
+        int levelHeight = ReportImageRaster.GetAlignedLevelDimension(image.Height, level);
+        int tileSize = textures.ImageTileSize;
+        int columns = (levelWidth + tileSize - 1) / tileSize, rows = (levelHeight + tileSize - 1) / tileSize;
+        double sourcePixelsPerTile = tileSize * (double)(1L << level);
+        int firstX = Math.Clamp((int)Math.Floor((visible.Left - rect.Left) / (double)rect.Width * image.Width / sourcePixelsPerTile), 0, columns - 1);
+        int firstY = Math.Clamp((int)Math.Floor((visible.Top - rect.Top) / (double)rect.Height * image.Height / sourcePixelsPerTile), 0, rows - 1);
+        int lastX = Math.Clamp((int)Math.Ceiling((visible.Right - rect.Left) / (double)rect.Width * image.Width / sourcePixelsPerTile) - 1, firstX, columns - 1);
+        int lastY = Math.Clamp((int)Math.Ceiling((visible.Bottom - rect.Top) / (double)rect.Height * image.Height / sourcePixelsPerTile) - 1, firstY, rows - 1);
+        var whole = Primitive(rect, paint, 4);
+        for (int y = firstY; y <= lastY; y++)
+            for (int x = firstX; x <= lastX; x++)
+            {
+                var tile = textures.GetImageTile(image, level, x, y);
+                var source = tile.SourceBounds;
+                var target = new SKRect(
+                    rect.Left + source.Left / image.Width * rect.Width,
+                    rect.Top + source.Top / image.Height * rect.Height,
+                    rect.Left + source.Right / image.Width * rect.Width,
+                    rect.Top + source.Bottom / image.Height * rect.Height);
+                var p = Primitive(target, paint, 4);
+                p.Uv = new(tile.Uv.Left, tile.Uv.Top, tile.Uv.Right, tile.Uv.Bottom);
+                p.Data = whole.Rect;
+                p.Extra.Z = 1; // Sample this tile; antialias only the whole image boundary.
+                float left = x == 0 ? whole.Quad.X : target.Left;
+                float top = y == 0 ? whole.Quad.Y : target.Top;
+                float right = x == columns - 1 ? whole.Quad.X + whole.Quad.Z : target.Right;
+                float bottom = y == rows - 1 ? whole.Quad.Y + whole.Quad.W : target.Bottom;
+                // Internal quads are disjoint. Their four-pixel texture gutters
+                // provide filtering continuity without translucent seam overdraw.
+                p.Quad = new(left, top, right - left, bottom - top);
+                Add(p, tile.Texture);
+            }
     }
 
     private float RasterScale()

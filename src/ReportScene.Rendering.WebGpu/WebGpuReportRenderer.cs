@@ -111,7 +111,14 @@ public sealed unsafe class WebGpuReportRenderer : IDisposable
             if (commands == null) throw new InvalidOperationException("WebGPU report command recording failed.");
             api.QueueSubmit(queue, 1, &commands);
             LastStatistics = new(primitives.Length, canvas.Batches.Count, shared.Textures.TextureUploads,
-                checked((long)bytes + 16 + shared.Textures.UploadedBytes), shared.Textures.AtlasPages);
+                checked((long)bytes + 16 + shared.Textures.UploadedBytes), shared.Textures.AtlasPages)
+            {
+                MaximumTextureDimension = shared.Textures.MaximumTextureDimension,
+                ImageTileSize = shared.Textures.ImageTileSize,
+                CachedImageBytes = shared.Textures.RetainedImageBytes,
+                CachedPathMaskBytes = shared.Textures.RetainedMaskBytes,
+                ImageStagingBytes = shared.Textures.RetainedStagingBytes
+            };
         }
         finally
         {

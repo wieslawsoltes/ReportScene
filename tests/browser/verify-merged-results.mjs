@@ -4,10 +4,11 @@ const tests = [];
 function visit(suite) { for (const spec of suite.specs || []) tests.push(...spec.tests.map(test => ({ ...test, title: spec.title }))); for (const child of suite.suites || []) visit(child); }
 for (const suite of report.suites || []) visit(suite);
 const bad = tests.filter(t => t.expectedStatus !== 'passed' || t.results.length !== 1 || t.results[0].status !== 'passed');
-if (tests.length < 75 || bad.length || report.errors?.length || report.stats.unexpected || report.stats.flaky || report.stats.skipped)
+if (tests.length < 76 || bad.length || report.errors?.length || report.stats.unexpected || report.stats.flaky || report.stats.skipped)
   throw new Error(`Merged browser validation failed: ${tests.length} tests, ${bad.length} rejected, stats=${JSON.stringify(report.stats)}`);
 for (const required of [
   'native WebGPU surfaces use viewport targets, preserve scroll and stop submitting when idle',
+  'native WebGPU tiles oversized odd images without seams and bounds visible image residency',
   'WebGPU unavailable state releases the splash and reports the rendering failure visibly',
   'pane double-click resets on release',
   'native border width keeps precise', 'native paragraph alignment shows single and mixed',
