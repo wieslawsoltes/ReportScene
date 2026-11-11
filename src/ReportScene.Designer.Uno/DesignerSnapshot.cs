@@ -16,6 +16,8 @@ public sealed record ObjectSnapshot(string Id, string Name, string Kind, RectD B
 }
 public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview, int TemplatePages, int PreparedPages, int PreviewPage, int ObjectCount, int SelectedCount, bool CanUndo, bool CanRedo, int HistoryCount, double Zoom, long RenderCount, string Status, IReadOnlyList<Diagnostic> Diagnostics, Dictionary<string, ElementBounds> Commands, Dictionary<string, ElementBounds> Properties, IReadOnlyList<ObjectSnapshot> Objects, Dictionary<string, string> Inputs, long SnapshotSequence)
 {
+    public ReportGpuSurfaceSnapshot DesignGpu { get; init; }
+    public ReportGpuSurfaceSnapshot PreviewGpu { get; init; }
     public Guid DocumentId { get; init; }
     public long ContentRevision { get; init; }
     public long PreviewIndexBuilds { get; init; }
@@ -176,6 +178,7 @@ public sealed partial class ReportDesignerControl
         var objects = DesignView.Layout.Objects.Select(entry => new ObjectSnapshot(entry.Item.Id, entry.Item.Name, entry.Item.GetType().Name, entry.Item.Bounds, entry.Item is TextItem text ? text.Text : null, Session.SelectedIds.Contains(entry.Item.Id), origin is null ? null : new(origin.X + entry.Bounds.X * DesignView.PointScale, origin.Y + entry.Bounds.Y * DesignView.PointScale, entry.Bounds.Width * DesignView.PointScale, entry.Bounds.Height * DesignView.PointScale)) { Locked = entry.Item.Locked }).ToArray();
         return new(Session.Document.Name, Session.IsDirty, previewMode, Session.Document.Pages.Count, PreviewView.Report?.Pages.Count ?? 0, PreviewView.PageIndex + 1, DocumentTree.AllItems(Session.Document).Count(), Session.SelectedIds.Count, Session.CanUndo, Session.CanRedo, Session.HistoryCount, previewMode ? PreviewView.Zoom : DesignView.Zoom, previewMode ? PreviewView.RenderCount : DesignView.RenderCount, status.Text, diagnostics.ToArray(), commandBounds, propertyBounds, objects, inputs, ++snapshotSequence)
         {
+            DesignGpu = DesignView.GpuSnapshot, PreviewGpu = PreviewView.GpuSnapshot,
             DocumentId = Session.DocumentId, ContentRevision = Session.Revision, PreviewIndexBuilds = PreviewView.IndexBuildCount,
             PreviewCandidatesExamined = PreviewView.LastCandidatesExamined, PreviewViewport = PreviewView.ViewportSnapshot,
             PreviewOutlineVisible = PreviewView.OutlineVisible, PreviewOutlineEffectiveVisible = PreviewView.OutlineEffectivelyVisible,

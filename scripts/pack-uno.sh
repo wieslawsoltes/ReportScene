@@ -2,7 +2,7 @@
 set -euo pipefail
 mkdir -p artifacts/packages
 cp artifacts/core-input/packages/*.nupkg artifacts/packages/
-for suffix in Controls.Uno Designer.Uno; do
+for suffix in Rendering.WebGpu Controls.Uno Designer.Uno; do
   dotnet pack "src/ReportScene.$suffix" -c Release -o "$(pwd)/artifacts/packages"
   compgen -G "artifacts/packages/ReportScene.$suffix.*.nupkg" >/dev/null || { echo "Missing Uno package: $suffix" >&2; exit 1; }
 done
@@ -10,9 +10,9 @@ python3 - <<'PY'
 from pathlib import Path
 import zipfile, xml.etree.ElementTree as ET
 packages = list(Path('artifacts/packages').glob('*.nupkg'))
-if len(packages) != 13:
-    raise SystemExit(f'Expected 13 reusable packages, found {len(packages)}')
-for name in ('ReportScene.Controls.Uno', 'ReportScene.Designer.Uno'):
+if len(packages) != 14:
+    raise SystemExit(f'Expected 14 reusable packages, found {len(packages)}')
+for name in ('ReportScene.Rendering.WebGpu', 'ReportScene.Controls.Uno', 'ReportScene.Designer.Uno'):
     package = next(p for p in packages if p.name.startswith(name + '.'))
     with zipfile.ZipFile(package) as archive:
         if not any(n.startswith('lib/') and n.endswith('/' + name + '.dll') for n in archive.namelist()):

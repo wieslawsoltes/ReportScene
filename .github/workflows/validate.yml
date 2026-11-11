@@ -13,6 +13,27 @@ concurrency:
   group: validate-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  webgpu-shader:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the browser shader validation runtime
+        run: |
+          npm install --prefix tests/browser
+          cd tests/browser
+          npx playwright install --with-deps chromium
+      - name: Compile and render WGSL on software WebGPU
+        run: node --test tests/browser/webgpu-shader.test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webgpu-shader-validation
+          path: tests/browser/shader-evidence
+          if-no-files-found: error
   core:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -54,7 +75,7 @@ jobs:
         with:
           name: core-validation
           path: artifacts/core-input
-      - name: Build desktop application and reusable Uno controls
+      - name: Build Uno 7 desktop application and WebGPU libraries
         run: dotnet build apps/ReportScene.App -c Release -f net10.0-desktop -p:ReportSceneTargetFramework=net10.0-desktop
       - name: Pack and consume Uno libraries
         run: bash scripts/pack-uno.sh 2>&1 | tee artifacts/uno-packages.log
@@ -112,7 +133,7 @@ jobs:
           npm run test:pixels --prefix tests/browser
           cd tests/browser
           npx playwright install --with-deps chromium
-      - name: Test the shared published build with native input
+      - name: Test WebGPU rendering and native input with software Vulkan
         run: |
           python3 -m http.server 8000 --directory artifacts/testsite > artifacts/http.log 2>&1 &
           cd tests/browser
@@ -162,7 +183,7 @@ jobs:
           if-no-files-found: error
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [core, desktop, browser]
+    needs: [core, desktop, browser, webgpu-shader]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -3,7 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Library</OutputType>
     <IsPackable>false</IsPackable>
-    <UnoFeatures>Skia;</UnoFeatures>
+    <UnoFeatures>Skia;WebGpu;</UnoFeatures>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="ReportScene.Designer.Uno" Version="0.1.0" />

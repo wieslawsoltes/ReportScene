@@ -4,7 +4,7 @@
     <TargetFrameworks Condition="'$(ReportSceneTargetFramework)' != ''">$(ReportSceneTargetFramework)</TargetFrameworks>
     <OutputType>Exe</OutputType>
     <UnoSingleProject>true</UnoSingleProject>
-    <UnoFeatures>SkiaRenderer;Skia;</UnoFeatures>
+    <UnoFeatures>Skia;WebGpu;</UnoFeatures>
     <ApplicationTitle>ReportScene</ApplicationTitle>
     <ApplicationId>org.reportscene.designer</ApplicationId>
     <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>

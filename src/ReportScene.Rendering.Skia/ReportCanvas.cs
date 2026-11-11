@@ -26,6 +26,59 @@ public abstract class ReportCanvas
     public abstract void ClipRect(SKRect rect, SKClipOperation operation = SKClipOperation.Intersect, bool antialias = false);
     public abstract void DrawRect(SKRect rect, SKPaint paint);
     public void DrawRect(float x, float y, float width, float height, SKPaint paint) => DrawRect(SKRect.Create(x, y, width, height), paint);
+
+    /// <summary>Draws a rectangular dashed outline with a continuous phase around its perimeter.</summary>
+    public virtual void DrawDashedRect(SKRect rect, SKPaint paint, float dash = 2, float gap = 2)
+    {
+        ArgumentNullException.ThrowIfNull(paint);
+        if (!float.IsFinite(dash) || dash <= 0) throw new ArgumentOutOfRangeException(nameof(dash));
+        if (!float.IsFinite(gap) || gap <= 0) throw new ArgumentOutOfRangeException(nameof(gap));
+        if (rect.IsEmpty) return;
+        var clip = LocalClipBounds;
+        var matrix = TotalMatrix;
+        double scale = Math.Max(.00001, Math.Min(Math.Abs(matrix.ScaleX), Math.Abs(matrix.ScaleY)));
+        float outset = (float)(Math.Max(0, paint.StrokeWidth) * .5 + 2 / scale);
+        clip.Inflate(outset, outset);
+        double phase = 0, period = (double)dash + gap;
+        int segments = 0;
+        void Edge(float x, float y, float dx, float dy, double length)
+        {
+            double begin, end;
+            if (dx != 0)
+            {
+                if (y < clip.Top || y > clip.Bottom) { phase += length; return; }
+                begin = Math.Max(0, dx > 0 ? clip.Left - x : x - clip.Right);
+                end = Math.Min(length, dx > 0 ? clip.Right - x : x - clip.Left);
+            }
+            else
+            {
+                if (x < clip.Left || x > clip.Right) { phase += length; return; }
+                begin = Math.Max(0, dy > 0 ? clip.Top - y : y - clip.Bottom);
+                end = Math.Min(length, dy > 0 ? clip.Bottom - y : y - clip.Top);
+            }
+            if (begin < end)
+            {
+                double start = Math.Floor((phase + begin) / period) * period - phase;
+                while (start < end)
+                {
+                    double a = Math.Max(0, start), b = Math.Min(length, start + dash);
+                    if (b > a && b >= begin)
+                    {
+                        if (++segments > 1_048_576) throw new InvalidOperationException("Visible dashed outline exceeds the segment budget.");
+                        DrawLine((float)(x + dx * a), (float)(y + dy * a), (float)(x + dx * b), (float)(y + dy * b), paint);
+                    }
+                    if (start + period <= start) throw new ArgumentException("Dash spacing cannot advance within these coordinates.");
+                    start += period;
+                }
+            }
+            phase += length;
+        }
+        Edge(rect.Left, rect.Top, 1, 0, rect.Width);
+        Edge(rect.Right, rect.Top, 0, 1, rect.Height);
+        Edge(rect.Right, rect.Bottom, -1, 0, rect.Width);
+        Edge(rect.Left, rect.Bottom, 0, -1, rect.Height);
+    }
+
     public abstract void DrawRoundRect(SKRect rect, float radiusX, float radiusY, SKPaint paint);
     public abstract void DrawOval(SKRect rect, SKPaint paint);
     public void DrawOval(float centerX, float centerY, float radiusX, float radiusY, SKPaint paint) =>
@@ -63,6 +116,16 @@ public sealed class SkiaReportCanvas : ReportCanvas
     public override void Scale(float x, float y) => Canvas.Scale(x, y);
     public override void ClipRect(SKRect rect, SKClipOperation operation = SKClipOperation.Intersect, bool antialias = false) => Canvas.ClipRect(rect, operation, antialias);
     public override void DrawRect(SKRect rect, SKPaint paint) => Canvas.DrawRect(rect, paint);
+    public override void DrawDashedRect(SKRect rect, SKPaint paint, float dash = 2, float gap = 2)
+    {
+        if (!float.IsFinite(dash) || dash <= 0) throw new ArgumentOutOfRangeException(nameof(dash));
+        if (!float.IsFinite(gap) || gap <= 0) throw new ArgumentOutOfRangeException(nameof(gap));
+        using var stroke = paint.Clone();
+        using var effect = SKPathEffect.CreateDash([dash, gap], 0);
+        stroke.PathEffect = effect;
+        stroke.Style = SKPaintStyle.Stroke;
+        Canvas.DrawRect(rect, stroke);
+    }
     public override void DrawRoundRect(SKRect rect, float radiusX, float radiusY, SKPaint paint) => Canvas.DrawRoundRect(rect, radiusX, radiusY, paint);
     public override void DrawOval(SKRect rect, SKPaint paint) => Canvas.DrawOval(rect, paint);
     public override void DrawCircle(float centerX, float centerY, float radius, SKPaint paint) => Canvas.DrawCircle(centerX, centerY, radius, paint);

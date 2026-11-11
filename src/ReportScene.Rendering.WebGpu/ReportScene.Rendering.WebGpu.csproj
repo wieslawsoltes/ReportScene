@@ -1,0 +1,13 @@
+<Project Sdk="Uno.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <UnoFeatures>Skia;WebGpu;</UnoFeatures>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>Native WebGPU report drawing with analytic WGSL primitives, ordered batching, shaped glyph atlases and bounded viewport resources.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ReportScene.Rendering.Skia/ReportScene.Rendering.Skia.csproj" />
+    <EmbeddedResource Include="Shaders/Report2D.wgsl" LogicalName="ReportScene.Rendering.WebGpu.Report2D.wgsl" />
+  </ItemGroup>
+</Project>

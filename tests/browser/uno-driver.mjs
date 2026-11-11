@@ -5,8 +5,10 @@ import { screenshotPixels } from './screenshot-pixels.mjs';
 export const state = page => page.evaluate(() => window.reportScene?.state);
 export async function ready(page, selftest = false) {
   await page.goto(`?${selftest ? 'selftest=1' : 'diagnostics=1'}`);
-  await page.waitForFunction(() => window.reportScene?.ready || window.reportSceneFatal || window.reportScene?.testFatal, null, { timeout: 180_000 });
+  await page.waitForFunction(() => window.reportScene?.ready || window.reportScene?.renderingError || window.reportSceneFatal || window.reportScene?.testFatal, null, { timeout: 180_000 });
   expect(await page.evaluate(() => window.reportSceneFatal || window.reportScene?.testFatal), 'Uno startup must not fail').toBeFalsy();
+  expect(await page.evaluate(() => window.reportScene?.renderingError), 'The native WebGPU report surface must initialize').toBeFalsy();
+  expect(await page.evaluate(() => window.reportScene?.renderingBackend), 'Report rendering must use the WebGPU backend').toBe('WebGPU');
   await expect.poll(() => page.evaluate(() => window.reportScene?.state?.RenderCount ?? 0)).toBeGreaterThan(0);
   await page.waitForFunction(() => window.reportScene?.presented || window.reportScene?.presentationError || window.reportSceneFatal, null, { timeout: 60_000 });
   expect(await page.evaluate(() => window.reportSceneFatal || window.reportScene?.presentationError)).toBeFalsy();

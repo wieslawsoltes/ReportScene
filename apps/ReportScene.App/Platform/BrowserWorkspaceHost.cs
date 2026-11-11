@@ -25,9 +25,11 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
         var firstFrame = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         firstFrame.Tick += (_, _) =>
         {
-            if (!designer.IsLoaded || designer.DesignView.RenderCount == 0) return;
+            if (!designer.IsLoaded || (designer.DesignView.GpuSnapshot.SubmittedFrames == 0 && designer.DesignView.RenderingError is null)) return;
             firstFrame.Stop();
-            Invoke("requestAnimationFrame(() => requestAnimationFrame(() => { const wrapper = globalThis.Uno?.UI?.Runtime?.Skia?.WebAssemblyWindowWrapper; if (typeof wrapper?.removeLoading !== 'function') { window.reportScene.presentationError = 'Uno Skia loading handoff is unavailable.'; return; } wrapper.removeLoading(); window.reportScene.presented = !document.querySelector('.uno-persistent-loader, #uno-loading'); }));");
+            if (designer.DesignView.RenderingError is { } renderingError)
+                Invoke("window.reportScene.renderingError=" + J(renderingError) + ";");
+            Invoke("requestAnimationFrame(() => requestAnimationFrame(() => { const wrapper = globalThis.Uno?.UI?.Runtime?.WebAssemblyWindowWrapper; if (typeof wrapper?.removeLoading !== 'function') { window.reportScene.presentationError = 'Uno Platform loading handoff is unavailable.'; return; } wrapper.removeLoading(); window.reportScene.presented = !document.querySelector('.uno-persistent-loader, #uno-loading'); }));");
         };
         firstFrame.Start();
         bool diagnostics = SelfTest || Invoke("String(new URLSearchParams(location.search).get('diagnostics') === '1')") == "true";
@@ -36,7 +38,16 @@ public sealed class BrowserWorkspaceHost : IReportWorkspaceHost
             diagnosticsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
             diagnosticsTimer.Tick += (_, _) =>
             {
-                try { var snapshot = designer.Snapshot(); Invoke("window.reportScene.state=" + JsonSerializer.Serialize(snapshot, DesignerSnapshotJsonContext.Default.DesignerSnapshot) + ";window.reportScene.ready=" + (snapshot.RenderCount > 0 ? "true" : "false") + ";"); }
+                try
+                {
+                    var snapshot = designer.Snapshot();
+                    var gpu = designer.DesignView.GpuSnapshot;
+                    var error = designer.DesignView.RenderingError;
+                    Invoke("window.reportScene.state=" + JsonSerializer.Serialize(snapshot, DesignerSnapshotJsonContext.Default.DesignerSnapshot) +
+                        ";window.reportScene.renderingBackend=" + J(gpu.State) +
+                        ";window.reportScene.renderingError=" + (error is null ? "null" : J(error)) +
+                        ";window.reportScene.ready=" + (gpu.SubmittedFrames > 0 ? "true" : "false") + ";");
+                }
                 catch (Exception e) { Invoke("window.reportScene.diagnosticError=" + J(e.ToString()) + ";"); }
             };
             diagnosticsTimer.Start();
