@@ -17,6 +17,14 @@ public static class ReportViewportClip
         return clip;
     }
 
+    public static SKRect Apply(ReportCanvas canvas, RectD viewport)
+    {
+        ArgumentNullException.ThrowIfNull(canvas);
+        var clip = Bounds(viewport);
+        canvas.ClipRect(clip, SKClipOperation.Intersect, antialias: false);
+        return clip;
+    }
+
     /// <summary>Converts each edge outwards so binary32 conversion never cuts inward.</summary>
     public static SKRect Bounds(RectD viewport)
     {

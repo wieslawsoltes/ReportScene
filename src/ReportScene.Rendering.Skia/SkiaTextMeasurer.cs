@@ -47,6 +47,20 @@ public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
         var face = GetFace(style);
         return new(face.Typeface, (float)style.FontSize) { Edging = SKFontEdging.Antialias, Subpixel = true, Embolden = face.Fallback && style.Bold, SkewX = face.Fallback && style.Italic ? -.2f : 0 };
     }
+    /// <summary>
+    /// Returns glyph identifiers and positioned advances from the same HarfBuzz
+    /// shaper used for pagination and exports. Result arrays belong to the caller;
+    /// the typeface remains owned by this metrics instance. Do not retain a font
+    /// across disposal or eviction of its metrics owner.
+    /// </summary>
+    public SKShaper.Result ShapeText(string text, ItemStyle style)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(text); ArgumentNullException.ThrowIfNull(style);
+        using var font = CreateFont(style);
+        return GetFace(style).Shaper.Shape(text, font);
+    }
+
     public double MeasureWidth(string text, ItemStyle style)
     {
         ObjectDisposedException.ThrowIf(disposed, this); ArgumentNullException.ThrowIfNull(text); ArgumentNullException.ThrowIfNull(style);

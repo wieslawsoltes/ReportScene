@@ -21,7 +21,16 @@ public sealed class ReportRenderer : IDisposable
     public ReportRenderer(SkiaTextMeasurer? metrics = null) { Metrics = metrics ?? new(); ownsMetrics = metrics is null; }
     public static SKRect Rect(RectD r) => SKRect.Create((float)r.X, (float)r.Y, (float)r.Width, (float)r.Height);
     public static SKColor Color(string value) => SKColor.TryParse(value, out var c) ? c : throw new FormatException($"Invalid report color '{value}'.");
-    public void DrawPage(SKCanvas canvas, PreparedPage page, RectD? viewport = null, bool paper = true)
+    /// <summary>Compatibility entry point for existing Skia-based exporters and hosts.</summary>
+    public void DrawPage(SKCanvas canvas, PreparedPage page, RectD? viewport = null, bool paper = true) =>
+        DrawPage(new SkiaReportCanvas(canvas), page, viewport, paper);
+    /// <summary>Compatibility entry point for existing Skia-based exporters and hosts.</summary>
+    public void DrawItem(SKCanvas canvas, PreparedItem item, bool designer = false) =>
+        DrawItem(new SkiaReportCanvas(canvas), item, designer);
+    /// <summary>Compatibility entry point for existing Skia-based exporters and hosts.</summary>
+    public void DrawText(SKCanvas canvas, string text, RectD bounds, ItemStyle style) =>
+        DrawText(new SkiaReportCanvas(canvas), text, bounds, style);
+    public void DrawPage(ReportCanvas canvas, PreparedPage page, RectD? viewport = null, bool paper = true)
     {
         canvas.Save();
         try
@@ -35,7 +44,7 @@ public sealed class ReportRenderer : IDisposable
         }
         finally { canvas.Restore(); }
     }
-    public void DrawItem(SKCanvas canvas, PreparedItem item, bool designer = false)
+    public void DrawItem(ReportCanvas canvas, PreparedItem item, bool designer = false)
     {
         canvas.Save();
         try
@@ -70,30 +79,34 @@ public sealed class ReportRenderer : IDisposable
         { throw new ReportRenderException(item.Source.Id, $"{item.Source.Name}: {e.Message}", e); }
         finally { canvas.Restore(); }
     }
-    public void DrawText(SKCanvas canvas, string text, RectD bounds, ItemStyle style)
+    public void DrawText(ReportCanvas canvas, string text, RectD bounds, ItemStyle style)
     {
-        var lines = text.Split('\n'); canvas.Save(); canvas.ClipRect(Rect(bounds));
-        using var font = Metrics.CreateFont(style); using var paint = new SKPaint { Color = Color(style.Foreground), IsAntialias = true };
-        double lineHeight = Metrics.LineHeight(style), available = bounds.Height - 2 * style.Padding;
-        double offset = style.VerticalAlignment switch { VerticalAlign.Center => Math.Max(0, (available - lines.Length * lineHeight) / 2), VerticalAlign.Bottom => Math.Max(0, available - lines.Length * lineHeight), _ => 0 };
-        var fontMetrics = font.Metrics; double topPadding = Math.Max(0, (lineHeight - (fontMetrics.Descent - fontMetrics.Ascent)) / 2);
-        for (int n = 0; n < lines.Length; n++)
+        var lines = text.Split('\n'); canvas.Save();
+        try
         {
-            string line = lines[n]; double width = Metrics.MeasureWidth(line, style);
-            double x = bounds.X + style.Padding + (style.Alignment switch { TextAlign.Center => (bounds.Width - style.Padding * 2 - width) / 2, TextAlign.Right => bounds.Width - style.Padding * 2 - width, _ => 0 });
-            double y = bounds.Y + style.Padding + offset + n * lineHeight + topPadding - fontMetrics.Ascent;
-            Metrics.Draw(canvas, line, (float)x, (float)y, style, paint);
-            if (style.Underline) { paint.StrokeWidth = (float)Math.Max(.5, style.FontSize / 16); canvas.DrawLine((float)x, (float)(y + style.FontSize * .1), (float)(x + width), (float)(y + style.FontSize * .1), paint); }
+            canvas.ClipRect(Rect(bounds));
+            using var font = Metrics.CreateFont(style); using var paint = new SKPaint { Color = Color(style.Foreground), IsAntialias = true };
+            double lineHeight = Metrics.LineHeight(style), available = bounds.Height - 2 * style.Padding;
+            double offset = style.VerticalAlignment switch { VerticalAlign.Center => Math.Max(0, (available - lines.Length * lineHeight) / 2), VerticalAlign.Bottom => Math.Max(0, available - lines.Length * lineHeight), _ => 0 };
+            var fontMetrics = font.Metrics; double topPadding = Math.Max(0, (lineHeight - (fontMetrics.Descent - fontMetrics.Ascent)) / 2);
+            for (int n = 0; n < lines.Length; n++)
+            {
+                string line = lines[n]; double width = Metrics.MeasureWidth(line, style);
+                double x = bounds.X + style.Padding + (style.Alignment switch { TextAlign.Center => (bounds.Width - style.Padding * 2 - width) / 2, TextAlign.Right => bounds.Width - style.Padding * 2 - width, _ => 0 });
+                double y = bounds.Y + style.Padding + offset + n * lineHeight + topPadding - fontMetrics.Ascent;
+                canvas.DrawText(Metrics, line, (float)x, (float)y, style, paint);
+                if (style.Underline) { paint.StrokeWidth = (float)Math.Max(.5, style.FontSize / 16); canvas.DrawLine((float)x, (float)(y + style.FontSize * .1), (float)(x + width), (float)(y + style.FontSize * .1), paint); }
+            }
         }
-        canvas.Restore();
+        finally { canvas.Restore(); }
     }
-    private static void Background(SKCanvas canvas, RectD bounds, ItemStyle style)
+    private static void Background(ReportCanvas canvas, RectD bounds, ItemStyle style)
     {
         using var paint = new SKPaint { IsAntialias = true, Color = Color(style.Fill) };
         if (paint.Color.Alpha > 0) canvas.DrawRect(Rect(bounds), paint);
         if (style.BorderWidth > 0) { paint.Style = SKPaintStyle.Stroke; paint.Color = Color(style.BorderColor); paint.StrokeWidth = (float)style.BorderWidth; canvas.DrawRect(Rect(bounds), paint); }
     }
-    private static void DrawShape(SKCanvas canvas, ShapeItem shape, RectD bounds)
+    private static void DrawShape(ReportCanvas canvas, ShapeItem shape, RectD bounds)
     {
         using var paint = new SKPaint { IsAntialias = true, Color = Color(shape.Style.Fill) };
         void Draw()
@@ -110,7 +123,7 @@ public sealed class ReportRenderer : IDisposable
         if (shape.Style.BorderWidth > 0 || shape.Shape == ShapeKind.Line)
         { paint.Style = SKPaintStyle.Stroke; paint.Color = Color(shape.Style.BorderColor); paint.StrokeWidth = (float)Math.Max(shape.Shape == ShapeKind.Line ? .5 : 0, shape.Style.BorderWidth); Draw(); }
     }
-    private void DrawImage(SKCanvas canvas, ImageItem source, RectD bounds, bool designer)
+    private void DrawImage(ReportCanvas canvas, ImageItem source, RectD bounds, bool designer)
     {
         if (source.Data.Length == 0)
         {
@@ -137,7 +150,7 @@ public sealed class ReportRenderer : IDisposable
         }
         canvas.DrawImage(image, Rect(bounds), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
     }
-    private static void DrawCheck(SKCanvas canvas, RectD bounds, bool isChecked, ItemStyle style)
+    private static void DrawCheck(ReportCanvas canvas, RectD bounds, bool isChecked, ItemStyle style)
     {
         float side = (float)Math.Min(bounds.Width, bounds.Height); var box = SKRect.Create((float)bounds.X, (float)bounds.Y, side, side);
         using var paint = new SKPaint { Color = Color(style.Foreground), Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1, side / 14), IsAntialias = true };
@@ -155,7 +168,7 @@ public sealed class ReportRenderer : IDisposable
         result = new MultiFormatWriter().encode(text, format, 0, 0, hints);
         if (barcodes.Count >= 128) barcodes.Clear(); barcodes[(kind, text)] = result; return result;
     }
-    private void DrawBarcode(SKCanvas canvas, BarcodeItem barcode, string text, RectD bounds)
+    private void DrawBarcode(ReportCanvas canvas, BarcodeItem barcode, string text, RectD bounds)
     {
         var matrix = EncodeBarcode(barcode.Symbology, text); double captionHeight = barcode.ShowText ? Math.Min(15, bounds.Height * .3) : 0;
         var codeBounds = bounds with { Height = bounds.Height - captionHeight }; bool square = barcode.Symbology is BarcodeKind.QrCode or BarcodeKind.DataMatrix;
@@ -170,49 +183,54 @@ public sealed class ReportRenderer : IDisposable
         }
         if (barcode.ShowText) DrawText(canvas, text, new(bounds.X, bounds.Bottom - captionHeight, bounds.Width, captionHeight), barcode.Style with { FontSize = Math.Min(9, captionHeight * .7), Alignment = TextAlign.Center, Padding = 0 });
     }
-    private void DrawChart(SKCanvas canvas, ChartItem chart, RectD bounds, IReadOnlyList<ChartPoint> points, bool designer)
+    private void DrawChart(ReportCanvas canvas, ChartItem chart, RectD bounds, IReadOnlyList<ChartPoint> points, bool designer)
     {
-        canvas.Save(); canvas.ClipRect(Rect(bounds));
-        var titleStyle = chart.Style with { FontSize = Math.Max(11, chart.Style.FontSize), Bold = true, Padding = 0 };
-        DrawText(canvas, chart.Title, new(bounds.X + 6, bounds.Y + 4, bounds.Width - 12, 23), titleStyle);
-        if (points.Count == 0)
-        { DrawText(canvas, designer ? $"{chart.Chart} chart\n{chart.DataSource} · {chart.CategoryColumn} / {chart.ValueExpression}\nPreview to evaluate data" : "No data", new(bounds.X, bounds.Y + 30, bounds.Width, bounds.Height - 30), new() { Foreground = "#768594", Alignment = TextAlign.Center, VerticalAlignment = VerticalAlign.Center }); canvas.Restore(); return; }
-        using var paint = new SKPaint { IsAntialias = true };
-        if (chart.Chart == ChartKind.Pie)
+        canvas.Save();
+        try
         {
-            var positive = points.Where(p => p.Value > 0).ToArray(); decimal total = positive.Sum(p => p.Value);
-            if (total <= 0) { DrawText(canvas, "Pie charts require positive values", new(bounds.X, bounds.Y + 35, bounds.Width, 30), new()); canvas.Restore(); return; }
-            double diameter = Math.Min(bounds.Height - 40, bounds.Width * .65);
-            var circle = SKRect.Create((float)(bounds.X + 10), (float)(bounds.Y + 32), (float)diameter, (float)diameter); float start = -90;
-            for (int n = 0; n < positive.Length; n++)
+            canvas.ClipRect(Rect(bounds));
+            var titleStyle = chart.Style with { FontSize = Math.Max(11, chart.Style.FontSize), Bold = true, Padding = 0 };
+            DrawText(canvas, chart.Title, new(bounds.X + 6, bounds.Y + 4, bounds.Width - 12, 23), titleStyle);
+            if (points.Count == 0)
+            { DrawText(canvas, designer ? $"{chart.Chart} chart\n{chart.DataSource} · {chart.CategoryColumn} / {chart.ValueExpression}\nPreview to evaluate data" : "No data", new(bounds.X, bounds.Y + 30, bounds.Width, bounds.Height - 30), new() { Foreground = "#768594", Alignment = TextAlign.Center, VerticalAlignment = VerticalAlign.Center }); return; }
+            using var paint = new SKPaint { IsAntialias = true };
+            if (chart.Chart == ChartKind.Pie)
             {
-                float sweep = (float)(positive[n].Value / total * 360m); paint.Color = Color(Palette[n % Palette.Length]); canvas.DrawArc(circle, start, sweep, true, paint); start += sweep;
-                if (n < 16) { var legend = new RectD(bounds.X + diameter + 24, bounds.Y + 40 + n * 17, Math.Max(20, bounds.Width - diameter - 30), 16); canvas.DrawRect((float)legend.X - 10, (float)legend.Y + 3, 6, 6, paint); DrawText(canvas, positive[n].Label, legend, new() { FontSize = 8, Padding = 0 }); }
+                var positive = points.Where(p => p.Value > 0).ToArray(); decimal total = positive.Sum(p => p.Value);
+                if (total <= 0) { DrawText(canvas, "Pie charts require positive values", new(bounds.X, bounds.Y + 35, bounds.Width, 30), new()); return; }
+                double diameter = Math.Min(bounds.Height - 40, bounds.Width * .65);
+                var circle = SKRect.Create((float)(bounds.X + 10), (float)(bounds.Y + 32), (float)diameter, (float)diameter); float start = -90;
+                for (int n = 0; n < positive.Length; n++)
+                {
+                    float sweep = (float)(positive[n].Value / total * 360m); paint.Color = Color(Palette[n % Palette.Length]); canvas.DrawArc(circle, start, sweep, true, paint); start += sweep;
+                    if (n < 16) { var legend = new RectD(bounds.X + diameter + 24, bounds.Y + 40 + n * 17, Math.Max(20, bounds.Width - diameter - 30), 16); canvas.DrawRect((float)legend.X - 10, (float)legend.Y + 3, 6, 6, paint); DrawText(canvas, positive[n].Label, legend, new() { FontSize = 8, Padding = 0 }); }
+                }
+                return;
             }
-            canvas.Restore(); return;
+            double left = bounds.X + 49, right = bounds.Right - 12, top = bounds.Y + 35, bottom = bounds.Bottom - 30;
+            if (right <= left || bottom <= top) { return; }
+            decimal min = Math.Min(0, points.Min(p => p.Value)), max = Math.Max(0, points.Max(p => p.Value)); if (min == max) max = min + 1;
+            double Y(decimal value) => bottom - (double)((value - min) / (max - min)) * (bottom - top);
+            for (int tick = 0; tick <= 4; tick++)
+            {
+                decimal value = min + (max - min) * tick / 4; float y = (float)Y(value); paint.Color = Color("#DFE5EA"); paint.StrokeWidth = .5f;
+                canvas.DrawLine((float)left, y, (float)right, y, paint);
+                DrawText(canvas, value.ToString("0.##", CultureInfo.InvariantCulture), new(bounds.X, y - 6, 43, 15), new() { FontSize = 8, Alignment = TextAlign.Right, Foreground = "#647080", Padding = 0 });
+            }
+            double step = (right - left) / points.Count; using var path = new SKPath();
+            for (int n = 0; n < points.Count; n++)
+            {
+                float x = (float)(left + step * (n + .5)), y = (float)Y(points[n].Value); paint.Color = Color(Palette[0]);
+                if (chart.Chart == ChartKind.Bar) { float zero = (float)Y(0); canvas.DrawRect(SKRect.Create((float)(left + step * (n + .15)), Math.Min(y, zero), (float)(step * .7), Math.Max(.5f, Math.Abs(y - zero))), paint); }
+                else { if (n == 0) path.MoveTo(x, y); else path.LineTo(x, y); canvas.DrawCircle(x, y, 2.4f, paint); }
+                int stride = Math.Max(1, (int)Math.Ceiling(points.Count / Math.Max(1d, (right - left) / 56)));
+                if (n % stride == 0) DrawText(canvas, points[n].Label, new(x - Math.Max(step, 55) / 2, bottom + 7, Math.Max(step, 55), 18), new() { FontSize = 8, Alignment = TextAlign.Center, Foreground = "#647080", Padding = 0 });
+            }
+            if (chart.Chart == ChartKind.Line) { paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = 2; canvas.DrawPath(path, paint); }
         }
-        double left = bounds.X + 49, right = bounds.Right - 12, top = bounds.Y + 35, bottom = bounds.Bottom - 30;
-        if (right <= left || bottom <= top) { canvas.Restore(); return; }
-        decimal min = Math.Min(0, points.Min(p => p.Value)), max = Math.Max(0, points.Max(p => p.Value)); if (min == max) max = min + 1;
-        double Y(decimal value) => bottom - (double)((value - min) / (max - min)) * (bottom - top);
-        for (int tick = 0; tick <= 4; tick++)
-        {
-            decimal value = min + (max - min) * tick / 4; float y = (float)Y(value); paint.Color = Color("#DFE5EA"); paint.StrokeWidth = .5f;
-            canvas.DrawLine((float)left, y, (float)right, y, paint);
-            DrawText(canvas, value.ToString("0.##", CultureInfo.InvariantCulture), new(bounds.X, y - 6, 43, 15), new() { FontSize = 8, Alignment = TextAlign.Right, Foreground = "#647080", Padding = 0 });
-        }
-        double step = (right - left) / points.Count; using var path = new SKPath();
-        for (int n = 0; n < points.Count; n++)
-        {
-            float x = (float)(left + step * (n + .5)), y = (float)Y(points[n].Value); paint.Color = Color(Palette[0]);
-            if (chart.Chart == ChartKind.Bar) { float zero = (float)Y(0); canvas.DrawRect(SKRect.Create((float)(left + step * (n + .15)), Math.Min(y, zero), (float)(step * .7), Math.Max(.5f, Math.Abs(y - zero))), paint); }
-            else { if (n == 0) path.MoveTo(x, y); else path.LineTo(x, y); canvas.DrawCircle(x, y, 2.4f, paint); }
-            int stride = Math.Max(1, (int)Math.Ceiling(points.Count / Math.Max(1d, (right - left) / 56)));
-            if (n % stride == 0) DrawText(canvas, points[n].Label, new(x - Math.Max(step, 55) / 2, bottom + 7, Math.Max(step, 55), 18), new() { FontSize = 8, Alignment = TextAlign.Center, Foreground = "#647080", Padding = 0 });
-        }
-        if (chart.Chart == ChartKind.Line) { paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = 2; canvas.DrawPath(path, paint); } canvas.Restore();
+        finally { canvas.Restore(); }
     }
-    private void DrawTableDesign(SKCanvas canvas, TableItem table, RectD bounds)
+    private void DrawTableDesign(ReportCanvas canvas, TableItem table, RectD bounds)
     {
         double total = table.Columns.Sum(c => c.Width); if (total <= 0) return; double x = bounds.X;
         foreach (var column in table.Columns)

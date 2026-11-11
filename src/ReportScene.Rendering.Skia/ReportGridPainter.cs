@@ -19,6 +19,13 @@ public sealed partial class ReportGridPainter
     public int RetainedPointCapacity => (batch?.Length ?? 0) + (tail?.Length ?? 0);
     public void Clear() { batch = null; tail = null; ClearMesh(); }
 
+    public GridPaintStatistics Draw(ReportCanvas canvas, RectD bounds, RectD viewport, double spacing, SKPaint paint,
+        int maximumPoints = 1_048_576, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(canvas); ArgumentNullException.ThrowIfNull(paint);
+        return canvas.DrawGrid(bounds, viewport, spacing, paint, maximumPoints, cancellationToken);
+    }
+
     public GridPaintStatistics Draw(SKCanvas canvas, RectD bounds, RectD viewport, double spacing, SKPaint paint,
         int maximumPoints = 1_048_576, CancellationToken cancellationToken = default)
     {
