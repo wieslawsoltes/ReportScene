@@ -114,7 +114,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private void PreparePreview()
     {
         var report = Prepare(); prepared = report; searchSession = null; searchHits.Clear(); searchIndex = -1;
-        PreviewView.Report = report; SetPreview(true); BuildRibbon(); SetStatus($"Prepared {report.Pages.Count} page(s) in {report.Elapsed.TotalMilliseconds:0} ms · {RenderingStatus}");
+        PreviewView.Report = report; SetPreview(true); BuildRibbon(); SetStatus($"Prepared {report.Pages.Count} page(s) in {report.Elapsed.TotalMilliseconds:0} ms");
     }
     private PreparedReport Prepare()
     {

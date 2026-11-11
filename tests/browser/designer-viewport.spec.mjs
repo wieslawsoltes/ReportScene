@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { ready, state, fresh, bounds, click, choose, save, artifact, screenshot } from './uno-driver.mjs';
 import { screenshotPixels } from './screenshot-pixels.mjs';
+import { waitForScrollSettled } from './scroll-settled.mjs';
 
 function fixture() {
   const text = (id, x, y, width, height, style) => ({ $type: 'text', id, name: id, text: '', bounds: { x, y, width, height }, style });
@@ -80,6 +81,7 @@ test('authoring culling retains a thick border when its nominal rectangle is out
   const initial = await load(page);
   await click(page, 'tab-view'); await choose(page, 'design-zoom', 4); await click(page, 'tab-home');
   await selected(page, 4, 'border');
+  await waitForScrollSettled(page, 'DesignViewport');
   // Scroll with actual wheel input until the object's right edge is 16 DIPs left
   // of the viewport. Its 80-point border still extends into the visible region.
   for (let step = 0; step < 12; step++) {
@@ -87,7 +89,7 @@ test('authoring culling retains a thick border when its nominal rectangle is out
     const delta = r.X + r.Width - (v.X - 16);
     if (Math.abs(delta) < 2) break;
     await page.mouse.move(v.X + v.Width / 2, v.Y + v.Height / 2);
-    await page.mouse.wheel(delta, 0); await fresh(page);
+    await page.mouse.wheel(delta, 0); await waitForScrollSettled(page, 'DesignViewport');
   }
   await expect.poll(async () => {
     const s = await state(page), r = s.Objects.find(o => o.Id === 'border').Screen, v = s.Commands['design-viewport'];

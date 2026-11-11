@@ -69,6 +69,7 @@ test('native WebGPU surfaces use viewport targets, preserve scroll and stop subm
   await fresh(page);
   const preview = await state(page);
   assertNativeGpu(preview, 'PreviewGpu', 'preview-viewport', ratio);
+  expect(preview.Status, 'A successfully rendered preview must not retain a pending renderer label').not.toContain('Initializing WebGPU');
   expect(preview.PreviewGpu.Viewport.Height).toBeLessThan(preview.Commands['preview-paper'].Height);
   expect(preview.Diagnostics).toEqual([]);
   await screenshot(page, info.outputPath('native-webgpu-preview.png'));

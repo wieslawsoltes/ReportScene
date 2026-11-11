@@ -82,14 +82,25 @@ export async function fill(page, id, text) {
 export async function choose(page, id, index) {
   const r = await bounds(page, id);
   await page.mouse.click(r.X + r.Width - 14, r.Y + r.Height - 15);
-  const optionId = `${id}-option-${index}`;
+  const optionId = `${id}-option-${index}`, prefix = `${id}-option-`;
+  let rowHeight = 0;
+  const fullyVisible = snapshot => {
+    const options = Object.entries(snapshot?.Commands ?? {}).filter(([key]) => key.startsWith(prefix));
+    rowHeight = Math.max(rowHeight, ...options.map(([, rect]) => rect.Height));
+    const rect = snapshot?.Commands[optionId];
+    // Diagnostics clip rows to the native scroll viewport. A few visible pixels
+    // at the edge are not a complete click target while the wheel is settling.
+    return rect && rowHeight > 0 && rect.Height >= rowHeight - .5;
+  };
   await fresh(page);
-  for (let step = 0; step < 40 && !(await state(page))?.Commands[optionId]; step++) {
+  for (let step = 0; step < 40; step++) {
     const snapshot = await state(page), popup = snapshot?.Commands[`${id}-popup`];
+    if (fullyVisible(snapshot)) break;
     if (!popup) { await fresh(page); continue; }
-    const visible = Object.keys(snapshot.Commands).filter(k => k.startsWith(`${id}-option-`))
-      .map(k => Number(k.slice(`${id}-option-`.length))).filter(Number.isFinite);
-    const direction = visible.length && index < Math.min(...visible) ? -1 : 1;
+    const visible = Object.keys(snapshot.Commands).filter(k => k.startsWith(prefix))
+      .map(k => Number(k.slice(prefix.length))).filter(Number.isFinite);
+    // Scroll a clipped first row upwards and a clipped last row downwards.
+    const direction = visible.length && index <= Math.min(...visible) ? -1 : 1;
     await page.mouse.move(popup.X + popup.Width / 2, popup.Y + popup.Height / 2);
     await page.mouse.wheel(0, direction * Math.max(22, Math.min(120, popup.Height * .6)));
     await fresh(page);
@@ -97,11 +108,12 @@ export async function choose(page, id, index) {
   let previous = '', previousSequence = -1, stable = 0;
   await expect.poll(async () => {
     const snapshot = await state(page), rect = snapshot?.Commands[optionId];
-    if (!rect || snapshot.SnapshotSequence === previousSequence) return false;
+    if (!fullyVisible(snapshot)) { previous = ''; stable = 0; return false; }
+    if (snapshot.SnapshotSequence === previousSequence) return false;
     const key = JSON.stringify(rect); stable = key === previous ? stable + 1 : 1;
     previous = key; previousSequence = snapshot.SnapshotSequence;
     return stable >= 3;
-  }, { message: `Stable native popup item ${optionId}` }).toBe(true);
+  }, { message: `Stable fully visible native popup item ${optionId}` }).toBe(true);
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await click(page, optionId);
   await expect.poll(async () => Boolean((await state(page))?.Commands[`${id}-option-${index}`])).toBe(false);
