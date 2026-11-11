@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { screenshotPixels } from './screenshot-pixels.mjs';
-import { waitForScrollSettled } from './scroll-settled.mjs';
+import { waitForScrollSettled, createWheelScroller } from './scroll-settled.mjs';
 import { ready, state, bounds, click, choose, save, artifact, screenshot } from './uno-driver.mjs';
 
 test('prepared checkbox stroke stays painted when its nominal rectangle is outside the native viewport', async ({ page }, info) => {
@@ -18,6 +18,7 @@ test('prepared checkbox stroke stays painted when its nominal rectangle is outsi
   await choose(page, 'preview-zoom', 9); await expect.poll(async () => (await state(page)).Zoom).toBe(4);
   await waitForScrollSettled(page, 'PreviewViewport');
   const indexBuilds = (await state(page)).PreviewIndexBuilds;
+  const scroll = createWheelScroller(page, 'PreviewViewport');
   // Real wheel input places the checkbox's nominal right edge 16 DIPs left of
   // the viewport, while its renderer-owned outline still extends into it.
   for (let step = 0; step < 12; step++) {
@@ -25,8 +26,7 @@ test('prepared checkbox stroke stays painted when its nominal rectangle is outsi
     const dx = p.X + 580 * scale - (v.X - 16), dy = p.Y + 540 * scale - (v.Y + v.Height / 2);
     if (Math.abs(dx) < 2 && Math.abs(dy) < 2) break;
     await page.mouse.move(v.X + v.Width / 2, v.Y + v.Height / 2);
-    await page.mouse.wheel(dx, dy);
-    await waitForScrollSettled(page, 'PreviewViewport');
+    await scroll(dx, dy);
   }
   await expect.poll(async () => {
     const s = await state(page), p = s.Commands['preview-paper'], v = s.Commands['preview-viewport'], scale = s.Zoom * 96 / 72;

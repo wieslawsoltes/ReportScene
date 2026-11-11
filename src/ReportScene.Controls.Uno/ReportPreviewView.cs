@@ -19,6 +19,7 @@ public readonly record struct PreviewViewportSnapshot(double Width, double Heigh
     double HorizontalOffset, double VerticalOffset, string FocusOwner, PreviewPaintSnapshot Paint)
 {
     public bool IsIntermediate { get; init; }
+    public long ViewChangeVersion { get; init; }
 }
 
 /// <summary>The current-page spatial index is retained; optional bookmark metadata is materialized only when the outline is opened.</summary>
@@ -30,6 +31,7 @@ public sealed partial class ReportPreviewView : UserControl
     private int pageIndex;
     private double zoom = 1;
     private bool scrollIsIntermediate;
+    private long scrollViewChangeVersion;
     public PreparedReport? Report
     {
         get => report;
@@ -65,7 +67,7 @@ public sealed partial class ReportPreviewView : UserControl
     public FrameworkElement CanvasElement => surface;
     public FrameworkElement ViewportElement => scroll;
     public PreviewViewportSnapshot ViewportSnapshot => new(scroll.ViewportWidth, scroll.ViewportHeight, scroll.ExtentWidth, scroll.ExtentHeight,
-        scroll.HorizontalOffset, scroll.VerticalOffset, XamlRoot is null ? "" : FocusManager.GetFocusedElement(XamlRoot)?.GetType().Name ?? "", surface.LastPaint) { IsIntermediate = scrollIsIntermediate };
+        scroll.HorizontalOffset, scroll.VerticalOffset, XamlRoot is null ? "" : FocusManager.GetFocusedElement(XamlRoot)?.GetType().Name ?? "", surface.LastPaint) { IsIntermediate = scrollIsIntermediate, ViewChangeVersion = scrollViewChangeVersion };
     public event Action? ViewChanged;
     public event Action? RenderingStateChanged;
     public event Action<Exception>? Failed;
@@ -83,7 +85,7 @@ public sealed partial class ReportPreviewView : UserControl
         };
         surface.SizeChanged += (_, _) => { surface.Invalidate(); QueueReveal(); };
         scroll.SizeChanged += (_, _) => { surface.Invalidate(); QueueReveal(); };
-        scroll.ViewChanged += (_, e) => { scrollIsIntermediate = e.IsIntermediate; surface.Invalidate(); };
+        scroll.ViewChanged += (_, e) => { scrollViewChangeVersion++; scrollIsIntermediate = e.IsIntermediate; surface.Invalidate(); };
         InitializeOutline();
         ControlTheme.Identify(this, "report-preview-view", "Prepared report preview; Page Up/Down changes pages, Ctrl+Home/End jumps to first/last");
         // Tunnelling runs before the ScrollViewer's class handler consumes paging keys.

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { ready, state, fresh, bounds, click, choose, artifact, screenshot } from './uno-driver.mjs';
 import { screenshotPixels } from './screenshot-pixels.mjs';
-import { waitForScrollSettled } from './scroll-settled.mjs';
+import { waitForScrollSettled, createWheelScroller } from './scroll-settled.mjs';
 
 const sourceWidth = 9001, sourceHeight = 257;
 const expected = [143, 191, 239, 255]; // RGBA(32,128,224,128), premultiplied over white.
@@ -66,6 +66,7 @@ test('native WebGPU tiles oversized odd images without seams and bounds visible 
   // with native wheel input. Each row must remain uniform even at the shared
   // fractional edge: a gap or double alpha blend changes these pixels.
   const observations = [];
+  const scroll = createWheelScroller(page, 'DesignViewport');
   for (const boundary of [tileSize, tileSize * 2]) {
     await waitForScrollSettled(page, 'DesignViewport');
     for (let attempt = 0; attempt < 12; attempt++) {
@@ -74,7 +75,7 @@ test('native WebGPU tiles oversized odd images without seams and bounds visible 
       const delta = r.X + r.Width * boundary / sourceWidth - (v.X + v.Width / 2);
       if (Math.abs(delta) < 2) break;
       await page.mouse.move(v.X + v.Width / 2, v.Y + v.Height / 2);
-      await page.mouse.wheel(delta, 0); await waitForScrollSettled(page, 'DesignViewport');
+      await scroll(delta, 0);
     }
     await expect.poll(async () => {
       const snapshot = await state(page), r = snapshot.Objects.find(item => item.Id === 'native-size').Screen;

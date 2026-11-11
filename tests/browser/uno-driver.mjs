@@ -83,6 +83,7 @@ export async function choose(page, id, index) {
   const r = await bounds(page, id);
   await page.mouse.click(r.X + r.Width - 14, r.Y + r.Height - 15);
   const optionId = `${id}-option-${index}`, prefix = `${id}-option-`;
+  const scrollState = snapshot => snapshot?.PopupScrolls?.[id];
   let rowHeight = 0;
   const fullyVisible = snapshot => {
     const options = Object.entries(snapshot?.Commands ?? {}).filter(([key]) => key.startsWith(prefix));
@@ -102,15 +103,28 @@ export async function choose(page, id, index) {
     // Scroll a clipped first row upwards and a clipped last row downwards.
     const direction = visible.length && index <= Math.min(...visible) ? -1 : 1;
     await page.mouse.move(popup.X + popup.Width / 2, popup.Y + popup.Height / 2);
+    await fresh(page);
+    const before = scrollState(await state(page));
+    expect(before, `Native popup scroll observations for ${id}`).toBeTruthy();
+    const maximum = Math.max(0, before.ExtentHeight - before.ViewportHeight);
+    const clamped = direction < 0 ? before.VerticalOffset <= .01 : before.VerticalOffset >= maximum - .01;
+    if (clamped) { await fresh(page); continue; }
     await page.mouse.wheel(0, direction * Math.max(22, Math.min(120, popup.Height * .6)));
+    // Several diagnostic snapshots may precede delivery of a queued wheel.
+    // Require a subsequent native event before accepting the final idle state.
+    await expect.poll(async () => {
+      const current = scrollState(await state(page));
+      return current && current.ViewChangeVersion > before.ViewChangeVersion && !current.IsIntermediate
+        && (current.VerticalOffset - before.VerticalOffset) * direction > .01;
+    }, { message: `Native popup ${id} acknowledges the wheel and settles` }).toBe(true);
     await fresh(page);
   }
   let previous = '', previousSequence = -1, stable = 0;
   await expect.poll(async () => {
-    const snapshot = await state(page), rect = snapshot?.Commands[optionId];
-    if (!fullyVisible(snapshot)) { previous = ''; stable = 0; return false; }
+    const snapshot = await state(page), rect = snapshot?.Commands[optionId], scroll = scrollState(snapshot);
+    if (!fullyVisible(snapshot) || !scroll || scroll.IsIntermediate) { previous = ''; stable = 0; return false; }
     if (snapshot.SnapshotSequence === previousSequence) return false;
-    const key = JSON.stringify(rect); stable = key === previous ? stable + 1 : 1;
+    const key = JSON.stringify([rect, scroll]); stable = key === previous ? stable + 1 : 1;
     previous = key; previousSequence = snapshot.SnapshotSequence;
     return stable >= 3;
   }, { message: `Stable fully visible native popup item ${optionId}` }).toBe(true);
