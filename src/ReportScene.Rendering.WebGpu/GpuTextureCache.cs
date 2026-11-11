@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Silk.NET.WebGPU;
@@ -37,12 +38,14 @@ internal readonly record struct GpuCoverage(GpuTexture Texture, SKRect Uv, SKRec
 /// </summary>
 internal unsafe sealed class GpuTextureCache : IDisposable
 {
-    private const int AtlasSize = 2048, MaximumAtlasPages = 4, Guard = 2, MaximumGlyphs = 65536, MaximumImages = 128, MaximumMasks = 256;
+    private const int AtlasSize = 2048, MaximumAtlasPages = 4, Guard = 2, MaximumGlyphs = 65536, MaximumImages = 1024, MaximumMasks = 2048;
     private readonly WebGpuCanvasContext context;
     private readonly BindGroupLayout* textureLayout;
     private readonly Sampler* sampler;
     private readonly int maximumDimension;
     private readonly long imageBudget;
+    private static readonly ConditionalWeakTable<SKTypeface, TypefaceIdentity> TypefaceIds = new();
+    private static long nextTypefaceId;
     private readonly List<AtlasPage> pages = [];
     private readonly Dictionary<GlyphKey, GlyphEntry> glyphs = [];
     private readonly Dictionary<GlyphKey, GpuCoverage> largeGlyphs = [];
@@ -121,6 +124,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         if (measured[0].IsEmpty) return Empty;
         var bounds = RasterBounds(measured[0], 1);
         int width = checked((int)bounds.Width), height = checked((int)bounds.Height);
+        if (width > AtlasSize || height > AtlasSize) EnsureBudget(checked((long)width * height * 4));
         using var bitmap = Bitmap(width, height);
         using (var canvas = new SKCanvas(bitmap))
         using (var paint = new SKPaint { Color = SKColors.White, IsAntialias = true })
@@ -231,6 +235,9 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         if (geometry.IsEmpty) return Empty;
         if (clip is { } visible)
         {
+            // Antialias coverage extends past the geometric edge. Retain the
+            // small fringe; the GPU still applies the exact viewport clip.
+            visible.Inflate(Guard / rasterScale, Guard / rasterScale);
             float left = Math.Max(geometry.Left, visible.Left), top = Math.Max(geometry.Top, visible.Top);
             float right = Math.Min(geometry.Right, visible.Right), bottom = Math.Min(geometry.Bottom, visible.Bottom);
             if (right <= left || bottom <= top) return Empty;
@@ -480,9 +487,21 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         imageBytes = maskBytes = temporaryBytes = 0;
     }
 
-    private readonly record struct GlyphKey(uint Typeface, ushort Glyph, float Size, float ScaleX, float SkewX, int Flags)
+    private sealed class TypefaceIdentity
     {
-        public static GlyphKey Create(SKFont font, ushort glyph) => new(font.Typeface?.UniqueId ?? 0, glyph,
+        public long Value { get; } = Interlocked.Increment(ref nextTypefaceId);
+    }
+    private static long FontIdentity(SKFont font)
+    {
+        // Native handles may be recycled after a metrics owner evicts a face.
+        // A weak managed identity prevents stale atlas entries from aliasing a
+        // subsequently allocated typeface without retaining native font objects.
+        var face = font.Typeface;
+        return face is null ? 0 : TypefaceIds.GetValue(face, static _ => new()).Value;
+    }
+    private readonly record struct GlyphKey(long Typeface, ushort Glyph, float Size, float ScaleX, float SkewX, int Flags)
+    {
+        public static GlyphKey Create(SKFont font, ushort glyph) => new(FontIdentity(font), glyph,
             font.Size, font.ScaleX, font.SkewX,
             (font.Embolden ? 1 : 0) | (font.Subpixel ? 2 : 0) | (font.LinearMetrics ? 4 : 0)
             | (font.ForceAutoHinting ? 8 : 0) | (font.EmbeddedBitmaps ? 16 : 0) | (font.BaselineSnap ? 32 : 0)
