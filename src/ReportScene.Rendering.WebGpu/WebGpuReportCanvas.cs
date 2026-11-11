@@ -15,15 +15,16 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
 {
     public const int MaximumPrimitives = 262_144;
     private readonly GpuTextureCache textures;
-    private readonly float pixelsX, pixelsY;
+    private float pixelsX, pixelsY;
     private readonly Stack<State> states = new();
     private State state;
-    internal List<GpuPrimitive> Primitives { get; } = new(1024);
+    internal List<GpuPrimitive> Primitives { get; } = new(256);
     internal List<GpuBatch> Batches { get; } = new(32);
     private readonly record struct State(float ScaleX, float ScaleY, float X, float Y, SKRect Clip);
     private readonly record struct ShapeKey(string Text, string Family, bool Bold, bool Italic, double Size);
     private sealed class ShapeCache
     {
+        public ShapeCache() { }
         internal readonly Dictionary<ShapeKey, SKShaper.Result> Runs = new();
         internal readonly Queue<ShapeKey> Order = new();
         internal int Characters;
@@ -33,6 +34,14 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     public WebGpuReportCanvas(GpuTextureCache textures, RectD viewport, int pixelWidth, int pixelHeight)
     {
         this.textures = textures;
+        Reset(viewport, pixelWidth, pixelHeight);
+    }
+
+    internal void Reset(RectD viewport, int pixelWidth, int pixelHeight)
+    {
+        states.Clear();
+        Primitives.Clear();
+        Batches.Clear();
         pixelsX = (float)(pixelWidth / viewport.Width);
         pixelsY = (float)(pixelHeight / viewport.Height);
         state = new(1, 1, (float)-viewport.X, (float)-viewport.Y, SKRect.Create((float)viewport.Width, (float)viewport.Height));
@@ -135,7 +144,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     {
         if (paint.Style == SKPaintStyle.StrokeAndFill)
         {
-            using var path = new SKPath(); path.AddRect(rect); DrawPath(path, paint); return;
+            using var builder = new SKPathBuilder(); builder.AddRect(rect); using var path = builder.Detach(); DrawPath(path, paint); return;
         }
         Add(Primitive(Map(rect), paint, 0));
     }
@@ -143,7 +152,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     {
         if (Math.Abs(radiusX * state.ScaleX - radiusY * state.ScaleY) > .001f || paint.Style == SKPaintStyle.StrokeAndFill)
         {
-            using var path = new SKPath(); path.AddRoundRect(rect, radiusX, radiusY); DrawPath(path, paint); return;
+            using var builder = new SKPathBuilder(); builder.AddRoundRect(rect, radiusX, radiusY); using var path = builder.Detach(); DrawPath(path, paint); return;
         }
         var p = Primitive(Map(rect), paint, 1);
         p.Data = new(radiusX * state.ScaleX, radiusY * state.ScaleY, 0, 0);
@@ -153,7 +162,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     {
         if (paint.Style == SKPaintStyle.StrokeAndFill)
         {
-            using var path = new SKPath(); path.AddOval(rect); DrawPath(path, paint); return;
+            using var builder = new SKPathBuilder(); builder.AddOval(rect); using var path = builder.Detach(); DrawPath(path, paint); return;
         }
         Add(Primitive(Map(rect), paint, 2));
     }
@@ -207,9 +216,10 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         }
         else
         {
-            using var path = new SKPath();
-            if (useCenter) { path.MoveTo(oval.MidX, oval.MidY); path.ArcTo(oval, startAngle, sweepAngle, false); path.Close(); }
-            else { path.ArcTo(oval, startAngle, sweepAngle, true); if (paint.Style != SKPaintStyle.Stroke) path.Close(); }
+            using var builder = new SKPathBuilder();
+            if (useCenter) { builder.MoveTo(oval.MidX, oval.MidY); builder.ArcTo(oval, startAngle, sweepAngle, false); builder.Close(); }
+            else { builder.ArcTo(oval, startAngle, sweepAngle, true); if (paint.Style != SKPaintStyle.Stroke) builder.Close(); }
+            using var path = builder.Detach();
             DrawPath(path, paint);
         }
     }

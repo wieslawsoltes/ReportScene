@@ -224,13 +224,14 @@ internal unsafe sealed class GpuTextureCache : IDisposable
             throw new NotSupportedException("Inverse path coverage requires an explicit viewport fill.");
         // Bake stroke joins, caps and path effects into the coverage geometry.
         // This makes the cache independent of temporary paint/path lifetimes.
-        using var outline = new SKPath();
+        using var outlineBuilder = new SKPathBuilder();
         using (var stroke = paint.Clone())
         {
             if (stroke.Style != SKPaintStyle.Fill && stroke.StrokeWidth == 0) stroke.StrokeWidth = 1 / rasterScale;
-            if (!stroke.GetFillPath(path, outline, rasterScale))
+            if (!stroke.GetFillPath(path, outlineBuilder, rasterScale))
                 throw new InvalidOperationException("The path could not be converted to finite coverage geometry.");
         }
+        using var outline = outlineBuilder.Detach();
         var geometry = outline.TightBounds;
         if (geometry.IsEmpty) return Empty;
         if (clip is { } visible)
@@ -245,9 +246,15 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         }
         var bounds = RasterBounds(geometry, rasterScale);
         int width = checked((int)bounds.Width), height = checked((int)bounds.Height);
-        outline.Transform(SKMatrix.CreateScale(rasterScale, rasterScale));
-        outline.Offset(-bounds.Left, -bounds.Top);
-        var key = PathKey.Create(outline, width, height, paint.IsAntialias);
+        using var rasterBuilder = new SKPathBuilder { FillType = outline.FillType };
+        var transform = new SKMatrix
+        {
+            ScaleX = rasterScale, ScaleY = rasterScale,
+            TransX = -bounds.Left, TransY = -bounds.Top, Persp2 = 1
+        };
+        rasterBuilder.AddPath(outline, in transform);
+        using var rasterOutline = rasterBuilder.Detach();
+        var key = PathKey.Create(rasterOutline, width, height, paint.IsAntialias);
         if (masks.TryGetValue(key, out var found))
         {
             found.LastFrame = frame;
@@ -259,7 +266,7 @@ internal unsafe sealed class GpuTextureCache : IDisposable
         using (var canvas = new SKCanvas(bitmap))
         using (var coveragePaint = new SKPaint { Color = SKColors.White, IsAntialias = paint.IsAntialias, Style = SKPaintStyle.Fill })
         {
-            canvas.DrawPath(outline, coveragePaint);
+            canvas.DrawPath(rasterOutline, coveragePaint);
             canvas.Flush();
         }
         var texture = Create(width, height, 1);

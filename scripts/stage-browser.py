@@ -20,5 +20,5 @@ for target in (output, test_output):
         shutil.rmtree(target)
     shutil.copytree(root, target)
     (target / '.nojekyll').touch()
-    (target / 'build-info.json').write_text(json.dumps({'application': 'ReportScene', 'runtime': '.NET 10 / Uno Platform Skia', 'source': str(root)}, indent=2))
+    (target / 'build-info.json').write_text(json.dumps({'application': 'ReportScene', 'runtime': '.NET 10 / Uno Platform 7', 'preferredRenderer': 'WebGPU', 'source': str(root)}, indent=2))
 print(f'Staged {root} -> {output} and {test_output}')

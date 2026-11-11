@@ -155,7 +155,11 @@ public sealed class ReportRenderer : IDisposable
         float side = (float)Math.Min(bounds.Width, bounds.Height); var box = SKRect.Create((float)bounds.X, (float)bounds.Y, side, side);
         using var paint = new SKPaint { Color = Color(style.Foreground), Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1, side / 14), IsAntialias = true };
         canvas.DrawRect(box, paint); if (!isChecked) return;
-        using var path = new SKPath(); path.MoveTo(box.Left + side * .2f, box.Top + side * .5f); path.LineTo(box.Left + side * .43f, box.Top + side * .75f); path.LineTo(box.Left + side * .82f, box.Top + side * .23f); canvas.DrawPath(path, paint);
+        using var builder = new SKPathBuilder();
+        builder.MoveTo(box.Left + side * .2f, box.Top + side * .5f);
+        builder.LineTo(box.Left + side * .43f, box.Top + side * .75f);
+        builder.LineTo(box.Left + side * .82f, box.Top + side * .23f);
+        using var path = builder.Detach(); canvas.DrawPath(path, paint);
     }
     public BitMatrix EncodeBarcode(BarcodeKind kind, string text)
     {
@@ -217,16 +221,16 @@ public sealed class ReportRenderer : IDisposable
                 canvas.DrawLine((float)left, y, (float)right, y, paint);
                 DrawText(canvas, value.ToString("0.##", CultureInfo.InvariantCulture), new(bounds.X, y - 6, 43, 15), new() { FontSize = 8, Alignment = TextAlign.Right, Foreground = "#647080", Padding = 0 });
             }
-            double step = (right - left) / points.Count; using var path = new SKPath();
+            double step = (right - left) / points.Count; using var pathBuilder = new SKPathBuilder();
             for (int n = 0; n < points.Count; n++)
             {
                 float x = (float)(left + step * (n + .5)), y = (float)Y(points[n].Value); paint.Color = Color(Palette[0]);
                 if (chart.Chart == ChartKind.Bar) { float zero = (float)Y(0); canvas.DrawRect(SKRect.Create((float)(left + step * (n + .15)), Math.Min(y, zero), (float)(step * .7), Math.Max(.5f, Math.Abs(y - zero))), paint); }
-                else { if (n == 0) path.MoveTo(x, y); else path.LineTo(x, y); canvas.DrawCircle(x, y, 2.4f, paint); }
+                else { if (n == 0) pathBuilder.MoveTo(x, y); else pathBuilder.LineTo(x, y); canvas.DrawCircle(x, y, 2.4f, paint); }
                 int stride = Math.Max(1, (int)Math.Ceiling(points.Count / Math.Max(1d, (right - left) / 56)));
                 if (n % stride == 0) DrawText(canvas, points[n].Label, new(x - Math.Max(step, 55) / 2, bottom + 7, Math.Max(step, 55), 18), new() { FontSize = 8, Alignment = TextAlign.Center, Foreground = "#647080", Padding = 0 });
             }
-            if (chart.Chart == ChartKind.Line) { paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = 2; canvas.DrawPath(path, paint); }
+            if (chart.Chart == ChartKind.Line) { using var path = pathBuilder.Detach(); paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = 2; canvas.DrawPath(path, paint); }
         }
         finally { canvas.Restore(); }
     }

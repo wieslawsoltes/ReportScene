@@ -174,7 +174,7 @@ public sealed partial class ReportDesignerControl
             var required = new CheckBox { IsChecked = parameter.Required, MinWidth = 0 }; ToolTipService.SetToolTip(required, "Required parameter");
             var row = new ParameterRow(grid, name, kind, value, description, required);
             var remove = ControlTheme.Button("remove-parameter", "Remove", "delete", () => { list.Children.Remove(grid); editors.Remove(row); }, text: false);
-            UIElement[] cells = [name, kind, value, description, required, remove]; for (int n = 0; n < cells.Length; n++) { Grid.SetColumn(cells[n], n); grid.Children.Add(cells[n]); }
+            FrameworkElement[] cells = [name, kind, value, description, required, remove]; for (int n = 0; n < cells.Length; n++) { Grid.SetColumn(cells[n], n); grid.Children.Add(cells[n]); }
             editors.Add(row); list.Children.Add(grid);
         }
         foreach (var parameter in Session.Document.Parameters) Add(parameter);

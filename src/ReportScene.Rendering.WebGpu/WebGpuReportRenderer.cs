@@ -23,6 +23,7 @@ public sealed unsafe class WebGpuReportRenderer : IDisposable
     private GpuBuffer* primitiveBuffer;
     private BindGroup* frameBindings;
     private int capacity;
+    private WebGpuReportCanvas? commandCanvas;
     private bool disposed;
 
     public WebGpuRenderStatistics LastStatistics { get; private set; }
@@ -61,7 +62,8 @@ public sealed unsafe class WebGpuReportRenderer : IDisposable
     private void RenderCore(WebGpuCanvasContext context, RectD viewport, Action<ReportCanvas> draw, GpuDeviceResources shared)
     {
         shared.Textures.BeginFrame();
-        var canvas = new WebGpuReportCanvas(shared.Textures, viewport, context.PixelWidth, context.PixelHeight);
+        var canvas = commandCanvas ??= new WebGpuReportCanvas(shared.Textures, viewport, context.PixelWidth, context.PixelHeight);
+        canvas.Reset(viewport, context.PixelWidth, context.PixelHeight);
         draw(canvas);
         canvas.ValidateBalancedState();
         EnsureCapacity(Math.Max(1, canvas.Primitives.Count));
@@ -159,6 +161,7 @@ public sealed unsafe class WebGpuReportRenderer : IDisposable
         if (frameBindings != null) { api.BindGroupRelease(frameBindings); frameBindings = null; }
         if (primitiveBuffer != null) { api.BufferRelease(primitiveBuffer); primitiveBuffer = null; }
         if (uniformBuffer != null) { api.BufferRelease(uniformBuffer); uniformBuffer = null; }
+        commandCanvas = null;
         resources?.Release();
         resources = null;
     }

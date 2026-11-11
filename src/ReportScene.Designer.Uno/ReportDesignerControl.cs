@@ -93,7 +93,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         "Unavailable" or "Failed" => "WebGPU unavailable",
         _ => "Initializing WebGPU"
     };
-    private void AddRoot(UIElement element, int row) { Grid.SetRow(element, row); root.Children.Add(element); }
+    private void AddRoot(FrameworkElement element, int row) { Grid.SetRow(element, row); root.Children.Add(element); }
     private Button Command(string id, string label, string icon, Action action, bool large = false, bool text = true)
     {
         var button = ControlTheme.Button(id, label, icon, () => Run(action), large, text);
