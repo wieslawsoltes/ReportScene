@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { screenshotPixels } from './screenshot-pixels.mjs';
 
 const evidence = fileURLToPath(new URL('./shader-evidence/', import.meta.url));
 const shaderPath = new URL('../../src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl', import.meta.url);
@@ -18,27 +19,29 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
     response.end('<!doctype html><title>ReportScene WGSL contract validation</title>');
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  let browser;
+  let browser, page;
   const consoleMessages = [];
   try {
     browser = await chromium.launch({ headless: true, executablePath: process.env.REPORTSCENE_BROWSER_EXECUTABLE, args: [
       '--enable-webgpu', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist',
-      '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--use-webgpu-adapter=swiftshader',
-      '--enable-features=Vulkan', '--disable-vulkan-surface'
+      '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--use-vulkan=swiftshader',
+      '--enable-features=Vulkan'
     ] });
-    const page = await browser.newPage();
+    page = await browser.newPage();
     page.on('console', message => consoleMessages.push({ type: message.type(), text: message.text() }));
     page.on('pageerror', error => consoleMessages.push({ type: 'pageerror', text: error.message }));
     await page.goto('http://127.0.0.1:' + server.address().port + '/');
     const result = await page.evaluate(async shader => {
       if (!navigator.gpu) throw new Error('WebGPU is unavailable: shader validation cannot be skipped or replaced by WebGL.');
-      const adapter = await navigator.gpu.requestAdapter({ forceFallbackAdapter: true });
-      if (!adapter) throw new Error('No SwiftShader fallback adapter was created.');
+      const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+      if (!adapter) throw new Error('No WebGPU adapter was created with the configured software Vulkan driver.');
       const device = await adapter.requestDevice();
+      device.lost.then(info => { window.__reportSceneShaderDeviceLoss = { reason: info.reason, message: info.message }; });
       const uncaptured = [];
       device.addEventListener('uncapturederror', event => uncaptured.push(event.error.message));
       const resources = [];
       const own = value => { resources.push(value); return value; };
+      let retainedForPresentation = false;
       try {
         device.pushErrorScope('validation');
         const module = device.createShaderModule({ label: 'ReportScene production WGSL', code: shader });
@@ -134,6 +137,23 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
         const readback = own(device.createBuffer({
           size: width * height * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
         }));
+        const presentedCanvas = document.createElement('canvas');
+        presentedCanvas.id = 'production-wgsl-output';
+        presentedCanvas.width = width; presentedCanvas.height = height;
+        document.body.style.margin = '0'; document.body.style.background = '#FFFFFF';
+        document.body.appendChild(presentedCanvas);
+        const canvasContext = presentedCanvas.getContext('webgpu');
+        if (!canvasContext) throw new Error('The production shader must also render through a real GPUCanvasContext.');
+        // Match Uno's browser surface format and premultiplied-alpha composition.
+        // CopySrc additionally lets this test compare the real swapchain texels.
+        canvasContext.configure({
+          device, format: 'rgba8unorm', alphaMode: 'premultiplied',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+        });
+        const canvasTexture = canvasContext.getCurrentTexture();
+        const canvasReadback = own(device.createBuffer({
+          size: width * height * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        }));
         const encoder = device.createCommandEncoder();
         const pass = encoder.beginRenderPass({ colorAttachments: [{
           view: target.createView(), clearValue: [0, 0, 0, 0], loadOp: 'clear', storeOp: 'store'
@@ -147,10 +167,27 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
         encoder.copyTextureToBuffer(
           { texture: target }, { buffer: readback, bytesPerRow: width * 4, rowsPerImage: height }, [width, height]
         );
+        const presentationPass = encoder.beginRenderPass({ colorAttachments: [{
+          view: canvasTexture.createView(), clearValue: [0, 0, 0, 0], loadOp: 'clear', storeOp: 'store'
+        }] });
+        presentationPass.setPipeline(pipeline);
+        presentationPass.setBindGroup(0, frameGroup); presentationPass.setBindGroup(1, imageGroup);
+        presentationPass.draw(6, 8, 0, 0);
+        presentationPass.draw(6, commands.length - 8, 0, 8);
+        presentationPass.end();
+        encoder.copyTextureToBuffer(
+          { texture: canvasTexture }, { buffer: canvasReadback, bytesPerRow: width * 4, rowsPerImage: height }, [width, height]
+        );
         device.queue.submit([encoder.finish()]);
         await readback.mapAsync(GPUMapMode.READ);
         const pixels = new Uint8Array(readback.getMappedRange()).slice();
         readback.unmap();
+        await canvasReadback.mapAsync(GPUMapMode.READ);
+        const presentedPixels = new Uint8Array(canvasReadback.getMappedRange()).slice();
+        canvasReadback.unmap();
+        let canvasPixelMismatches = 0;
+        for (let n = 0; n < pixels.length; n++)
+          if (pixels[n] !== presentedPixels[n]) canvasPixelMismatches++;
         await device.queue.onSubmittedWorkDone();
         const validationError = await device.popErrorScope();
         if (validationError) throw new Error('WebGPU validation failed: ' + validationError.message);
@@ -211,7 +248,12 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
         }
         const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
         canvas.getContext('2d').putImageData(new ImageData(display, width, height), 0, 0);
+        // Keep the actual WebGPU device and its objects alive across Node's
+        // screenshot. Destroying them here would clear the canvas before inspection.
+        window.__reportSceneShaderValidation = { device, resources, canvasContext };
+        retainedForPresentation = true;
         return {
+          canvasPixelMismatches, presentationDrawCalls: 2,
           adapter: {
             vendor: adapter.info.vendor, architecture: adapter.info.architecture,
             device: adapter.info.device, description: adapter.info.description,
@@ -222,14 +264,37 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
           samples, imageDataUrl: canvas.toDataURL('image/png')
         };
       } finally {
-        for (const resource of resources.reverse()) resource.destroy();
-        device.destroy();
+        if (!retainedForPresentation) {
+          for (const resource of resources.reverse()) resource.destroy();
+          device.destroy();
+        }
       }
     }, code);
     const imageDataUrl = result.imageDataUrl;
     delete result.imageDataUrl;
     await writeFile(evidence + '/pixels.png', Buffer.from(imageDataUrl.split(',')[1], 'base64'));
+    // Canvas readback alone can pass while the browser's compositor loses its
+    // WebGPU instance. Inspect the real presented canvas too; never substitute the
+    // offscreen PNG for this screenshot (Chromium issue 575926500).
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const presented = await page.screenshot({ clip: { x: 0, y: 0, width: result.width, height: result.height } });
+    await writeFile(evidence + '/presented.png', presented);
+    const screen = screenshotPixels(presented);
+    result.presentedColorCount = screen.colorCount();
+    result.deviceLoss = await page.evaluate(() => window.__reportSceneShaderDeviceLoss ?? null);
+    result.presentationSamples = result.samples.map(sample => ({
+      name: sample.name, x: sample.x, y: sample.y,
+      expected: sample.expected.slice(0, 3).map(channel => Math.min(255, channel + 255 - sample.expected[3])),
+      actual: screen.pixel(sample.x, sample.y).slice(0, 3),
+      tolerance: Math.max(2, sample.tolerance)
+    }));
     await writeFile(evidence + '/results.json', JSON.stringify(result, null, 2));
+    assert.equal(result.canvasPixelMismatches, 0, 'GPUCanvasContext texels must equal the offscreen production shader result.');
+    assert.equal(result.deviceLoss, null, 'The real presented canvas must retain a valid WebGPU device.');
+    assert.ok(result.presentedColorCount > 30, 'The browser must present shader colors, not a blank canvas.');
+    const presentationFailures = result.presentationSamples.filter(sample => sample.actual.some((value, channel) =>
+      Math.abs(value - sample.expected[channel]) > sample.tolerance));
+    assert.deepEqual(presentationFailures, [], 'Presented canvas differs from premultiplied shader output over the white page.');
     const failed = result.samples.filter(sample => sample.actual.some((value, channel) =>
       Math.abs(value - sample.expected[channel]) > sample.tolerance));
     assert.deepEqual(failed, [], 'Production WGSL pixel mismatches; inspect shader-evidence/results.json and pixels.png.');
@@ -242,6 +307,14 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
     throw error;
   } finally {
     await writeFile(evidence + '/console.json', JSON.stringify(consoleMessages, null, 2));
+    if (page && !page.isClosed()) await page.evaluate(() => {
+      const owned = window.__reportSceneShaderValidation;
+      if (!owned) return;
+      owned.canvasContext.unconfigure();
+      for (const resource of owned.resources.reverse()) resource.destroy();
+      owned.device.destroy();
+      delete window.__reportSceneShaderValidation;
+    }).catch(() => {});
     if (browser) await browser.close();
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
