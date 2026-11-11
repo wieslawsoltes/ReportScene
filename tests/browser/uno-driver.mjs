@@ -2,8 +2,43 @@ import { expect } from '@playwright/test';
 import fs from 'node:fs/promises';
 import { screenshotPixels } from './screenshot-pixels.mjs';
 
+const gpuHealth = new WeakMap();
+function watchGpuHealth(page) {
+  if (gpuHealth.has(page)) return;
+  const health = { errors: [], pending: new Set() };
+  gpuHealth.set(page, health);
+  page.on('console', message => {
+    const text = message.text();
+    if (!/^WebGpuInit: (?:device lost\b|uncaptured error:)/.test(text)) return;
+    const source = message.args()[0];
+    if (!source) {
+      health.errors.push({ document: null, text: `GPU health message has no originating context: ${text}` });
+      return;
+    }
+    // Resolve against the message's execution context, never the newly navigated page.
+    // A reload may legitimately destroy the previous document's GPU device.
+    const pending = source.evaluate(() => performance.timeOrigin)
+      .then(document => health.errors.push({ document, text }))
+      .catch(error => {
+        if (!/Execution context was destroyed|Cannot find context with specified id/.test(String(error)))
+          health.errors.push({ document: null, text: `Cannot inspect GPU health: ${error}` });
+      })
+      .finally(() => health.pending.delete(pending));
+    health.pending.add(pending);
+  });
+}
+async function assertGpuHealth(page) {
+  const health = gpuHealth.get(page);
+  if (!health) return; // The deliberate unsupported-GPU scenario does not call ready().
+  const document = await page.evaluate(() => performance.timeOrigin);
+  while (health.pending.size) await Promise.all([...health.pending]);
+  expect(health.errors.filter(error => error.document === null || error.document === document)
+    .map(error => error.text), 'The current document must have no native WebGPU loss or uncaptured errors').toEqual([]);
+}
+
 export const state = page => page.evaluate(() => window.reportScene?.state);
 export async function ready(page, selftest = false) {
+  watchGpuHealth(page);
   await page.goto(`?${selftest ? 'selftest=1' : 'diagnostics=1'}`);
   await page.waitForFunction(() => window.reportScene?.ready || window.reportScene?.renderingError || window.reportSceneFatal || window.reportScene?.testFatal, null, { timeout: 180_000 });
   expect(await page.evaluate(() => window.reportSceneFatal || window.reportScene?.testFatal), 'Uno startup must not fail').toBeFalsy();
@@ -16,6 +51,7 @@ export async function ready(page, selftest = false) {
   await screenshot(page); await fresh(page);
 }
 export async function fresh(page) {
+  await assertGpuHealth(page);
   const sequence = () => page.evaluate(() => window.reportScene?.state?.SnapshotSequence ?? 0);
   const before = await sequence();
   try {
@@ -24,6 +60,7 @@ export async function fresh(page) {
     const diagnostic = await page.evaluate(() => ({ fatal: window.reportSceneFatal, diagnosticError: window.reportScene?.diagnosticError, presented: window.reportScene?.presented, sequence: window.reportScene?.state?.SnapshotSequence }));
     throw new Error(`Native diagnostic publication did not advance before the deadline: ${JSON.stringify(diagnostic)}`, { cause: error });
   }
+  await assertGpuHealth(page);
 }
 export async function bounds(page, id) {
   const read = () => page.evaluate(key => window.reportScene?.state?.Commands[key], id);
@@ -80,9 +117,11 @@ export async function artifact(info, name, value) {
   await info.attach(name, { path: info.outputPath(name), contentType: 'application/json' });
 }
 export async function screenshot(page, path) {
+  await assertGpuHealth(page);
   await expect(page.locator('.uno-loader, #uno-loading')).toHaveCount(0);
   const bytes = await page.screenshot({ ...(path ? { path } : {}), fullPage: true });
   const colors = screenshotPixels(bytes).colorCount();
   expect(colors, 'The real rendered window must contain UI pixels, not only the splash or a blank canvas').toBeGreaterThan(30);
+  await assertGpuHealth(page);
   return bytes;
 }

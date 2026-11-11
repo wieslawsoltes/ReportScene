@@ -88,6 +88,7 @@ public sealed unsafe class WebGpuReportRenderer : IDisposable
             var attachment = new RenderPassColorAttachment
             {
                 View = context.TargetView,
+                DepthSlice = uint.MaxValue, // WGPU_DEPTH_SLICE_UNDEFINED for a 2D target.
                 LoadOp = LoadOp.Clear,
                 StoreOp = StoreOp.Store,
                 ClearValue = new Color(0, 0, 0, 0)
