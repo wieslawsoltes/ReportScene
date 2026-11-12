@@ -8,19 +8,20 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { screenshotPixels } from './screenshot-pixels.mjs';
 import { ellipseDistanceCases, ellipseIterationBudget } from './ellipse-reference.mjs';
-import { lineReferenceFrames, verifyLineEnvelopeSupport } from './line-reference.mjs';
+import { lineReferenceFrames, verifyLineRejectionSupport } from './line-reference.mjs';
 
 const evidence = fileURLToPath(new URL('./shader-evidence/', import.meta.url));
 const shaderPath = new URL('../../src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl', import.meta.url);
 
-test('oriented line envelopes retain independently bounded coverage with less raster area', () => {
-  const result = verifyLineEnvelopeSupport();
+test('line rejection retains independently bounded coverage and derivative helpers', () => {
+  const result = verifyLineRejectionSupport();
   assert.equal(result.frames, 3);
   assert.ok(result.sampled > 300_000 && result.supported > 30_000);
-  assert.ok(result.oriented > 20 && result.fallback > 10, 'Exercise optimized and conservative fallback geometry.');
-  assert.ok(result.candidateAreaPixels < result.originalAreaPixels * .3,
-    'The deterministic geometry fixtures must remove at least 70% of quad area without omitting possible coverage.');
-  console.log('LINE ENVELOPES: ' + JSON.stringify(result));
+  assert.ok(result.enabled > 20 && result.fallback > 10, 'Exercise optimized and conservative fallback paths.');
+  assert.equal(result.helperChecks, result.supported * 4);
+  assert.ok(result.rejectedBeforeDistance > result.sampled * .6,
+    'The deterministic fixtures must avoid distance work for at least 60% of samples without removing coverage or derivative helpers.');
+  console.log('LINE REJECTION: ' + JSON.stringify(result));
 });
 
 test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blending and grid pixels', { timeout: 180_000 }, async () => {
@@ -87,9 +88,9 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
     let p = primitives[id.x];
     ellipse_probe_distances[id.x] = ellipse_stroke_distance(p.data.xy, p.rect.zw, p.shape.y, u32(p.data.z));
 }
-// The previous axis-aligned vertex path is a geometry reference. The fragment
-// function remains identical, so every output byte must survive the envelope
-// change, including AA, clipping, translucent overlap and nonzero firstInstance.
+// The previous vertex path disables early rejection. Geometry, interpolation
+// and the complete distance function remain identical. Every output byte must
+// survive, including AA, clipping, translucent overlap and nonzero firstInstance.
 @vertex fn axis_aligned_reference(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> VertexOutput {
     let corners = array<vec2f, 6>(vec2f(0, 0), vec2f(1, 0), vec2f(0, 1), vec2f(0, 1), vec2f(1, 0), vec2f(1, 1));
     let p = primitives[instance];
@@ -98,7 +99,7 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
     output.position = vec4f(point.x / frame.size.x * 2 - 1, 1 - point.y / frame.size.y * 2, 0, 1);
     output.point = point;
     output.index = instance;
-    output.oriented_line = 0u;
+    output.line_rejection = vec4f(0);
     return output;
 }`;
         const module = device.createShaderModule({ label: 'ReportScene production WGSL', code: shader + distanceProbe });
@@ -132,7 +133,7 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
         };
         const pipeline = await device.createRenderPipelineAsync(pipelineDescriptor);
         const axisAlignedPipeline = await device.createRenderPipelineAsync({
-          ...pipelineDescriptor, label: 'Unoptimized axis-aligned line envelope reference',
+          ...pipelineDescriptor, label: 'Unoptimized complete line distance reference',
           vertex: { module, entryPoint: 'axis_aligned_reference' }
         });
 
@@ -485,7 +486,7 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
     assert.equal(result.lineComparisons.length, 3);
     assert.ok(result.lineComparisons.every(frame => frame.primitiveCount === 17 && frame.firstInstance === 3 && frame.nontransparentPixels > 1000));
     assert.deepEqual(result.lineComparisons.filter(frame => frame.byteMismatches !== 0), [],
-      'Oriented line geometry must retain every output byte of the original axis-aligned envelope, including fractional/nonuniform DPR.');
+      'Early line rejection must retain every output byte of the complete distance path, including fractional/nonuniform DPR.');
     assert.equal(result.canvasPixelMismatches, 0, 'GPUCanvasContext texels must equal the offscreen production shader result.');
     assert.equal(result.deviceLoss, null, 'The real presented canvas must retain a valid WebGPU device.');
     assert.ok(result.presentedColorCount > 30, 'The browser must present shader colors, not a blank canvas.');

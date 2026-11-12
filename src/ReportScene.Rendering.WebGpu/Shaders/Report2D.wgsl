@@ -23,41 +23,35 @@ struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) point: vec2f,
     @location(1) @interpolate(flat) index: u32,
-    @location(2) @interpolate(flat) oriented_line: u32,
+    @location(2) @interpolate(flat) line_rejection: vec4f, // normal.xy, bias, conservative distance limit (0 disables)
 };
 @vertex fn vertex_main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> VertexOutput {
     let corners = array<vec2f, 6>(
         vec2f(0, 0), vec2f(1, 0), vec2f(0, 1),
         vec2f(0, 1), vec2f(1, 0), vec2f(1, 1));
     let p = primitives[instance];
-    var point = p.quad.xy + corners[vertex] * p.quad.zw;
-    var oriented_line = 0u;
+    let point = p.quad.xy + corners[vertex] * p.quad.zw;
+    var line_rejection = vec4f(0);
     if (u32(p.shape.x + 0.5) == 3u) {
         let delta = p.data.zw - p.data.xy;
         let line_length = length(delta);
-        // Keep the original clipped, viewport-local quad for degenerate lines
-        // and distant endpoints. Rotating huge offscreen vertices can erase a
-        // thin line through float32 cancellation before viewport clipping.
+        // Distant endpoints and degenerate lines retain the complete original
+        // distance path. This also bounds cancellation in the rejection plane.
         let coordinate_limit = max(frame.size.x, frame.size.y) * 4;
         if (line_length >= 0.0001 && line_length < 3.0e38 && line_length <= coordinate_limit
             && all(abs(p.data) <= vec4f(coordinate_limit))) {
             let tangent = delta / line_length;
-            let normal = vec2f(-tangent.y, tangent.x);
-            let half_width = max(p.shape.y, 0.0001);
-            // All segment distance fields are 1-Lipschitz. Their AA support is
-            // at most .5*(1/ppd.x + 1/ppd.y), bounded by 1/min(ppd). Retain the
-            // existing 1.5-pixel fringe, and a half-pixel guard for binary edges
-            // so the rasterizer's half-open triangle boundary cannot omit d=0.
-            let guard_pixels = select(0.5, 1.5, p.shape.z >= 0.5);
-            let fringe = guard_pixels / min(frame.pixels_per_dip.x, frame.pixels_per_dip.y);
-            let extension = select(0.0, half_width, p.shape.w > 0.5);
-            let half_extent = vec2f(line_length * 0.5 + extension + fringe, half_width + fringe);
-            // Retain the clipped axis-aligned quad for short, thick, axial or
-            // mostly offscreen lines when rotation would not reduce raster work.
-            if (4 * half_extent.x * half_extent.y < p.quad.z * p.quad.w) {
-                let offset = (corners[vertex] * 2 - 1) * half_extent;
-                point = (p.data.xy + p.data.zw) * 0.5 + tangent * offset.x + normal * offset.y;
-                oriented_line = 1u;
+            // The segment fields are 1-Lipschitz. Possible AA coverage is at
+            // most .5*(1/ppd.x+1/ppd.y) from the stroke. Four physical pixels
+            // additionally retain every neighboring 2x2 derivative invocation
+            // and float32 roundoff. No potentially visible lane uses this exit.
+            let limit = max(p.shape.y, 0.0001) + 4 / min(frame.pixels_per_dip.x, frame.pixels_per_dip.y);
+            let projected_length = dot(p.quad.zw, abs(tangent));
+            // Enable only when the conservative strip can avoid distance work;
+            // short, thick, axial and mostly clipped lines need no extra test.
+            if (2 * limit * projected_length < p.quad.z * p.quad.w) {
+                let normal = vec2f(-tangent.y, tangent.x);
+                line_rejection = vec4f(normal, -dot(p.data.xy, normal), limit);
             }
         }
     }
@@ -65,7 +59,7 @@ struct VertexOutput {
     output.position = vec4f(point.x / frame.size.x * 2 - 1, 1 - point.y / frame.size.y * 2, 0, 1);
     output.point = point;
     output.index = instance;
-    output.oriented_line = oriented_line;
+    output.line_rejection = line_rejection;
     return output;
 }
 fn box_distance(p: vec2f, half_size: vec2f) -> f32 {
@@ -156,17 +150,16 @@ fn segment_distance(point: vec2f, a: vec2f, b: vec2f, half_width: f32, cap: f32)
     return box_distance(local, vec2f(len * 0.5 + extension, half_width));
 }
 @fragment fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
-    let p = primitives[input.index];
     let point = input.point;
+    // Keep the original quad and point interpolation bit-for-bit. Discard only
+    // guaranteed transparent portions of large diagonal-line bounds, before
+    // loading the primitive or evaluating distance/blending. Neighboring lanes of
+    // any potentially covered fragment retain the unmodified distance path.
+    if (input.line_rejection.w > 0
+        && abs(dot(point, input.line_rejection.xy) + input.line_rejection.z) > input.line_rejection.w) { discard; }
+    let p = primitives[input.index];
     // Exact per-primitive clips preserve painter order without scissor state churn.
     if (point.x < p.clip.x || point.y < p.clip.y || point.x >= p.clip.z || point.y >= p.clip.w) { discard; }
-    if (input.oriented_line != 0u) {
-        // Quad also records the CPU's conservative geometry/viewport bounds.
-        // Retain that domain when rotating its rasterization envelope, including
-        // custom clipped command streams and non-antialiased inclusive SDFs.
-        if (point.x < p.quad.x || point.y < p.quad.y
-            || point.x >= p.quad.x + p.quad.z || point.y >= p.quad.y + p.quad.w) { discard; }
-    }
     let center = p.rect.xy + p.rect.zw * 0.5;
     let half_size = p.rect.zw * 0.5;
     let local = point - center;

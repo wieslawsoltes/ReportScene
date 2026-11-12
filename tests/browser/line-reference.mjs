@@ -1,5 +1,5 @@
 // Independent double-precision segment-distance reference and deterministic
-// rasterization envelopes. These tests bound geometry support, not GPU timings.
+// rejection planes. These bound coverage and derivative support, not GPU timings.
 const f = Math.fround;
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
 const subtract = (a, b) => [a[0] - b[0], a[1] - b[1]];
@@ -34,29 +34,24 @@ function command(start, end, halfWidth, cap, aa, clip, frame, color = [.3, .15, 
   ]));
 }
 
-// Simulate vertex arithmetic at float32 precision for conservative support
-// checks. The distance oracle above uses an independent basis/box formulation.
-export function rasterEnvelope(primitive, frame) {
+// Simulate only the conservative rejection plane at float32 precision. The
+// independent distance oracle above verifies visible support and every 2x2
+// derivative neighbor; the GPU gate compares all bytes to the unmodified path.
+export function lineRejection(primitive, frame) {
   const start = primitive.slice(16, 18), end = primitive.slice(18, 20), quad = primitive.slice(24, 28);
   const delta = end.map((value, axis) => f(value - start[axis]));
   const length = f(Math.sqrt(f(f(delta[0] * delta[0]) + f(delta[1] * delta[1]))));
-  const limit = f(Math.max(...frame.size) * 4), halfWidth = Math.max(primitive[13], .0001);
-  const original = [[quad[0], quad[1]], [f(quad[0] + quad[2]), quad[1]],
-    [f(quad[0] + quad[2]), f(quad[1] + quad[3])], [quad[0], f(quad[1] + quad[3])]];
-  const originalArea = quad[2] * quad[3];
-  if (!(length >= .0001 && length < 3e38 && length <= limit && [...start, ...end].every(value => Math.abs(value) <= limit)))
-    return { oriented: false, corners: original, area: originalArea, originalArea };
+  const coordinateLimit = f(Math.max(...frame.size) * 4);
+  if (!(length >= .0001 && length < 3e38 && length <= coordinateLimit && [...start, ...end].every(value => Math.abs(value) <= coordinateLimit)))
+    return [0, 0, 0, 0];
   const tangent = delta.map(value => f(value / length)), normal = [-tangent[1], tangent[0]];
-  const fringe = f((primitive[14] >= .5 ? 1.5 : .5) / Math.min(...frame.pixelsPerDip));
-  const extension = primitive[15] > .5 ? halfWidth : 0;
-  const extents = [f(f(f(length * .5) + extension) + fringe), f(halfWidth + fringe)];
-  const area = f(f(4 * extents[0]) * extents[1]);
-  if (!(area < f(quad[2] * quad[3]))) return { oriented: false, corners: original, area: originalArea, originalArea };
-  const center = start.map((value, axis) => f(f(value + end[axis]) * .5));
-  const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(signs => center.map((value, axis) =>
-    f(f(value + f(tangent[axis] * f(signs[0] * extents[0]))) + f(normal[axis] * f(signs[1] * extents[1])))));
-  return { oriented: true, corners, area, originalArea };
+  const limit = f(Math.max(primitive[13], f(.0001)) + f(4 / Math.min(...frame.pixelsPerDip)));
+  const projectedLength = f(f(quad[2] * Math.abs(tangent[0])) + f(quad[3] * Math.abs(tangent[1])));
+  if (!(f(f(2 * limit) * projectedLength) < f(quad[2] * quad[3]))) return [0, 0, 0, 0];
+  return [...normal, -f(f(start[0] * normal[0]) + f(start[1] * normal[1])), limit];
 }
+
+const rejected = (point, plane) => plane[3] > 0 && Math.abs(f(f(f(f(point[0]) * plane[0]) + f(f(point[1]) * plane[1])) + plane[2])) > plane[3];
 
 export function lineReferenceFrames() {
   return [[1, 1], [1.25, 1.5], [2.75, .75]].map(pixelsPerDip => {
@@ -90,14 +85,13 @@ export function lineReferenceFrames() {
   });
 }
 
-export function verifyLineEnvelopeSupport(frames = lineReferenceFrames()) {
-  let sampled = 0, supported = 0, oriented = 0, fallback = 0, originalAreaPixels = 0, candidateAreaPixels = 0;
+export function verifyLineRejectionSupport(frames = lineReferenceFrames()) {
+  let sampled = 0, supported = 0, helperChecks = 0, enabled = 0, fallback = 0, rejectedBeforeDistance = 0;
   for (const frame of frames) for (const primitive of frame.commands.slice(frame.firstInstance)) {
-    const envelope = rasterEnvelope(primitive, frame), quad = primitive.slice(24, 28), clip = primitive.slice(8, 12);
-    if (envelope.oriented) oriented++; else fallback++;
-    originalAreaPixels += envelope.originalArea * frame.pixelsPerDip[0] * frame.pixelsPerDip[1];
-    candidateAreaPixels += envelope.area * frame.pixelsPerDip[0] * frame.pixelsPerDip[1];
+    const plane = lineRejection(primitive, frame), quad = primitive.slice(24, 28), clip = primitive.slice(8, 12);
+    if (plane[3] > 0) enabled++; else fallback++;
     const halfWidth = Math.max(primitive[13], .0001), aaSupport = primitive[14] >= .5 ? .5 * (1 / frame.pixelsPerDip[0] + 1 / frame.pixelsPerDip[1]) : 0;
+    const start = primitive.slice(16, 18), end = primitive.slice(18, 20);
     const [minX, minY] = [Math.max(0, Math.floor(quad[0] * frame.pixelsPerDip[0])), Math.max(0, Math.floor(quad[1] * frame.pixelsPerDip[1]))];
     const [maxX, maxY] = [Math.min(frame.width, Math.ceil((quad[0] + quad[2]) * frame.pixelsPerDip[0])), Math.min(frame.height, Math.ceil((quad[1] + quad[3]) * frame.pixelsPerDip[1]))];
     for (let y = minY; y < maxY; y++) for (let x = minX; x < maxX; x++) {
@@ -105,15 +99,20 @@ export function verifyLineEnvelopeSupport(frames = lineReferenceFrames()) {
       if (point[0] < clip[0] || point[1] < clip[1] || point[0] >= clip[2] || point[1] >= clip[3]
           || point[0] < quad[0] || point[1] < quad[1] || point[0] >= quad[0] + quad[2] || point[1] >= quad[1] + quad[3]) continue;
       sampled++;
-      const distance = segmentDistance(point, primitive.slice(16, 18), primitive.slice(18, 20), halfWidth, primitive[15]);
+      if (rejected(point, plane)) rejectedBeforeDistance++;
+      const distance = segmentDistance(point, start, end, halfWidth, primitive[15]);
       if (distance > aaSupport) continue;
       supported++;
-      for (let edge = 0; edge < 4; edge++) {
-        const a = envelope.corners[edge], b = envelope.corners[(edge + 1) % 4];
-        const cross = (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
-        if (cross < -1e-5) throw new Error(`Line envelope omits possible coverage at (${x},${y}), dpr=${frame.pixelsPerDip}, command=${JSON.stringify(primitive)}`);
+      // Hardware derivatives operate in aligned 2x2 pixel quads. Retain all four
+      // lanes around every potentially covered sample, even beyond its clip.
+      const qx = Math.floor(x / 2) * 2, qy = Math.floor(y / 2) * 2;
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+        helperChecks++;
+        const helper = [(qx + dx + .5) / frame.pixelsPerDip[0], (qy + dy + .5) / frame.pixelsPerDip[1]];
+        if (rejected(helper, plane)) throw new Error(`Line rejection omits coverage or derivative helper at (${x},${y}), dpr=${frame.pixelsPerDip}, command=${JSON.stringify(primitive)}`);
       }
     }
   }
-  return { frames: frames.length, sampled, supported, oriented, fallback, originalAreaPixels, candidateAreaPixels };
+  return { frames: frames.length, sampled, supported, helperChecks, enabled, fallback,
+    rejectedBeforeDistance, distanceCandidates: sampled - rejectedBeforeDistance };
 }
