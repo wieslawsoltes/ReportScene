@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using ReportScene.Model;
 using SkiaSharp;
+using SkiaSharp.HarfBuzz;
 
 namespace ReportScene.Rendering.Skia;
 
@@ -86,16 +87,33 @@ public sealed partial class SkiaTextMeasurer
         ShapeOperationCount++;
         var result = new ReportTextRun(GetFace(style).Shaper.Shape(key.Text, font.Font), font.Metrics);
         if (retain && CacheableText(key) && result.Glyphs.Length <= MaximumCachedRunTextLength)
-        {
-            int cost = TextCost(key), count = result.Glyphs.Length;
-            while (runs.Count >= MaximumCachedTextRuns || runCharacters + cost > MaximumCachedRunCharacters || runGlyphs + count > MaximumCachedRunGlyphs)
-            {
-                var oldest = runOrder.Dequeue(); runs.Remove(oldest, out var removed);
-                runCharacters -= TextCost(oldest); runGlyphs -= removed!.Glyphs.Length;
-            }
-            runs.Add(key, result); runOrder.Enqueue(key); runCharacters += cost; runGlyphs += count;
-        }
+            RetainTextRun(key, result);
         return result;
+    }
+
+    private SKShaper.Result GetNativeShapedText(string text, ItemStyle style, CachedFont font)
+    {
+        var key = TextKey(text, style);
+        if (runs.TryGetValue(key, out var cached)) return cached.Shaped;
+        ShapeOperationCount++;
+        var shaped = GetFace(style).Shaper.Shape(text, font.Font);
+        // Native color drawing already consumes HarfBuzz's uint glyph array in
+        // fixed-size batches. Oversized runs must not allocate ReportTextRun's
+        // additional whole-run ushort array just to obtain the original result.
+        if (CacheableText(key) && shaped.Codepoints.Length <= MaximumCachedRunTextLength)
+            RetainTextRun(key, new ReportTextRun(shaped, font.Metrics));
+        return shaped;
+    }
+
+    private void RetainTextRun(WidthKey key, ReportTextRun result)
+    {
+        int cost = TextCost(key), count = result.Glyphs.Length;
+        while (runs.Count >= MaximumCachedTextRuns || runCharacters + cost > MaximumCachedRunCharacters || runGlyphs + count > MaximumCachedRunGlyphs)
+        {
+            var oldest = runOrder.Dequeue(); runs.Remove(oldest, out var removed);
+            runCharacters -= TextCost(oldest); runGlyphs -= removed!.Glyphs.Length;
+        }
+        runs.Add(key, result); runOrder.Enqueue(key); runCharacters += cost; runGlyphs += count;
     }
 
     /// <summary>

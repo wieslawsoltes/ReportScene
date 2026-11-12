@@ -92,6 +92,42 @@ public static class TextRunCacheTests
                 Conformance.Throws<ArgumentOutOfRangeException>(() => metrics.TryGetRasterTextRun("x", Style, scale, out _));
         });
 
+        yield return Test("oversized native color draws avoid a duplicate whole-run glyph array", () =>
+        {
+            using var metrics = Metrics(color: true);
+            using var bitmap = ReportImageRaster.Create(4, 4); using var canvas = new SKCanvas(bitmap);
+            using var paint = new SKPaint { Color = new(0, 255, 0, 128), IsAntialias = true };
+            string text = new('\uE000', SkiaTextMeasurer.MaximumCachedRunTextLength * 4);
+            var style = Style;
+            long ShapeBytes()
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                var shaped = metrics.ShapeText(text, style);
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                Conformance.Equal(text.Length, shaped.Codepoints.Length);
+                return allocated;
+            }
+            long DrawBytes(ColorGlyphRasterOptions? options)
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                metrics.Draw(canvas, text, 1000, 80, style, paint, options);
+                return GC.GetAllocatedBytesForCurrentThread() - before;
+            }
+            foreach (var options in new ColorGlyphRasterOptions?[] { null, new(72, 4096) })
+            {
+                // Warm interop/JIT metadata without retaining this oversized run.
+                ShapeBytes(); DrawBytes(options);
+                long shapedBytes = ShapeBytes(), drawnBytes = DrawBytes(options);
+                // Fixed paint/builder/matrix wrappers are allowed. A duplicate
+                // ushort[16384] adds more than 32 KiB and must fail this bound.
+                Conformance.Equal(true, drawnBytes <= shapedBytes + 4096);
+                Conformance.Equal(0, metrics.CachedTextRunCount);
+                Conformance.Equal(0, metrics.CachedRasterRunCount);
+                Conformance.Equal(0, metrics.CachedNativeBlobCount);
+            }
+            Conformance.Equal(true, bitmap.GetPixelSpan().ToArray().All(value => value == 0));
+        });
+
         yield return Test("native cached blobs preserve exact offset accumulation transforms and paints", () =>
         {
             using var metrics = Metrics(); using var font = metrics.CreateFont(Style); using var shaper = new SKShaper(font.Typeface);

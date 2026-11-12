@@ -145,8 +145,9 @@ public sealed partial class SkiaTextMeasurer : ITextMeasurer, IDisposable
             return;
         }
         if (canvas.IsClipEmpty || paint.Color.Alpha == 0) return;
-        var font = GetCachedFont(style).Font;
-        var shaped = GetTextRun(text, style).Shaped;
+        var cachedFont = GetCachedFont(style);
+        var font = cachedFont.Font;
+        var shaped = GetNativeShapedText(text, style, cachedFont);
         if (colorGlyphRasterOptions is null)
         {
             ReportGlyphRaster.DrawWithOpacity(canvas, font, shaped, x, baseline, paint);
