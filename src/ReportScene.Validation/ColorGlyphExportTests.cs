@@ -125,9 +125,16 @@ public static class ColorGlyphExportTests
                 var output = exporter.Export(Report(128), ExportFormat.Png, new(Dpi: dpi));
                 using var image = SKImage.FromEncodedData(output.Content);
                 using var bitmap = ReportImageRaster.Decode(image);
+                using var reference = PaperReference(dpi);
                 int scale = dpi / 72;
-                ReportGlyphRasterTests.AssertPixel(bitmap, 35 * scale, 50 * scale, new(255, 127, 127));
-                ReportGlyphRasterTests.AssertPixel(bitmap, 85 * scale, 50 * scale, new(127, 255, 127));
+                // Only the white destination contribution (255 - 128 = 127)
+                // admits one RGBA8 step through native blending/PNG conversion.
+                // Saturated source channels and opaque output alpha stay exact;
+                // both images must obey these bounds and differ by at most one.
+                ColorGlyphDrawingTests.AssertCompositedPixel(bitmap, reference, 35 * scale, 50 * scale,
+                    [255, 126, 126, 255], [255, 128, 128, 255]);
+                ColorGlyphDrawingTests.AssertCompositedPixel(bitmap, reference, 85 * scale, 50 * scale,
+                    [126, 255, 126, 255], [128, 255, 128, 255]);
             }
         });
 
@@ -149,6 +156,24 @@ public static class ColorGlyphExportTests
             Conformance.Throws<ObjectDisposedException>(() => owners[1].CreateFont(ColorGlyphDrawingTests.Style));
             Conformance.Throws<InvalidOperationException>(() => new ReportExporter(() => null!).Export(report, ExportFormat.Svg));
         });
+    }
+
+    private static SKBitmap PaperReference(int dpi)
+    {
+        int scale = dpi / 72;
+        // Match the export surface format and encoding route, but use ordinary
+        // source-over rectangles with no font, glyph helper or opacity group.
+        using var surface = SKSurface.Create(new SKImageInfo(220 * scale, 120 * scale, SKColorType.Rgba8888, SKAlphaType.Premul))
+            ?? throw new InvalidOperationException("The native PNG reference surface could not be created.");
+        surface.Canvas.Clear(SKColors.White); surface.Canvas.Scale(scale);
+        using var paint = new SKPaint { Color = new(255, 0, 0, 128), BlendMode = SKBlendMode.SrcOver };
+        surface.Canvas.DrawRect(new SKRect(10, 10, 60, 90), paint);
+        paint.Color = new(0, 255, 0, 128);
+        surface.Canvas.DrawRect(new SKRect(60, 10, 110, 90), paint);
+        using var snapshot = surface.Snapshot();
+        using var encoded = snapshot.Encode(SKEncodedImageFormat.Png, 100);
+        using var decoded = SKImage.FromEncodedData(encoded.ToArray());
+        return ReportImageRaster.Decode(decoded);
     }
 
     private static SkiaTextMeasurer Metrics() => new((family, _) => ReportGlyphRasterTests.Fixture(family == "fixture-outline"));

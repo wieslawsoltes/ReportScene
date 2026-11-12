@@ -51,8 +51,15 @@ public static class ColorGlyphDrawingTests
                 canvas.Flush();
                 // The second glyph's red layer overlaps the first foreground
                 // layer. A single opacity group around the run fails this check.
-                int retained = (alpha * (255 - alpha) + 127) / 255;
-                AssertRaw(bitmap, 85, 50, alpha, retained, 0, alpha + retained);
+                // Native raster pipelines can retain floor or nearest RGBA8
+                // destination contribution. Constrain both the actual glyphs
+                // and an independent two-rectangle reference to floor/ceil of
+                // exact SrcOver, keeping source red and absent blue exact.
+                using var reference = OverlapReference(alpha);
+                int product = alpha * (255 - alpha), floor = product / 255, ceil = (product + 254) / 255;
+                AssertCompositedPixel(bitmap, reference, 85, 50,
+                    [alpha, (byte)floor, 0, (byte)(alpha + floor)],
+                    [alpha, (byte)ceil, 0, (byte)(alpha + ceil)]);
                 ReportGlyphRasterTests.AssertPixel(bitmap, 35, 50, new(255, 0, 0, alpha));
                 ReportGlyphRasterTests.AssertPixel(bitmap, 145, 50, paint.Color);
             }
@@ -151,10 +158,39 @@ public static class ColorGlyphDrawingTests
         });
     }
 
-    private static void AssertRaw(SKBitmap bitmap, int x, int y, int red, int green, int blue, int alpha)
+    private static SKBitmap OverlapReference(byte alpha)
     {
-        var pixel = bitmap.GetPixelSpan().Slice(y * bitmap.RowBytes + x * 4, 4);
-        Conformance.Equal((byte)red, pixel[0]); Conformance.Equal((byte)green, pixel[1]);
-        Conformance.Equal((byte)blue, pixel[2]); Conformance.Equal((byte)alpha, pixel[3]);
+        var bitmap = ReportImageRaster.Create(180, 100);
+        try
+        {
+            using var canvas = new SKCanvas(bitmap);
+            using var paint = new SKPaint { Color = new(0, 255, 0, alpha), BlendMode = SKBlendMode.SrcOver };
+            canvas.DrawRect(new SKRect(0, 0, 180, 100), paint);
+            paint.Color = new(255, 0, 0, alpha);
+            canvas.DrawRect(new SKRect(0, 0, 180, 100), paint);
+            canvas.Flush();
+            return bitmap;
+        }
+        catch { bitmap.Dispose(); throw; }
+    }
+
+    internal static void AssertCompositedPixel(SKBitmap actual, SKBitmap reference, int x, int y,
+        ReadOnlySpan<byte> minimum, ReadOnlySpan<byte> maximum)
+    {
+        var pixel = actual.GetPixelSpan().Slice(y * actual.RowBytes + x * 4, 4);
+        var native = reference.GetPixelSpan().Slice(y * reference.RowBytes + x * 4, 4);
+        for (int channel = 0; channel < 4; channel++)
+        {
+            // Each call supplies explicit channel bounds. Equal endpoints keep
+            // source-only, absent and fully opaque channels exact. The native
+            // reference must satisfy the same mathematical bounds, and cannot
+            // legitimize a wrong opacity/grouping result in the glyph renderer.
+            if (pixel[channel] < minimum[channel] || pixel[channel] > maximum[channel]
+                || native[channel] < minimum[channel] || native[channel] > maximum[channel]
+                || Math.Abs(pixel[channel] - native[channel]) > 1)
+                throw new InvalidOperationException($"Composited pixel ({x},{y}), channel {channel}: expected RGBA bounds "
+                    + $"[{string.Join(",", minimum.ToArray())}]..[{string.Join(",", maximum.ToArray())}], "
+                    + $"native rectangle reference [{string.Join(",", native.ToArray())}], actual [{string.Join(",", pixel.ToArray())}].");
+        }
     }
 }
