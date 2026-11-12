@@ -23,17 +23,49 @@ struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) point: vec2f,
     @location(1) @interpolate(flat) index: u32,
+    @location(2) @interpolate(flat) oriented_line: u32,
 };
 @vertex fn vertex_main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> VertexOutput {
     let corners = array<vec2f, 6>(
         vec2f(0, 0), vec2f(1, 0), vec2f(0, 1),
         vec2f(0, 1), vec2f(1, 0), vec2f(1, 1));
     let p = primitives[instance];
-    let point = p.quad.xy + corners[vertex] * p.quad.zw;
+    var point = p.quad.xy + corners[vertex] * p.quad.zw;
+    var oriented_line = 0u;
+    if (u32(p.shape.x + 0.5) == 3u) {
+        let delta = p.data.zw - p.data.xy;
+        let line_length = length(delta);
+        // Keep the original clipped, viewport-local quad for degenerate lines
+        // and distant endpoints. Rotating huge offscreen vertices can erase a
+        // thin line through float32 cancellation before viewport clipping.
+        let coordinate_limit = max(frame.size.x, frame.size.y) * 4;
+        if (line_length >= 0.0001 && line_length < 3.0e38 && line_length <= coordinate_limit
+            && all(abs(p.data) <= vec4f(coordinate_limit))) {
+            let tangent = delta / line_length;
+            let normal = vec2f(-tangent.y, tangent.x);
+            let half_width = max(p.shape.y, 0.0001);
+            // All segment distance fields are 1-Lipschitz. Their AA support is
+            // at most .5*(1/ppd.x + 1/ppd.y), bounded by 1/min(ppd). Retain the
+            // existing 1.5-pixel fringe, and a half-pixel guard for binary edges
+            // so the rasterizer's half-open triangle boundary cannot omit d=0.
+            let guard_pixels = select(0.5, 1.5, p.shape.z >= 0.5);
+            let fringe = guard_pixels / min(frame.pixels_per_dip.x, frame.pixels_per_dip.y);
+            let extension = select(0.0, half_width, p.shape.w > 0.5);
+            let half_extent = vec2f(line_length * 0.5 + extension + fringe, half_width + fringe);
+            // Retain the clipped axis-aligned quad for short, thick, axial or
+            // mostly offscreen lines when rotation would not reduce raster work.
+            if (4 * half_extent.x * half_extent.y < p.quad.z * p.quad.w) {
+                let offset = (corners[vertex] * 2 - 1) * half_extent;
+                point = (p.data.xy + p.data.zw) * 0.5 + tangent * offset.x + normal * offset.y;
+                oriented_line = 1u;
+            }
+        }
+    }
     var output: VertexOutput;
     output.position = vec4f(point.x / frame.size.x * 2 - 1, 1 - point.y / frame.size.y * 2, 0, 1);
     output.point = point;
     output.index = instance;
+    output.oriented_line = oriented_line;
     return output;
 }
 fn box_distance(p: vec2f, half_size: vec2f) -> f32 {
@@ -128,6 +160,13 @@ fn segment_distance(point: vec2f, a: vec2f, b: vec2f, half_width: f32, cap: f32)
     let point = input.point;
     // Exact per-primitive clips preserve painter order without scissor state churn.
     if (point.x < p.clip.x || point.y < p.clip.y || point.x >= p.clip.z || point.y >= p.clip.w) { discard; }
+    if (input.oriented_line != 0u) {
+        // Quad also records the CPU's conservative geometry/viewport bounds.
+        // Retain that domain when rotating its rasterization envelope, including
+        // custom clipped command streams and non-antialiased inclusive SDFs.
+        if (point.x < p.quad.x || point.y < p.quad.y
+            || point.x >= p.quad.x + p.quad.z || point.y >= p.quad.y + p.quad.w) { discard; }
+    }
     let center = p.rect.xy + p.rect.zw * 0.5;
     let half_size = p.rect.zw * 0.5;
     let local = point - center;

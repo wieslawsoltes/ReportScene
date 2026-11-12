@@ -8,9 +8,20 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { screenshotPixels } from './screenshot-pixels.mjs';
 import { ellipseDistanceCases, ellipseIterationBudget } from './ellipse-reference.mjs';
+import { lineReferenceFrames, verifyLineEnvelopeSupport } from './line-reference.mjs';
 
 const evidence = fileURLToPath(new URL('./shader-evidence/', import.meta.url));
 const shaderPath = new URL('../../src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl', import.meta.url);
+
+test('oriented line envelopes retain independently bounded coverage with less raster area', () => {
+  const result = verifyLineEnvelopeSupport();
+  assert.equal(result.frames, 3);
+  assert.ok(result.sampled > 300_000 && result.supported > 30_000);
+  assert.ok(result.oriented > 20 && result.fallback > 10, 'Exercise optimized and conservative fallback geometry.');
+  assert.ok(result.candidateAreaPixels < result.originalAreaPixels * .3,
+    'The deterministic geometry fixtures must remove at least 70% of quad area without omitting possible coverage.');
+  console.log('LINE ENVELOPES: ' + JSON.stringify(result));
+});
 
 test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blending and grid pixels', { timeout: 180_000 }, async () => {
   await mkdir(evidence, { recursive: true });
@@ -53,7 +64,7 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
     page.on('console', message => consoleMessages.push({ type: message.type(), text: message.text() }));
     page.on('pageerror', error => consoleMessages.push({ type: 'pageerror', text: error.message }));
     await page.goto('http://127.0.0.1:' + server.address().port + '/');
-    const result = await page.evaluate(async ({ shader, ellipses, distanceCases }) => {
+    const result = await page.evaluate(async ({ shader, ellipses, distanceCases, lineFrames }) => {
       if (!navigator.gpu) throw new Error('WebGPU is unavailable: shader validation cannot be skipped or replaced by WebGL.');
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
       if (!adapter) throw new Error('No WebGPU adapter was created with the configured software Vulkan driver.');
@@ -75,6 +86,20 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
     if (id.x >= arrayLength(&ellipse_probe_distances)) { return; }
     let p = primitives[id.x];
     ellipse_probe_distances[id.x] = ellipse_stroke_distance(p.data.xy, p.rect.zw, p.shape.y, u32(p.data.z));
+}
+// The previous axis-aligned vertex path is a geometry reference. The fragment
+// function remains identical, so every output byte must survive the envelope
+// change, including AA, clipping, translucent overlap and nonzero firstInstance.
+@vertex fn axis_aligned_reference(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> VertexOutput {
+    let corners = array<vec2f, 6>(vec2f(0, 0), vec2f(1, 0), vec2f(0, 1), vec2f(0, 1), vec2f(1, 0), vec2f(1, 1));
+    let p = primitives[instance];
+    let point = p.quad.xy + corners[vertex] * p.quad.zw;
+    var output: VertexOutput;
+    output.position = vec4f(point.x / frame.size.x * 2 - 1, 1 - point.y / frame.size.y * 2, 0, 1);
+    output.point = point;
+    output.index = instance;
+    output.oriented_line = 0u;
+    return output;
 }`;
         const module = device.createShaderModule({ label: 'ReportScene production WGSL', code: shader + distanceProbe });
         const compilation = await module.getCompilationInfo();
@@ -92,7 +117,7 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
           { binding: 0, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
           { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '2d' } }
         ] });
-        const pipeline = await device.createRenderPipelineAsync({
+        const pipelineDescriptor = {
           label: 'Report2D explicit layout and premultiplied blend contract',
           layout: device.createPipelineLayout({ bindGroupLayouts: [frameLayout, imageLayout] }),
           vertex: { module, entryPoint: 'vertex_main' },
@@ -104,6 +129,11 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
             }, writeMask: GPUColorWrite.ALL
           }] },
           primitive: { topology: 'triangle-list', cullMode: 'none' }
+        };
+        const pipeline = await device.createRenderPipelineAsync(pipelineDescriptor);
+        const axisAlignedPipeline = await device.createRenderPipelineAsync({
+          ...pipelineDescriptor, label: 'Unoptimized axis-aligned line envelope reference',
+          vertex: { module, entryPoint: 'axis_aligned_reference' }
         });
 
         const width = 512, height = 512;
@@ -254,6 +284,52 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
         let canvasPixelMismatches = 0;
         for (let n = 0; n < pixels.length; n++)
           if (pixels[n] !== presentedPixels[n]) canvasPixelMismatches++;
+        const lineComparisons = [];
+        for (const frame of lineFrames) {
+          const lineUniform = own(device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
+          const lineData = new Float32Array(frame.commands.flat());
+          const lineStorage = own(device.createBuffer({ size: lineData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }));
+          device.queue.writeBuffer(lineUniform, 0, new Float32Array([...frame.size, ...frame.pixelsPerDip]));
+          device.queue.writeBuffer(lineStorage, 0, lineData);
+          const lineGroup = device.createBindGroup({ layout: frameLayout, entries: [
+            { binding: 0, resource: { buffer: lineUniform } }, { binding: 1, resource: { buffer: lineStorage } }
+          ] });
+          const outputs = [pipeline, axisAlignedPipeline].map(selectedPipeline => ({
+            selectedPipeline,
+            target: own(device.createTexture({ size: [frame.width, frame.height], format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })),
+            readback: own(device.createBuffer({ size: frame.width * frame.height * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }))
+          }));
+          const lineEncoder = device.createCommandEncoder();
+          for (const output of outputs) {
+            const linePass = lineEncoder.beginRenderPass({ colorAttachments: [{
+              view: output.target.createView(), clearValue: [0, 0, 0, 0], loadOp: 'clear', storeOp: 'store'
+            }] });
+            linePass.setPipeline(output.selectedPipeline); linePass.setBindGroup(0, lineGroup); linePass.setBindGroup(1, imageGroup);
+            linePass.draw(6, frame.commands.length - frame.firstInstance, 0, frame.firstInstance);
+            linePass.end();
+            lineEncoder.copyTextureToBuffer({ texture: output.target },
+              { buffer: output.readback, bytesPerRow: frame.width * 4, rowsPerImage: frame.height }, [frame.width, frame.height]);
+          }
+          device.queue.submit([lineEncoder.finish()]);
+          await Promise.all(outputs.map(output => output.readback.mapAsync(GPUMapMode.READ)));
+          const [candidate, reference] = outputs.map(output => new Uint8Array(output.readback.getMappedRange()).slice());
+          for (const output of outputs) output.readback.unmap();
+          let byteMismatches = 0, maximumChannelDifference = 0, nontransparentPixels = 0;
+          const mismatches = [];
+          for (let index = 0; index < candidate.length; index++) {
+            if (index % 4 === 3 && candidate[index] !== 0) nontransparentPixels++;
+            const difference = Math.abs(candidate[index] - reference[index]);
+            maximumChannelDifference = Math.max(maximumChannelDifference, difference);
+            if (!difference) continue;
+            byteMismatches++;
+            if (mismatches.length < 32) mismatches.push({
+              x: Math.floor(index / 4) % frame.width, y: Math.floor(index / 4 / frame.width),
+              channel: index % 4, candidate: candidate[index], reference: reference[index]
+            });
+          }
+          lineComparisons.push({ pixelsPerDip: frame.pixelsPerDip, firstInstance: frame.firstInstance,
+            primitiveCount: frame.commands.length - frame.firstInstance, byteMismatches, maximumChannelDifference, nontransparentPixels, mismatches });
+        }
         await device.queue.onSubmittedWorkDone();
         const validationError = await device.popErrorScope();
         if (validationError) throw new Error('WebGPU validation failed: ' + validationError.message);
@@ -361,7 +437,7 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
           },
           limits: { maxTextureDimension2D: device.limits.maxTextureDimension2D, maxStorageBufferBindingSize: device.limits.maxStorageBufferBindingSize },
           compilationMessages: messages, width, height, primitiveCount: commands.length, drawCalls: 2,
-          samples, ellipseDistances, imageDataUrl: canvas.toDataURL('image/png')
+          samples, ellipseDistances, lineComparisons, imageDataUrl: canvas.toDataURL('image/png')
         };
       } finally {
         if (!retainedForPresentation) {
@@ -369,7 +445,7 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
           device.destroy();
         }
       }
-    }, { shader: code, ellipses, distanceCases: ellipseReference.cases });
+    }, { shader: code, ellipses, distanceCases: ellipseReference.cases, lineFrames: lineReferenceFrames() });
     const distanceErrors = result.ellipseDistances.map((actual, index) => {
       const c = ellipseReference.cases[index];
       const error = Math.abs(actual - c.expected);
@@ -406,6 +482,10 @@ fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
     await writeFile(evidence + '/results.json', JSON.stringify(result, null, 2));
     assert.equal(distanceErrors.length, ellipseReference.cases.length, 'Every seeded ellipse query must be executed by the production WGSL function.');
     assert.equal(result.ellipseDistanceValidation.failureCount, 0, 'Production ellipse distance exceeds its geometric plus float32 error bound; inspect shader-evidence/results.json.');
+    assert.equal(result.lineComparisons.length, 3);
+    assert.ok(result.lineComparisons.every(frame => frame.primitiveCount === 17 && frame.firstInstance === 3 && frame.nontransparentPixels > 1000));
+    assert.deepEqual(result.lineComparisons.filter(frame => frame.byteMismatches !== 0), [],
+      'Oriented line geometry must retain every output byte of the original axis-aligned envelope, including fractional/nonuniform DPR.');
     assert.equal(result.canvasPixelMismatches, 0, 'GPUCanvasContext texels must equal the offscreen production shader result.');
     assert.equal(result.deviceLoss, null, 'The real presented canvas must retain a valid WebGPU device.');
     assert.ok(result.presentedColorCount > 30, 'The browser must present shader colors, not a blank canvas.');
