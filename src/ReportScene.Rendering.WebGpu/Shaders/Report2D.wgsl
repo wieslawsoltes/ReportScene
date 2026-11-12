@@ -156,7 +156,13 @@ fn segment_distance(point: vec2f, a: vec2f, b: vec2f, half_width: f32, cap: f32)
     // loading the primitive or evaluating distance/blending. Neighboring lanes of
     // any potentially covered fragment retain the unmodified distance path.
     if (input.line_rejection.w > 0
-        && abs(dot(point, input.line_rejection.xy) + input.line_rejection.z) > input.line_rejection.w) { discard; }
+        && abs(dot(point, input.line_rejection.xy) + input.line_rejection.z) > input.line_rejection.w) {
+        // Discard only demotes to a helper invocation; explicitly return to
+        // avoid continuing through storage reads and the distance calculation.
+        // https://www.w3.org/TR/WGSL/#discard-statement
+        discard;
+        return vec4f(0);
+    }
     let p = primitives[input.index];
     // Exact per-primitive clips preserve painter order without scissor state churn.
     if (point.x < p.clip.x || point.y < p.clip.y || point.x >= p.clip.z || point.y >= p.clip.w) { discard; }

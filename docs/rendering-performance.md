@@ -42,7 +42,7 @@ The textured-primitive builder in [`WebGpuReportCanvas`](../src/ReportScene.Rend
 
 [`Report2D.wgsl`](../src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl) preserves the original axis-aligned quad vertices and interpolated point expression. For eligible thin diagonal lines, the vertex stage supplies a flat normal, plane bias and conservative distance limit. The fragment stage can exit outside that strip before evaluating the full capped-segment distance.
 
-The strip includes the half stroke plus `4 / min(pixels_per_dip.x, pixels_per_dip.y)` DIPs. This retains the antialiasing neighborhood, derivative helper lanes and float-rounding guard. Degenerate lines, distant endpoints and cases where the strip would not save work keep the original path. Caps, per-primitive clipping, the signed-distance function and premultiplied blending are unchanged. The optimization reduces work within the existing raster domain; it does not reduce the submitted quad area.
+The strip includes the half stroke plus `4 / min(pixels_per_dip.x, pixels_per_dip.y)` DIPs. This retains the antialiasing neighborhood, derivative helper lanes and float-rounding guard. Degenerate lines, distant endpoints and cases where the strip would not save work keep the original path. Rejected lanes execute both `discard` and an explicit entry-point `return`: WGSL discard alone demotes an invocation to a helper without terminating its execution. Caps, per-primitive clipping, the signed-distance function and premultiplied blending are unchanged. The optimization reduces work within the existing raster domain; it does not reduce the submitted quad area.
 
 ## Historical CPU comparison
 
@@ -120,6 +120,23 @@ The first combined 64-instance line/ellipse comparison reached its 300-second de
 The general workloads check for regressions from the shader's additional flat varying and branch; the targeted diagonal workload checks the intended optimization. Each workload supplies 48 measured frames per variant. CPU preparation, submit-call time, queue-completion wall time and optional GPU-pass timestamps remain separate. GPU timestamps are never replaced with queue wall time, and zero/unavailable denominators produce no ratio. Software-adapter results remain specific to that adapter and fixture.
 
 If a later run fails or times out while the page remains responsive, `failure.json` now retains `progress.completedEvidence` with `complete: false`. It contains only completed raw trial records, input/output hashes and strict accepted-pair equality results. It stores no packed pixel arrays, pooled performance summaries or speedup ratios, and does not change the failed status. A complete successful report is still required for a completed A/B result. The evolving full results are retained under `webgpu-benchmark-smoke` in the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks).
+
+### Completed discard-only result and execution correction
+
+The expanded comparison completed at `9a5716649a14f8513bd46bb8d0f1a9a00ffb803d` in [run 43248015197](https://github.com/wieslawsoltes/ReportScene/actions/runs/43248015197). All 24 paired trials passed exact full-image equality, with 48 measured samples per variant/workload. It did **not** show the intended line speedup. The reported SwiftShader GPU render-pass p50 values were:
+
+| Workload | Baseline | Discard-only candidate | Baseline / candidate |
+| --- | ---: | ---: | ---: |
+| Shapes, 64 instances | 8.8246 ms | 8.9516 ms | 0.9858 |
+| Glyphs, 64 instances | 3.6198 ms | 3.6459 ms | 0.9928 |
+| Images, 64 instances | 57.7780 ms | 58.3552 ms | 0.9901 |
+| Mixed, 64 instances | 8.1254 ms | 8.1937 ms | 0.9917 |
+| Diagonal lines, 64 instances | 1774.0132 ms | 1787.4335 ms | 0.9925 |
+| Ellipse control, 16 instances | 288.4241 ms | 290.2270 ms | 0.9938 |
+
+The controls show a small consistent cost in several workloads, so this run is not described as neutral or faster. Its [summary and provenance](performance/webgpu-2026-11-12-discard-only.json) and [unaltered raw JSON/CSV archive](performance/webgpu-2026-11-12-discard-only.zip) are retained. The archive preserves both invocations' complete reports and samples; the summary records each original file's digest and the downloaded Actions artifact digest.
+
+The guard was active for all 64 targeted lines. Inspection of [WGSL discard semantics](https://www.w3.org/TR/2026/CRD-WGSL-20261021/#discard-statement) explains why discarding coverage alone does not require the remaining storage reads or distance work to stop: execution becomes a helper invocation. An [entry-point return](https://www.w3.org/TR/2026/CRD-WGSL-20261021/#return-statement) terminates the invocation. The correction adds `return vec4f(0)` immediately after the proven far-line `discard`. The guard still preserves all potentially covered lanes and their derivative neighbors; geometry, input bytes and every quality/equality threshold remain unchanged. Subsequent full paired runs must establish the actual timing effect. No speedup is inferred merely from the source change or the CPU support oracle.
 
 ## Reproduce the CPU comparison
 
