@@ -50,6 +50,7 @@ Native render-pass attachments explicitly set `DepthSlice = uint.MaxValue`, the 
 ### Quality
 
 - Analytic signed-distance coverage provides fractional-pixel antialiasing for geometric edges, avoiding fixed-resolution page rasterization at zoom.
+- Filled ellipses use implicit coverage with no center singularity. Ellipse strokes use Euclidean distance to the nearest boundary in the original stroke metric, preserving thickness under nonuniform scaling. Circles have a constant-cost distance path; eccentric ellipses use a bounded half-angle solve with a per-primitive iteration budget derived from projected radius. Thick strokes whose inner contour collapses remain solid, without a false hole or half-covered medial pixel.
 - Pie sectors antialias their radial edges as well as their ellipse boundary. Rectangle outlines preserve miter, bevel and round joins; large outlines use disjoint edge strips to avoid shading transparent interiors or blending corners twice.
 - Physical pixel density and zoom determine glyph raster resolution. Raster scales round upward in eighth-unit steps to limit cache churn without undersampling.
 - HarfBuzz glyph IDs and positions come from the same metrics owner used by report preparation. Individual characters are not independently reshaped.
@@ -65,7 +66,15 @@ Native render-pass attachments explicitly set `DepthSlice = uint.MaxValue`, the 
 
 The renderer preserves the application's color convention; this migration does not introduce an HDR or wide-gamut output contract.
 
-Color glyph opacity is applied once to the completed premultiplied raster. A deterministic, original COLR/CPAL fixture verifies both palette and foreground-index layers. SkiaSharp 4.151.1 applies partially transparent paint twice to COLR foreground-index layers when drawing a text blob directly. The interactive renderer corrects this by rasterizing with opaque foreground RGB and then multiplying RGBA by the requested opacity. Direct Skia exports retain their native behavior for that specific color-font case. The fixture and its generator are included under the repository license; no third-party font is redistributed.
+Color glyph opacity is applied once to each completed glyph. SkiaSharp 4.151.1 applies partially transparent paint twice to COLR foreground-index layers when drawing a text blob directly. The interactive renderer corrects this by rasterizing with opaque foreground RGB and then multiplying premultiplied RGBA by the requested opacity. The Skia adapter preserves vector glyphs and uses a separate opacity group for each shaped glyph, so overlapping glyphs retain the GPU's painter-ordered source-over behavior. Device-space clips partition unusually large glyphs into disjoint layers of at most 2048 × 2048; layer bounds alone are not relied upon to constrain allocation. Ordinary fonts and opaque native color text retain the direct vector path.
+
+Skia's SVG backend cannot retain those opacity groups or intrinsic color-font layers. SVG and HTML therefore embed self-contained PNGs only for color-capable faces, with scale controlled by `ExportOptions.Dpi` and the canvas transform's largest singular value. Clipping precedes allocation; each visible glyph is bounded by `MaximumPixels`, a 16,384-pixel axis limit and a 32-megapixel hard limit. Other report content and ordinary-font text remain vector. The existing `Svg(renderer, page)` entry point is retained, and the added options overload forwards the same DPI/budget used by the exporter. PDF keeps native vector glyphs and transparency groups; PNG uses the same corrected drawing contract.
+
+These opacity corrections cover the solid SrcOver fills produced by `ReportRenderer`. Arbitrary native paint effects, shaders, filters, strokes and custom blend modes retain the original Skia drawing path and are not silently discarded. An optional per-instance `SkiaTextMeasurer` typeface resolver and per-export `ReportExporter` metrics factory let hosts supply consistent fonts without changing process-global fallback state. Returned typefaces/metrics transfer ownership to the receiving instance; data-only exports do not invoke the metrics factory. Existing parameterless constructors remain available.
+
+The original COLR/CPAL fixture includes palette/foreground layers, an ordinary outline glyph and a positioned overlapping pair. A separate outline-only face exercises the vector fast path. The fixtures and generator are included under the repository license; no third-party font is redistributed.
+
+The same validation found a native Skia thick-circle artifact: a stroke wider than the diameter can reflect its inner contour and leave a transparent center or ring. Adding the original fill is insufficient at extreme stroke widths. For collapsed oval strokes, the Skia adapter fills one exact expanded disk for circles, or retains only the native stroked outline's closed outer contour for eccentric ovals, preserving its conic weights. The input is restricted to one finite positive convex oval, whose outer contour encloses all reflected inner loops. A cloned fill paint composites the result once; full radial scans check the entire interior, not just its center. A shared predicate covers both `Stroke` and `StrokeAndFill` and routes saturated GPU ovals through analytic coverage. Dashed/path-effect strokes retain native semantics.
 
 ### Procedural grid
 
@@ -119,28 +128,36 @@ Native viewport and popup observations also include a monotonic `ViewChangeVersi
 
 These counters describe CPU-side submission work. They are not GPU execution timings, compositor presentation acknowledgements, hardware acceleration certification, or frames-per-second benchmarks. Texture upload counters exclude shared resource initialization outside that frame.
 
+## Reproducible GPU measurements
+
+The standalone [WebGPU benchmark runner](webgpu-benchmarks.md) uses the production shader and instance/binding/blending contract with deterministic shape, cached-mask, mipmapped-image and mixed workloads. It records raw samples, per-repeat and pooled p50/p95, work counts, source/fixture hashes and adapter/browser metadata. CPU encoding, submit calls, serialized queue completion and optional GPU render-pass timestamps are separate fields. Timestamp features are requested only on the runner's own device. Normal mode does not force software rendering; CI explicitly selects software mode for a bounded execution smoke. These prepared workloads complement actual Uno validation and do not measure complete application FPS.
+
 ## Validation
 
 The initial drawing-contract commit `31eeda45c3201a080f80bc8c7bcfe14c5016e401` passed the GitHub core conformance job, differential benchmarks, all 54 isolated core package-consumer checks, the desktop build and the Uno package-consumer build. This proves the compatibility refactor against the baseline dependencies; it is not a substitute for the full migration checks.
 
 The full Uno 7 / Skia 4 commit `5f35f5fe41490fa9bfd42e9a11dc262ea683485a` passed core conformance, benchmarks, all 54 core package checks, the desktop build, all 14 reusable packages, browser publication and all 37 original production-shader pixel assertions in [run 43109136759](https://github.com/wieslawsoltes/ReportScene/actions/runs/43109136759). Skia 4 typeface identity and immutable path-builder changes and Uno 7 layout signatures are integrated. Subsequent actual-application evidence identified the Chromium software-presentation configuration and native 2D depth-slice sentinel issues described above; both have explicit fixes and stronger validation gates.
 
-The expanded core suite includes 851 checks, with eight image staging, color and mip-transition checks, two deterministic glyph-coverage checks and a positive-area clipping regression. Browser conformance executes the platform-applicable subset; its recorded count comes from the actual WebAssembly application. The complete application gate requires all 77 scenarios across eight shards. Existing browser pixel assertions, required scenario names and the zero-retry policy remain mandatory. See [validation and reproducibility](validation.md) for commands, package checks and artifact contents, and the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks) for current revision-specific results.
+The expanded core suite covers image staging, color and mip transitions, deterministic glyph coverage and exports, collapsed oval strokes and positive-area clipping. Browser conformance executes the platform-applicable subset; its recorded count comes from the actual WebAssembly application. The complete application gate requires all 78 scenarios across eight shards. Existing browser pixel assertions, required scenario names and the zero-retry policy remain mandatory. See [validation and reproducibility](validation.md) for commands, package checks and artifact contents, and the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks) for current revision-specific results.
 
 The migration runs the same gates against Uno 7 / Skia 4, plus:
 
-- an independent WGSL compile/pipeline/readback job with 39 pixel assertions over 15 primitives and two ordered draw calls, including nonzero `firstInstance`, a fractional pie radial edge and a mitered rectangle corner;
+- an independent WGSL compile/pipeline/readback job with 73 pixel assertions over 25 primitives and two ordered draw calls, including nonzero `firstInstance`, a fractional pie radial edge, a mitered rectangle corner, thick/eccentric strokes and ellipse-center coverage;
+- production ellipse-distance execution in a compute entry point compared with an independent double-precision nearest-point oracle, including axis/medial queries, very eccentric ellipses and float32 rounding bounds;
 - the same production shader rendered into an actual `GPUCanvasContext`, requiring exact offscreen/canvas byte equality and matching browser screenshot samples;
 - native browser evidence for successful WebGPU submission, viewport-sized targets at high zoom, scroll/layout reuse and idle stability;
 - a native browser scenario using a transparent 9001 × 257 image at minified and original pixel sizes, scrolling across tile boundaries and inspecting screenshot pixels and cache bounds;
 - a native browser scenario rendering 200pt text at 400% zoom, requiring visible glyph pixels and bounded atlas pages while many distinct glyphs lie outside the text box;
+- a native browser scenario importing and preparing thick/eccentric ellipses through real controls, inspecting ten 3 × 3 screenshot patches for solid centers, inner holes, the medial stroke body and outer extents;
 - core raster checks for odd-size mip edges, long/narrow coordinate overflow, premultiplied transparent pixels, adjacent tile gutters, full-patch equivalence across mip transitions, sRGB conversion and invalid input;
-- exact premultiplied color-font palette/foreground opacity checks and reusable monochrome coverage checks;
+- exact premultiplied color-font palette/foreground opacity, positioned overlap, transformed clipping, native paint compatibility and self-contained SVG/HTML export checks;
 - geometric clipping checks for disjoint, edge-touching, inverted and zero-area rectangles away from the origin;
 - a browser with WebGPU deliberately unavailable, requiring a visible error, splash release and zero GPU report submissions;
 - all existing report editing, preparation, navigation, rendering, import/export and package tests.
 
 The standalone shader test writes `pixels.png`, `presented.png`, `results.json`, `console.json`, and failure diagnostics to its CI artifact. It tests the production shader directly and complements the actual Uno application scenarios. The real-canvas extension passed at commit `fee204018a73d092df6b3b747100a4c45bae47d0` in [run 43111580394](https://github.com/wieslawsoltes/ReportScene/actions/runs/43111580394).
+
+The benchmark smoke separately retains offscreen/upload/timestamp and canvas/resident/split-draw results. Both must execute without GPU errors and produce nonblank readback. Small smoke samples are not performance thresholds or hardware results.
 
 The initial browser failure matched [Chromium issue 575926500](https://issues.chromium.org/issues/575926500): selecting the software WebGPU adapter with incompatible canvas/shared-image flags allowed offscreen checks but lost the device during presentation. CI now selects software Vulkan with `--use-vulkan=swiftshader`, retains software ANGLE, and validates both canvas readback and actual presentation. No application ownership workaround or waived pixel assertion is involved.
 
@@ -162,6 +179,7 @@ python3 scripts/stage-browser.py artifacts/wasm artifacts/site artifacts/testsit
 npm ci --prefix tests/browser
 (cd tests/browser && npx playwright install chromium)
 node --test tests/browser/webgpu-shader.test.mjs
+npm run test:benchmark --prefix tests/browser
 python3 -m http.server 8000 --directory artifacts/testsite
 # In another terminal:
 (cd tests/browser && npx playwright test)
