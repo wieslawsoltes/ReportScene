@@ -36,12 +36,15 @@ jobs:
           npm run test:benchmark
           npm run benchmark:webgpu -- --software --workloads shapes,glyphs,images,mixed --instances 128 --width 640 --height 480 --warmup 2 --samples 3 --repeats 1 --timestamps auto --timeout-ms 120000 --output benchmark-evidence/offscreen
           npm run benchmark:webgpu -- --software --workloads mixed --instances 128 --width 320 --height 240 --warmup 1 --samples 3 --repeats 1 --timestamps off --target canvas --uploads none --batch-limit 1 --timeout-ms 120000 --output benchmark-evidence/canvas
-      - name: Compare production shaders on the same device and inputs
+      - name: Compare shader variants and baseline controls on the same device
         run: |
           mkdir -p artifacts/benchmark-baselines
           git show 22939aadd71c26917ce9fb7911be5467dcc76eaf:src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl > artifacts/benchmark-baselines/Report2D.22939aa.wgsl
           cd tests/browser
-          npm run benchmark:webgpu -- --software --baseline-shader ../../artifacts/benchmark-baselines/Report2D.22939aa.wgsl --workloads diagonal-lines,ellipse-strokes --instances 64 --width 640 --height 480 --warmup 4 --samples 12 --repeats 4 --timestamps auto --uploads none --timeout-ms 300000 --output benchmark-evidence/comparison
+          npm run benchmark:webgpu -- --software --baseline-shader ../../artifacts/benchmark-baselines/Report2D.22939aa.wgsl --workloads shapes,glyphs,images,mixed,diagonal-lines --instances 64 --width 640 --height 480 --warmup 4 --samples 12 --repeats 4 --timestamps auto --uploads none --timeout-ms 300000 --output benchmark-evidence/comparison-main
+      - name: Compare the ellipse control with bounded software raster work
+        working-directory: tests/browser
+        run: npm run benchmark:webgpu -- --software --baseline-shader ../../artifacts/benchmark-baselines/Report2D.22939aa.wgsl --workloads ellipse-strokes --instances 16 --width 640 --height 480 --warmup 4 --samples 12 --repeats 4 --timestamps auto --uploads none --timeout-ms 300000 --output benchmark-evidence/comparison-ellipses
       - uses: actions/upload-artifact@v4
         if: always()
         with:

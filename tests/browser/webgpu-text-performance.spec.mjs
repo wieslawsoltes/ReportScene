@@ -4,6 +4,8 @@ import { waitForScrollSettled, createWheelScroller } from './scroll-settled.mjs'
 import { screenshotPixels } from './screenshot-pixels.mjs';
 
 const labelCount = 100, text = 'Cache 012345';
+// Preparation emits one explicit white background and one text object per label.
+const preparedObjectCount = labelCount * 2;
 const items = Array.from({ length: labelCount }, (_, index) => ({
   $type: 'text', id: `warm-label-${index}`, name: `WarmLabel${index}`, text,
   bounds: { x: 16 + index % 5 * 112, y: 32 + Math.floor(index / 5) * 22, width: 104, height: 20 },
@@ -42,7 +44,7 @@ async function submittedFrame(page, after = 0) {
 
 function assertWarmFrame(snapshot, initial) {
   const statistics = snapshot.PreviewGpu.Statistics;
-  expect(snapshot.PreviewCandidatesExamined, 'All 100 repeated labels participate in the measured frame').toBe(labelCount);
+  expect(snapshot.PreviewCandidatesExamined, 'All 100 label backgrounds and 100 text objects participate in the measured frame').toBe(preparedObjectCount);
   expect(statistics.PrimitiveCount).toBeGreaterThan(labelCount);
   expect(statistics.DrawCalls).toBeGreaterThan(0);
   expect(statistics.GlyphCacheHits, 'The frame records hundreds of visible cached glyphs').toBeGreaterThanOrEqual(labelCount * 8);
@@ -105,7 +107,7 @@ test('native WebGPU warm text recording reuses shaped runs, glyph bounds and fon
     const initial = await submittedFrame(page), ratio = await page.evaluate(() => devicePixelRatio);
     expect(initial.PreviewViewport.VerticalOffset).toBe(0);
     expect(initial.PreviewViewport.ExtentHeight - initial.PreviewViewport.Height).toBeGreaterThan(100);
-    expect(initial.PreviewCandidatesExamined).toBe(labelCount);
+    expect(initial.PreviewCandidatesExamined).toBe(preparedObjectCount);
     expect(initial.PreviewGpu.Statistics.GlyphCacheHits).toBeGreaterThanOrEqual(labelCount * 8);
     expect(initial.ContentRevision).toBe(imported.ContentRevision);
     frames.push({ name: 'initial', ...evidence(initial) });

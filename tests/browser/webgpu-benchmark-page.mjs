@@ -139,6 +139,14 @@ export async function runBenchmark(config) {
     const frameData = new Float32Array([config.width, config.height, width / config.width, height / config.height]);
     const frameUniformSha256 = await digest(frameData);
     const workloadResults = new Map(), baselineResults = new Map(), comparisonResults = new Map();
+    // A deadline may interrupt a later workload after earlier trials completed.
+    // Retain only existing bounded result records, never readback pixel arrays.
+    // The controller writes these under failed progress with complete=false;
+    // a partial run receives no pooled summary or successful benchmark status.
+    const completedEvidence = progress.completedEvidence = {
+      complete: false, fixtureVersion, frameUniformSha256, textureFixtures,
+      timestampEnabled, workloads: [], baselineWorkloads: [], comparisons: []
+    };
     await device.queue.onSubmittedWorkDone();
     progress.status = 'measuring';
     for (let repeat = 0; repeat < config.repeats; repeat++) {
@@ -249,14 +257,18 @@ export async function runBenchmark(config) {
               pairedOutputs.set(variant, { pixels: output.pixels, trial });
             } finally { readback.destroy(); }
             const results = variant === 'candidate' ? workloadResults : baselineResults;
-            if (!results.has(name)) results.set(name, {
-              name, primitiveCount: workload.count, primitiveSha256, textureOrderSha256, primitiveBytes: workload.primitives.byteLength,
-              kindCounts: workload.kindCounts, glyphMasks: workload.glyphCount, images: workload.imageCount,
-              drawCalls: workload.batches.length,
-              textureBindChanges: workload.batches.filter((batch, index) => !index || batch.texture !== workload.batches[index - 1].texture).length,
-              uploadBytesPerFrame: config.uploads === 'instances' ? workload.primitives.byteLength + 16 : 0,
-              trials: []
-            });
+            if (!results.has(name)) {
+              const result = {
+                name, primitiveCount: workload.count, primitiveSha256, textureOrderSha256, primitiveBytes: workload.primitives.byteLength,
+                kindCounts: workload.kindCounts, glyphMasks: workload.glyphCount, images: workload.imageCount,
+                drawCalls: workload.batches.length,
+                textureBindChanges: workload.batches.filter((batch, index) => !index || batch.texture !== workload.batches[index - 1].texture).length,
+                uploadBytesPerFrame: config.uploads === 'instances' ? workload.primitives.byteLength + 16 : 0,
+                trials: []
+              };
+              results.set(name, result);
+              (variant === 'candidate' ? completedEvidence.workloads : completedEvidence.baselineWorkloads).push(result);
+            }
             const result = results.get(name);
             if (result.primitiveSha256 !== primitiveSha256 || result.textureOrderSha256 !== textureOrderSha256
                 || result.trials.some(previous => previous.output.pixelSha256 !== trial.output.pixelSha256))
@@ -275,7 +287,15 @@ export async function runBenchmark(config) {
               throw new Error('Shader comparison changed ' + pixelComparison.differingPixels + ' pixels (' +
                 pixelComparison.differingBytes + ' bytes) for ' + name + ' repeat ' + repeat + '. Exact RGBA equality is required.');
             }
-            if (!comparisonResults.has(name)) comparisonResults.set(name, { name, primitiveSha256, textureOrderSha256, trials: [] });
+            if (!comparisonResults.has(name)) {
+              const result = { name, primitiveSha256, textureOrderSha256, trials: [] };
+              comparisonResults.set(name, result);
+              completedEvidence.comparisons.push({ name, primitiveSha256, textureOrderSha256, trials: [] });
+            }
+            // The checkpoint deliberately has no performance ratios. Its pair
+            // records attest only to the strict equality check; raw separate
+            // baseline/candidate times remain on their completed trials.
+            completedEvidence.comparisons.find(result => result.name === name).trials.push({ repeat, variantOrder, pixelComparison });
             comparisonResults.get(name).trials.push({ repeat, variantOrder, pixelComparison,
               timings: compareTrialTimings(baseline.trial, candidate.trial) });
           }
