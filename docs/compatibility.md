@@ -29,7 +29,7 @@ ADO.NET adapters preserve report-compatible scalar values and single-column Data
 
 Native JSON retains implemented matrix and subreport definitions. FRX import/export is a separate limited translator: native support does not imply FRX support for analogous objects. Unsupported FRX objects are refused. FPX compatibility remains absent.
 
-Skia/HarfBuzz drawing is shared by designer, preview and exporters. CI software WebGL validates rendering behavior, not hardware throughput, WebGPU support, full typography conformance or identical glyph output on every platform. The application is Uno, not an HTML/CSS imitation of the reporting engine.
+Designer and preview use Uno 7's native WebGPU backend and the shared report drawing contract. HarfBuzz measurements, CPU glyph/path coverage and Skia document encoding remain shared with exporters. CI exercises software WebGPU through both the production WGSL pipeline and the actual Uno WebAssembly application. Physical GPU throughput, full typography conformance and identical glyph output on every platform require separate qualification. See the [migration guide](uno7-webgpu-migration.md) for rendering ownership, resource limits and validation.
 
 ## Outstanding parity
 

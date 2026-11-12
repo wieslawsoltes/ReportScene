@@ -23,7 +23,7 @@ jobs:
           node-version: '22'
       - name: Install the browser shader validation runtime
         run: |
-          npm install --prefix tests/browser
+          npm ci --prefix tests/browser
           cd tests/browser
           npx playwright install --with-deps chromium
       - name: Compile and render WGSL on software WebGPU
@@ -129,7 +129,7 @@ jobs:
           path: artifacts/testsite/ReportScene
       - name: Install and validate browser inspection dependencies
         run: |
-          npm install --prefix tests/browser
+          npm ci --prefix tests/browser
           npm run test:pixels --prefix tests/browser
           cd tests/browser
           npx playwright install --with-deps chromium
@@ -169,7 +169,7 @@ jobs:
       - name: Require all eight shards and merge their results
         run: |
           test "$(find tests/browser/all-blob-reports -name '*.zip' | wc -l)" -eq 8
-          npm install --prefix tests/browser
+          npm ci --prefix tests/browser
           cd tests/browser
           npx playwright merge-reports --config=merge.config.mjs all-blob-reports
           node verify-merged-results.mjs

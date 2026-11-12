@@ -159,7 +159,7 @@ dotnet publish apps/ReportScene.App -c Release -f net10.0-browserwasm \
   -p:WasmShellWebAppBasePath=/ReportScene/ -o artifacts/wasm
 python3 scripts/stage-browser.py artifacts/wasm artifacts/site artifacts/testsite/ReportScene
 
-npm install --prefix tests/browser
+npm ci --prefix tests/browser
 (cd tests/browser && npx playwright install chromium)
 node --test tests/browser/webgpu-shader.test.mjs
 python3 -m http.server 8000 --directory artifacts/testsite
