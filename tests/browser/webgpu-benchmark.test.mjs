@@ -1,24 +1,111 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { parseOptions } from './webgpu-benchmark.mjs';
-import { buildWorkload, decodeTimestampPair, distribution, primitiveStrideBytes, summarizeFrames, textureFixture } from './webgpu-benchmark-workloads.mjs';
+import { buildWorkload, comparePixelBytes, compareTrialTimings, decodeTimestampPair, distribution,
+  primitiveStrideBytes, shaderVariantOrder, summarizeFrames, textureFixture } from './webgpu-benchmark-workloads.mjs';
 
 test('benchmark rejects unbounded or ambiguous configurations before opening a browser', () => {
   const defaults = parseOptions([]);
   assert.equal(defaults.software, false);
   assert.equal(defaults.timestamps, 'off');
   assert.equal(defaults.uploads, 'instances');
+  assert.equal(defaults.baselineShader, null);
   for (const args of [
     ['--software', '--require-hardware'], ['--instances', '0'], ['--instances', '262145'],
     ['--width', '8192', '--height', '8192'], ['--dpr', 'NaN'], ['--samples', '2'],
     ['--warmup', '1000', '--samples', '1000', '--repeats', '10'],
     ['--workloads', 'shapes,shapes'], ['--workloads', 'constructor'], ['--workloads', 'shapes,'],
-    ['--timestamps', 'yes'], ['--width', '800', '--width', '800'], ['--unknown']
+    ['--timestamps', 'yes'], ['--width', '800', '--width', '800'], ['--unknown'], ['--baseline-shader', ''],
+    ['--workloads', 'shapes', '--warmup', '1000', '--samples', '1000', '--repeats', '10', '--baseline-shader', 'baseline.wgsl']
   ]) assert.throws(() => parseOptions(args), undefined, args.join(' '));
   const smoke = parseOptions(['--software', '--instances', '128', '--width', '640', '--height', '480',
     '--warmup', '2', '--samples', '3', '--repeats', '1', '--timestamps', 'auto']);
   assert.equal(smoke.software, true); assert.equal(smoke.timestamps, 'auto');
   assert.equal(smoke.workloads.length, 4);
+  const comparison = parseOptions(['--baseline-shader', 'baseline.wgsl', '--workloads', 'diagonal-lines,ellipse-strokes']);
+  assert.ok(comparison.baselineShader.endsWith('/baseline.wgsl'));
+  assert.deepEqual(comparison.workloads, ['diagonal-lines', 'ellipse-strokes']);
+});
+
+test('historical default workload bytes remain unchanged from revision 22939aa', () => {
+  const expected = {
+    shapes: 'c1b5f3b5d9f58e8bec347afe99faeebb20f0662d9fd273128b832613cb3b87e3',
+    glyphs: '7df09a4442eaadec0a80285f2c95e732a21dfd586fad6aae7f5a481f64e36f0c',
+    images: '422d406e421ba330f6a1a263d54000dfa57b441f5cac432e4a8b05fa73d85982',
+    mixed: '718968d9550a99082c11ef90bbcf4c1e1ecc1c84912bc92213be581d4eda7276'
+  };
+  const config = { width: 800, height: 500, instances: 512, seed: 104729, batchLimit: 262144 };
+  for (const [name, hash] of Object.entries(expected)) {
+    const bytes = buildWorkload(name, config).primitives;
+    assert.equal(createHash('sha256').update(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)).digest('hex'), hash);
+  }
+});
+
+test('targeted line and ellipse fixtures retain full caps, clipping, translucency and bounded ordered input', () => {
+  const config = { width: 800, height: 500, dpr: 1.25, instances: 96, seed: 104729, batchLimit: 262144 };
+  for (const name of ['diagonal-lines', 'ellipse-strokes']) {
+    const fixture = buildWorkload(name, config), split = buildWorkload(name, { ...config, batchLimit: 5 });
+    assert.deepEqual(fixture.primitives, split.primitives);
+    assert.equal(fixture.kindCounts[name === 'diagonal-lines' ? 3 : 2], config.instances);
+    assert.equal(fixture.batches.length, 1);
+    assert.ok(split.batches.every(batch => batch.count <= 5));
+    const caps = new Set(), directions = new Set(), antialias = new Set();
+    for (let index = 0; index < fixture.count; index++) {
+      const p = fixture.primitives.subarray(index * 32, (index + 1) * 32);
+      assert.ok(p.every(Number.isFinite));
+      assert.ok(p[7] >= .25 && p[7] < .9);
+      assert.ok(p[4] <= p[7] && p[5] <= p[7] && p[6] <= p[7]);
+      assert.ok(p[26] > 0 && p[27] > 0);
+      assert.ok(p[24] >= p[8] - .001 && p[25] >= p[9] - .001);
+      assert.ok(p[24] + p[26] <= p[10] + .001 && p[25] + p[27] <= p[11] + .001);
+      antialias.add(p[14]);
+      if (name === 'diagonal-lines') {
+        caps.add(p[15]); directions.add(Math.sign((p[18] - p[16]) * (p[19] - p[17])));
+        assert.ok(p[2] > config.width * .67 && p[3] > config.height * .67);
+        if (index % 7 !== 0 && p[15] === 1) {
+          const cap = p[13] * (p[2] + p[3]) / Math.hypot(p[2], p[3]);
+          assert.ok(p[24] < p[0] - cap && p[25] < p[1] - cap, 'Square-cap extrema must be inside the baseline quad.');
+        }
+      } else {
+        assert.equal(p[16], 1); assert.equal(p[17], 1);
+        assert.ok(p[18] >= 10 && p[18] <= 24);
+        assert.ok(p[13] < Math.min(p[2], p[3]) * .5, 'Targeted ellipse strokes must retain a large interior hole.');
+      }
+    }
+    assert.deepEqual([...antialias].sort(), [0, 1]);
+    if (name === 'diagonal-lines') { assert.deepEqual([...caps].sort(), [0, 1, 2]); assert.deepEqual([...directions].sort(), [-1, 1]); }
+  }
+});
+
+test('paired comparisons alternate variant order and detect every changed RGBA byte without tolerance', () => {
+  assert.deepEqual(shaderVariantOrder(0, true), ['baseline', 'candidate']);
+  assert.deepEqual(shaderVariantOrder(1, true), ['candidate', 'baseline']);
+  assert.deepEqual(shaderVariantOrder(2, true), ['baseline', 'candidate']);
+  assert.deepEqual(shaderVariantOrder(1, false), ['candidate']);
+  assert.throws(() => shaderVariantOrder(-1, true));
+  const baseline = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  assert.equal(comparePixelBytes(baseline, baseline.slice()).differingBytes, 0);
+  const actual = new Uint8Array([1, 3, 3, 4, 5, 6, 8, 8, 0, 10, 11, 12]);
+  const comparison = comparePixelBytes(baseline, actual);
+  assert.equal(comparison.differingBytes, 3); assert.equal(comparison.differingPixels, 3);
+  assert.equal(comparison.maximumChannelDifference, 9); assert.equal(comparison.bytesCompared, 12);
+  assert.deepEqual(comparison.examples[0], { pixel: 0, baseline: [1, 2, 3, 4], candidate: [1, 3, 3, 4] });
+  assert.throws(() => comparePixelBytes(baseline, actual.subarray(0, 4)));
+  assert.throws(() => comparePixelBytes(new Uint8Array(3), new Uint8Array(3)));
+});
+
+test('comparison ratios keep missing or zero GPU medians unavailable and retain separate CPU intervals', () => {
+  const frame = gpu => ({ cpuPrepareMs: 1, cpuSubmitCallMs: 2, queueCompletionWallMs: 20, postSubmitWaitMs: 17,
+    queryReadbackWallMs: 0, gpuRenderPassMs: gpu, timestampRejection: null });
+  const trial = gpu => ({ statistics: summarizeFrames([frame(gpu), frame(gpu), frame(gpu)]) });
+  const comparison = compareTrialTimings(trial(8), trial(2));
+  assert.equal(comparison.gpuRenderPassMs.baselineOverCandidateP50, 4);
+  assert.equal(comparison.queueCompletionWallMs.baselineOverCandidateP50, 1);
+  assert.equal(compareTrialTimings(trial(null), trial(2)).gpuRenderPassMs.baselineOverCandidateP50, null);
+  assert.equal(compareTrialTimings(trial(8), trial(0)).gpuRenderPassMs.baselineOverCandidateP50, null);
+  assert.equal(compareTrialTimings(trial(0), trial(2)).gpuRenderPassMs.baselineOverCandidateP50, null);
+  assert.equal(comparison.queryReadbackWallMs.baselineOverCandidateP50, null);
 });
 
 test('ordered batches cover each primitive exactly once without changing the instance stream', () => {

@@ -9,7 +9,7 @@ import { arch, cpus, platform, release } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { workloadDefaults } from './webgpu-benchmark-workloads.mjs';
+import { supportedWorkloadDefaults, workloadDefaults } from './webgpu-benchmark-workloads.mjs';
 
 const directory = fileURLToPath(new URL('.', import.meta.url));
 const repository = fileURLToPath(new URL('../../', import.meta.url));
@@ -24,9 +24,13 @@ Small software CI smoke (validates the runner; not hardware qualification):
   npm run benchmark:webgpu -- --software --workloads shapes,glyphs,images,mixed --instances 128 --width 640 --height 480 --warmup 2 --samples 3 --repeats 1 --timestamps auto --timeout-ms 120000
 
 Options:
-  --workloads LIST       Ordered subset of shapes,glyphs,images,mixed (default: all).
+  --workloads LIST       Ordered subset of shapes,glyphs,images,mixed,diagonal-lines,ellipse-strokes.
+                        Default: shapes,glyphs,images,mixed. Targeted fixtures are opt-in.
+  --baseline-shader PATH Compare that WGSL with production on the same device and inputs.
+                        Alternate baseline/candidate order per repeat; require exact RGBA equality.
   --instances N          Override per-workload primitive counts (1..262144).
                         Defaults: shapes=4096, glyphs=16384, images=512, mixed=8192.
+                        Targeted defaults: diagonal-lines=96, ellipse-strokes=64.
   --width N --height N   Logical viewport DIPs (64..8192; default: 1600 x 1000).
   --dpr N               Pixels per DIP (.5..4; default: 1). At most 16,777,216 pixels.
   --batch-limit N       Maximum adjacent same-texture instances per draw (default: 262144).
@@ -36,6 +40,7 @@ Options:
   --warmup N            Unrecorded frames per workload per repeat (1..1000; default: 30).
   --samples N           Recorded frames per workload per repeat (3..1000; default: 60).
   --repeats N           Repeats with rotating workload order (1..10; default: 3).
+                        An even count balances baseline/candidate order in comparison mode.
   --seed N              Deterministic unsigned 32-bit fixture seed (default: 104729).
   --timestamps MODE     off | auto | required (default: off). Requested only on our own device.
   --software            Explicit SwiftShader/Vulkan flags for software smoke validation.
@@ -55,7 +60,7 @@ Standard timestamp quantization is retained. No pass/fail speed threshold is imp
 
 export function parseOptions(args) {
   const strings = ['workloads', 'instances', 'width', 'height', 'dpr', 'batch-limit', 'uploads', 'target',
-    'warmup', 'samples', 'repeats', 'seed', 'timestamps', 'executable', 'output', 'timeout-ms'];
+    'warmup', 'samples', 'repeats', 'seed', 'timestamps', 'executable', 'output', 'timeout-ms', 'baseline-shader'];
   const booleans = ['software', 'require-hardware', 'headed', 'help'];
   const { values, tokens } = parseArgs({ args, strict: true, allowPositionals: false, tokens: true,
     options: Object.fromEntries([...strings.map(name => [name, { type: 'string' }]), ...booleans.map(name => [name, { type: 'boolean' }])]) });
@@ -77,8 +82,10 @@ export function parseOptions(args) {
     return result;
   };
   const workloads = (values.workloads ?? Object.keys(workloadDefaults).join(',')).split(',');
-  if (!workloads.length || workloads.some(name => !Object.hasOwn(workloadDefaults, name)) || new Set(workloads).size !== workloads.length)
-    throw new Error('--workloads must contain distinct names from ' + Object.keys(workloadDefaults).join(',') + '.');
+  if (!workloads.length || workloads.some(name => !Object.hasOwn(supportedWorkloadDefaults, name)) || new Set(workloads).size !== workloads.length)
+    throw new Error('--workloads must contain distinct names from ' + Object.keys(supportedWorkloadDefaults).join(',') + '.');
+  if (values['baseline-shader'] !== undefined && !values['baseline-shader'].trim())
+    throw new Error('--baseline-shader must name a WGSL file.');
   const width = number('width', 1600, 64, 8192), height = number('height', 1000, 64, 8192), dpr = number('dpr', 1, .5, 4, false);
   const pixelWidth = Math.round(width * dpr), pixelHeight = Math.round(height * dpr);
   if (Math.max(pixelWidth, pixelHeight) > 8192 || pixelWidth * pixelHeight > 16777216)
@@ -92,10 +99,11 @@ export function parseOptions(args) {
     uploads: choice('uploads', 'instances', ['instances', 'none']), target: choice('target', 'offscreen', ['offscreen', 'canvas']),
     software: values.software ?? false, requireHardware: values['require-hardware'] ?? false, headed: values.headed ?? false,
     executable: values.executable ?? process.env.REPORTSCENE_BROWSER_EXECUTABLE,
+    baselineShader: values['baseline-shader'] === undefined ? null : resolve(values['baseline-shader']),
     output: resolve(values.output ?? fileURLToPath(new URL('./benchmark-evidence/', import.meta.url))),
     timeoutMs: number('timeout-ms', 180000, 1000, 600000)
   };
-  if ((config.warmup + config.samples) * config.repeats * workloads.length > 20000)
+  if ((config.warmup + config.samples) * config.repeats * workloads.length * (config.baselineShader ? 2 : 1) > 20000)
     throw new Error('The run is limited to 20,000 total warmup plus measured frames.');
   return config;
 }
@@ -123,6 +131,7 @@ export async function benchmark(config) {
   const sources = await Promise.all(['webgpu-benchmark.mjs', 'webgpu-benchmark-page.mjs', 'webgpu-benchmark-workloads.mjs', 'ellipse-reference.mjs']
     .map(async name => [name, await readFile(resolve(directory, name), 'utf8')]));
   const shader = await readFile(resolve(repository, shaderPath), 'utf8');
+  const baselineShader = config.baselineShader ? await readFile(config.baselineShader, 'utf8') : null;
   const hash = content => createHash('sha256').update(content).digest('hex');
   let commit = null, dirty = null;
   try {
@@ -132,6 +141,7 @@ export async function benchmark(config) {
   const routes = new Map([
     ['/', ['text/html; charset=utf-8', '<!doctype html><title>ReportScene WebGPU benchmark</title>']],
     ['/Report2D.wgsl', ['text/plain; charset=utf-8', shader]],
+    ...(baselineShader === null ? [] : [['/Baseline.wgsl', ['text/plain; charset=utf-8', baselineShader]]]),
     ...sources.filter(([name]) => name !== 'webgpu-benchmark.mjs').map(([name, content]) => ['/' + name, ['text/javascript; charset=utf-8', content]])
   ]);
   const server = createServer((request, response) => {
@@ -145,7 +155,9 @@ export async function benchmark(config) {
   ] : ['--enable-webgpu'];
   const metadata = {
     schemaVersion: 1, startedAt: new Date().toISOString(), configuration: config,
-    source: { commit, dirty, shaderPath, shaderSha256: hash(shader), harnessSha256: Object.fromEntries(sources.map(([name, source]) => [name, hash(source)])) },
+    source: { commit, dirty, shaderPath, shaderSha256: hash(shader),
+      baselineShader: baselineShader === null ? null : { path: config.baselineShader, sha256: hash(baselineShader) },
+      harnessSha256: Object.fromEntries(sources.map(([name, source]) => [name, hash(source)])) },
     host: { platform: platform(), release: release(), architecture: arch(), logicalCpus: cpus().length, cpuModel: cpus()[0]?.model, node: process.version },
     launch: { flags, headless: !config.headed, executable: config.executable ?? 'Playwright Chromium' },
     timingDefinitions
@@ -167,9 +179,10 @@ export async function benchmark(config) {
     if (messages.some(message => message.type === 'pageerror')) throw new Error('The benchmark page emitted a JavaScript error.');
     const report = { ...metadata, status: 'passed', ...result };
     await writeFile(resolve(config.output, 'results.json'), JSON.stringify(report, null, 2) + '\n');
-    const csv = ['workload,repeat,sample,cpuPrepareMs,cpuSubmitCallMs,queueCompletionWallMs,postSubmitWaitMs,queryReadbackWallMs,gpuRenderPassMs,timestampDeltaNs,timestampRejected'];
-    for (const workload of report.workloads) for (const trial of workload.trials) for (const [index, sample] of trial.samples.entries())
-      csv.push([workload.name, trial.repeat, index, sample.cpuPrepareMs, sample.cpuSubmitCallMs,
+    const csv = [(config.baselineShader ? 'variant,' : '') + 'workload,repeat,sample,cpuPrepareMs,cpuSubmitCallMs,queueCompletionWallMs,postSubmitWaitMs,queryReadbackWallMs,gpuRenderPassMs,timestampDeltaNs,timestampRejected'];
+    for (const [variant, workloads] of [['candidate', report.workloads], ['baseline', report.comparison?.baselineWorkloads ?? []]])
+      for (const workload of workloads) for (const trial of workload.trials) for (const [index, sample] of trial.samples.entries())
+      csv.push([...(config.baselineShader ? [variant] : []), workload.name, trial.repeat, index, sample.cpuPrepareMs, sample.cpuSubmitCallMs,
         sample.queueCompletionWallMs, sample.postSubmitWaitMs, sample.queryReadbackWallMs,
         sample.gpuRenderPassMs ?? '', sample.timestampDeltaNs ?? '', sample.timestampRejection ? 'true' : 'false'].join(','));
     await writeFile(resolve(config.output, 'samples.csv'), csv.join('\n') + '\n');
@@ -181,6 +194,13 @@ export async function benchmark(config) {
         ', samples=' + metrics.queueCompletionWallMs.count + ', queue-wall p50/p95=' +
         metrics.queueCompletionWallMs.p50.toFixed(3) + '/' + metrics.queueCompletionWallMs.p95.toFixed(3) +
         ', GPU-pass p50/p95=' + (gpu ? gpu.p50.toFixed(3) + '/' + gpu.p95.toFixed(3) : 'unavailable'));
+    }
+    for (const comparison of report.comparison?.workloads ?? []) {
+      console.log(comparison.name + ': exact paired RGBA equality across ' + comparison.trials.length +
+        ' repeats; baseline/candidate pooled GPU p50 ratio=' +
+        (comparison.pooledTimings.gpuRenderPassMs.baselineOverCandidateP50?.toFixed(3) ?? 'unavailable') +
+        ', queue-wall p50 ratio=' +
+        (comparison.pooledTimings.queueCompletionWallMs.baselineOverCandidateP50?.toFixed(3) ?? 'unavailable'));
     }
     console.log('Results: ' + resolve(config.output, 'results.json'));
     return report;

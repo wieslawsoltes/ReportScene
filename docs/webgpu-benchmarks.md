@@ -34,12 +34,44 @@ The default logical viewport is 1600 × 1000 DIPs at DPR 1. Each workload receiv
 | `glyphs` | 16,384 | Synthetic antialiased masks in two resident atlas textures; no font shaping or rasterization |
 | `images` | 512 | Premultiplied image fixtures with complete mip chains in two resident textures |
 | `mixed` | 8,192 | Painter-ordered runs of shapes, glyph masks and images |
+| `diagonal-lines` (opt-in) | 96 | Long viewport-spanning thin lines in both directions, all cap styles, translucency, clipping, antialiased and binary coverage |
+| `ellipse-strokes` (opt-in) | 64 | Large eccentric thin-stroked ellipses with broad interior holes, translucent overlaps and partial clips |
+
+The first four workloads remain the defaults. Their fixture bytes are pinned against revision `22939aadd71c26917ce9fb7911be5467dcc76eaf`; adding targeted workloads does not change historical geometry or painter order.
 
 `--instances` overrides the count for every selected workload. A fixed unsigned seed determines geometry and colors. Adjacent instances with the same texture form batches; textures are never globally sorted. `--batch-limit` splits those batches without changing the primitive stream or painter order. `--uploads instances` includes the 16-byte frame uniform and complete instance upload in each measured frame; `--uploads none` reuses the uploaded buffers. Texture creation and initial uploads are outside the measured frames in both modes.
 
 `--width`, `--height` and `--dpr` control logical and physical dimensions. `--target offscreen` is the default. `--target canvas` acquires a real `GPUCanvasContext` target each frame; queue completion still does not acknowledge that the display presented it. Input validation bounds the viewport, instance count, total frames and wall-clock duration, and checks selected-device limits before allocating the main buffers.
 
-The runner performs an untimed output readback after every trial and rejects an entirely clear viewport. It retains the changed-pixel count and output SHA-256. Detailed edge/color/presentation correctness belongs to `webgpu-shader.test.mjs`; nonblank output alone cannot establish rendering quality.
+The runner performs an untimed output readback after every trial and rejects an entirely clear viewport. It retains the changed-pixel count and output SHA-256, and requires unchanged inputs and outputs across repeats. Detailed edge/color/presentation correctness belongs to `webgpu-shader.test.mjs`; nonblank output alone cannot establish rendering quality.
+
+## Compare shader revisions on the same device
+
+`--baseline-shader PATH` compiles a second WGSL pipeline alongside the current production shader. Both pipelines use the same device, target, uniform/instance buffers, resident textures, sampler, painter order, draw batches, upload mode and timestamp setting. The independent variable is shader source. The baseline must expose the same entry points, bindings and 128-byte primitive ABI.
+
+Extract the exact baseline from git, then run the comparison. The following commands use the last validated rendering revision before the performance changes:
+
+```sh
+# From the repository root, with this commit available in the local git history.
+mkdir -p artifacts/benchmark-baselines
+git show 22939aadd71c26917ce9fb7911be5467dcc76eaf:src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl \
+  > artifacts/benchmark-baselines/Report2D.22939aa.wgsl
+
+cd tests/browser
+npm run benchmark:webgpu -- --require-hardware --headed \
+  --baseline-shader ../../artifacts/benchmark-baselines/Report2D.22939aa.wgsl \
+  --workloads diagonal-lines,ellipse-strokes --instances 64 \
+  --warmup 30 --samples 60 --repeats 4 --timestamps auto \
+  --output benchmark-evidence/hardware-comparison
+```
+
+Each workload/repeat runs a separately warmed baseline/candidate pair. Even repeats run baseline first; odd repeats run candidate first. Workload order rotates independently. Use an even repeat count to balance variant order; four repeats are a useful starting point. The normal single-pipeline mode and its CSV columns remain unchanged. Comparison mode adds a `variant` CSV column and stores baseline raw samples under `comparison.baselineWorkloads`; the top-level `workloads` still contain the candidate results.
+
+Every pair receives a full untimed RGBA8 readback. **Any changed output byte fails the comparison**, including a one-byte antialiasing difference. The report retains byte/pixel counts, maximum channel difference and example coordinates on failure; no timing result is accepted as an equivalent-output optimization in that case. Comparison temporarily retains one additional packed viewport image, bounded by the existing 16,777,216-pixel viewport limit. Shader contract/oracle tests and actual Uno browser scenarios remain separate required checks.
+
+`comparison.workloads` contains each repeat's exact pixel comparison and separate baseline/candidate timing distributions, plus pooled distributions. Ratios are baseline divided by candidate for the named percentile: above one means the candidate took less time for that specific interval and fixture. Missing or zero percentiles yield `null`, never an infinite speedup. CPU preparation, queue completion and GPU pass ratios remain distinct. A shader comparison does not measure changes to C# report traversal, text shaping, atlas preparation, native interop or application input latency.
+
+The source metadata records both shader hashes. Uniform bytes, instance bytes, texture order, every texture mip level and rendered output also have SHA-256 hashes. The same production shader can be supplied as the baseline for an A/A instrumentation control; its timing variation estimates measurement noise, while output must still be identical. Measurements on software adapters remain software results, and should not be generalized to hardware throughput.
 
 ## Read the timings correctly
 
@@ -60,14 +92,14 @@ CPU and queue wall times are never relabeled as GPU execution times. GPU pass ti
 
 Each output directory contains:
 
-- `results.json`: raw frames, per-repeat and pooled nearest-rank p50/p95, min/max/mean, work counts, initial/per-frame upload bytes, shader and harness hashes, instance hashes, output hashes, browser/adapter/features/limits, host information, options and timing definitions;
+- `results.json`: raw frames, per-repeat and pooled nearest-rank p50/p95, min/max/mean, work counts, initial/per-frame upload bytes, shader and harness hashes, uniform/instance/texture-order/mip hashes, output hashes, browser/adapter/features/limits, host information, options and timing definitions; optional same-device baseline and exact-output comparisons;
 - `samples.csv`: every measured frame, including timestamp rejection flags;
 - `console.json`: browser diagnostics;
 - `failure.json` on failure, with the configuration and available progress/error evidence.
 
 A rerun removes those runner-owned result files first, so a failed attempt cannot leave an older successful result under the same output name. Other files in the selected directory are retained.
 
-For a controlled batching comparison, run the same fixture twice with `--batch-limit 1` and the default limit, using separate output directories. Verify equal primitive hashes and output hashes, and record the draw-call difference. Keep the adapter, driver, browser, viewport/DPR, seed/counts, upload and timestamp settings fixed. A shader comparison intentionally changes the shader hash; record that independent variable and hold the remaining inputs constant. Record machine power/thermal conditions and competing workloads alongside the generated evidence. Do not compare a short CI smoke with a hardware run as a performance improvement.
+For a controlled batching comparison, run the same fixture twice with `--batch-limit 1` and the default limit, using separate output directories. Verify equal primitive hashes and output hashes, and record the draw-call difference. Keep the adapter, driver, browser, viewport/DPR, seed/counts, upload and timestamp settings fixed. For a shader-only comparison, prefer the same-device paired mode above. Record machine power/thermal conditions and competing workloads alongside the generated evidence. Do not compare a short CI smoke with a hardware run as a performance improvement.
 
 ## CI smoke and local contract checks
 
