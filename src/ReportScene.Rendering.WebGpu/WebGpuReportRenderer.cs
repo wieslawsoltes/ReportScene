@@ -117,7 +117,12 @@ public sealed unsafe class WebGpuReportRenderer : IDisposable
                 ImageTileSize = shared.Textures.ImageTileSize,
                 CachedImageBytes = shared.Textures.RetainedImageBytes,
                 CachedPathMaskBytes = shared.Textures.RetainedMaskBytes,
-                ImageStagingBytes = shared.Textures.RetainedStagingBytes
+                ImageStagingBytes = shared.Textures.RetainedStagingBytes,
+                TextShapingOperations = canvas.TextShapingOperations,
+                TextBoundsQueries = canvas.TextBoundsQueries,
+                TextFontCreations = canvas.TextFontCreations,
+                GlyphCacheHits = shared.Textures.GlyphCacheHits,
+                GlyphRasterizations = shared.Textures.GlyphRasterizations
             };
         }
         finally

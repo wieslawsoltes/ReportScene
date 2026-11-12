@@ -1,9 +1,7 @@
 using System.Numerics;
-using System.Runtime.CompilerServices;
 using ReportScene.Model;
 using ReportScene.Rendering.Skia;
 using SkiaSharp;
-using SkiaSharp.HarfBuzz;
 
 namespace ReportScene.Rendering.WebGpu;
 
@@ -20,16 +18,10 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     private State state;
     internal List<GpuPrimitive> Primitives { get; } = new(256);
     internal List<GpuBatch> Batches { get; } = new(32);
+    internal long TextShapingOperations { get; private set; }
+    internal long TextBoundsQueries { get; private set; }
+    internal long TextFontCreations { get; private set; }
     private readonly record struct State(float ScaleX, float ScaleY, float X, float Y, SKRect Clip);
-    private readonly record struct ShapeKey(string Text, string Family, bool Bold, bool Italic, double Size);
-    private sealed class ShapeCache
-    {
-        public ShapeCache() { }
-        internal readonly Dictionary<ShapeKey, SKShaper.Result> Runs = new();
-        internal readonly Queue<ShapeKey> Order = new();
-        internal int Characters;
-    }
-    private static readonly ConditionalWeakTable<SkiaTextMeasurer, ShapeCache> Shapes = new();
 
     public WebGpuReportCanvas(GpuTextureCache textures, RectD viewport, int pixelWidth, int pixelHeight)
     {
@@ -42,6 +34,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         states.Clear();
         Primitives.Clear();
         Batches.Clear();
+        TextShapingOperations = TextBoundsQueries = TextFontCreations = 0;
         pixelsX = (float)(pixelWidth / viewport.Width);
         pixelsY = (float)(pixelHeight / viewport.Height);
         state = new(1, 1, (float)-viewport.X, (float)-viewport.Y, SKRect.Create((float)viewport.Width, (float)viewport.Height));
@@ -364,57 +357,101 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     public override void DrawText(SkiaTextMeasurer metrics, string text, float x, float baseline, ItemStyle style, SKPaint paint)
     {
         if (string.IsNullOrEmpty(text) || !ReportViewportClip.HasPositiveArea(state.Clip) || paint.Color.Alpha == 0) return;
-        var shaped = Shape(metrics, text, style);
+        long shapes = metrics.ShapeOperationCount, queries = metrics.RasterBoundsQueryCount,
+            fonts = metrics.NativeFontCreationCount;
+        try { DrawTextCore(metrics, text, x, baseline, style, paint.Color); }
+        finally
+        {
+            // These counters cover glyph-command recording only. Preparation,
+            // native rasterization and compositor/GPU execution are separate.
+            TextShapingOperations += metrics.ShapeOperationCount - shapes;
+            TextBoundsQueries += metrics.RasterBoundsQueryCount - queries;
+            TextFontCreations += metrics.NativeFontCreationCount - fonts;
+        }
+    }
+
+    private void DrawTextCore(SkiaTextMeasurer metrics, string text, float x, float baseline, ItemStyle style, SKColor color)
+    {
         float scale = RasterScale();
+        if (metrics.TryGetRasterTextRun(text, style, scale, out var raster))
+        {
+            var glyphs = raster.TextRun.Glyphs;
+            var positions = raster.TextRun.Positions;
+            var ink = raster.InkBounds;
+            SKFont? rasterFont = null;
+            try
+            {
+                for (int i = 0; i < glyphs.Length; i++)
+                {
+                    if (!TryVisibleGlyphOrigin(ink[i], positions[i], x, baseline, scale, out var origin)) continue;
+                    if (!textures.TryGetGlyph(raster.Font, glyphs[i], color, out var coverage))
+                    {
+                        // The warm path needs no native font object or native
+                        // font-property queries. Allocate only for a visible
+                        // atlas miss after clipping has rejected hidden ink.
+                        rasterFont ??= CreateRasterFont(metrics, style, raster.Font);
+                        coverage = textures.GetGlyph(rasterFont, raster.Font, glyphs[i], ink[i], color);
+                    }
+                    DrawCoverage(coverage, origin.X, origin.Y, scale, color);
+                }
+            }
+            finally { rasterFont?.Dispose(); }
+            return;
+        }
+
+        // Oversized runs keep fixed-size ink staging. They must not allocate a
+        // paragraph-sized native-bound array simply to reject offscreen glyphs.
+        var shaped = metrics.ShapeText(text, style);
         using var font = metrics.CreateFont(style);
         font.Size *= scale;
         if (!float.IsFinite(font.Size) || font.Size <= 0)
             throw new ArgumentException("Glyph raster size must be finite and positive.", nameof(style));
-        // Bound queries precede atlas lookup: clipped lines and long text runs
-        // must not pin invisible glyphs or exhaust the visible-frame atlas budget.
-        // Reuse fixed stack storage for arbitrarily long shaped runs.
+        var descriptor = ReportRasterFont.FromFont(font);
         const int batchSize = 128;
-        Span<ushort> glyphs = stackalloc ushort[batchSize];
+        Span<ushort> batchGlyphs = stackalloc ushort[batchSize];
         Span<SKRect> bounds = stackalloc SKRect[batchSize];
         for (int offset = 0; offset < shaped.Codepoints.Length; offset += batchSize)
         {
             int count = Math.Min(batchSize, shaped.Codepoints.Length - offset);
-            for (int i = 0; i < count; i++) glyphs[i] = checked((ushort)shaped.Codepoints[offset + i]);
-            font.GetGlyphWidths(glyphs[..count], Span<float>.Empty, bounds[..count]);
+            for (int i = 0; i < count; i++) batchGlyphs[i] = checked((ushort)shaped.Codepoints[offset + i]);
+            font.GetGlyphWidths(batchGlyphs[..count], Span<float>.Empty, bounds[..count]);
+            TextBoundsQueries++;
             for (int i = 0; i < count; i++)
             {
-                var ink = bounds[i];
-                if (!ReportViewportClip.HasPositiveArea(ink)) continue;
-                // Match GpuTextureCache.RasterBounds exactly, including floor /
-                // ceil and the transparent filtering guard around overhanging ink.
-                const int guard = GpuTextureCache.CoverageGuard;
-                var raster = new SKRect((float)Math.Floor(ink.Left) - guard, (float)Math.Floor(ink.Top) - guard,
-                    (float)Math.Ceiling(ink.Right) + guard, (float)Math.Ceiling(ink.Bottom) + guard);
-                var point = shaped.Points[offset + i];
-                float originX = x + point.X, originY = baseline + point.Y;
-                var target = Map(new SKRect(originX + raster.Left / scale, originY + raster.Top / scale,
-                    originX + raster.Right / scale, originY + raster.Bottom / scale));
-                if (!ReportViewportClip.HasPositiveArea(Intersection(target, state.Clip))) continue;
-                var coverage = textures.GetGlyph(font, glyphs[i], paint.Color);
-                DrawCoverage(coverage, originX, originY, scale, paint.Color);
+                if (!TryVisibleGlyphOrigin(bounds[i], shaped.Points[offset + i], x, baseline, scale, out var origin)) continue;
+                if (!textures.TryGetGlyph(descriptor, batchGlyphs[i], color, out var coverage))
+                    coverage = textures.GetGlyph(font, descriptor, batchGlyphs[i], bounds[i], color);
+                DrawCoverage(coverage, origin.X, origin.Y, scale, color);
             }
         }
     }
-    private static SKShaper.Result Shape(SkiaTextMeasurer metrics, string text, ItemStyle style)
+
+    private static SKFont CreateRasterFont(SkiaTextMeasurer metrics, ItemStyle style, ReportRasterFont descriptor)
     {
-        var cache = Shapes.GetOrCreateValue(metrics);
-        var key = new ShapeKey(text, style.FontFamily, style.Bold, style.Italic, style.FontSize);
-        if (cache.Runs.TryGetValue(key, out var found)) return found;
-        var shaped = metrics.ShapeText(text, style);
-        int cost = text.Length + style.FontFamily.Length;
-        if (cost > 4096) return shaped;
-        while (cache.Runs.Count >= 2048 || cache.Characters + cost > 131_072)
+        var font = metrics.CreateFont(style);
+        try
         {
-            var oldest = cache.Order.Dequeue(); cache.Runs.Remove(oldest);
-            cache.Characters -= oldest.Text.Length + oldest.Family.Length;
+            font.Size = descriptor.Size;
+            if (ReportRasterFont.FromFont(font) != descriptor)
+                throw new InvalidOperationException("The cached glyph run no longer matches its native raster font.");
+            return font;
         }
-        cache.Runs.Add(key, shaped); cache.Order.Enqueue(key); cache.Characters += cost;
-        return shaped;
+        catch { font.Dispose(); throw; }
+    }
+
+    private bool TryVisibleGlyphOrigin(SKRect ink, SKPoint position, float x, float baseline, float scale, out SKPoint origin)
+    {
+        origin = default;
+        if (!ReportViewportClip.HasPositiveArea(ink)) return false;
+        // Match the atlas bounds, including floor/ceil and transparent guards.
+        // Clipping always precedes atlas lookup and current-frame page pinning.
+        const int guard = GpuTextureCache.CoverageGuard;
+        var raster = new SKRect((float)Math.Floor(ink.Left) - guard, (float)Math.Floor(ink.Top) - guard,
+            (float)Math.Ceiling(ink.Right) + guard, (float)Math.Ceiling(ink.Bottom) + guard);
+        origin = new(x + position.X, baseline + position.Y);
+        var target = Map(new SKRect(origin.X + raster.Left / scale, origin.Y + raster.Top / scale,
+            origin.X + raster.Right / scale, origin.Y + raster.Bottom / scale));
+        return ReportViewportClip.HasPositiveArea(Intersection(target, state.Clip));
     }
     private void DrawCoverage(GpuCoverage coverage, float x, float baseline, float scale, SKColor color)
     {

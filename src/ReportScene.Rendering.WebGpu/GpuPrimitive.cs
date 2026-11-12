@@ -11,6 +11,12 @@ public readonly record struct WebGpuRenderStatistics(int PrimitiveCount, int Dra
     public long CachedImageBytes { get; init; }
     public long CachedPathMaskBytes { get; init; }
     public long ImageStagingBytes { get; init; }
+    /// <summary>Native operations performed while recording text commands, excluding preparation and GPU execution.</summary>
+    public long TextShapingOperations { get; init; }
+    public long TextBoundsQueries { get; init; }
+    public long TextFontCreations { get; init; }
+    public int GlyphCacheHits { get; init; }
+    public int GlyphRasterizations { get; init; }
 }
 
 /// <summary>Eight aligned vec4 fields; the exact 128-byte layout is shared with Report2D.wgsl.</summary>
