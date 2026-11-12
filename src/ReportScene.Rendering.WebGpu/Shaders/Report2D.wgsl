@@ -41,11 +41,13 @@ struct VertexOutput {
         if (line_length >= 0.0001 && line_length < 3.0e38 && line_length <= coordinate_limit
             && all(abs(p.data) <= vec4f(coordinate_limit))) {
             let tangent = delta / line_length;
-            // The segment fields are 1-Lipschitz. Possible AA coverage is at
-            // most .5*(1/ppd.x+1/ppd.y) from the stroke. Four physical pixels
-            // additionally retain every neighboring 2x2 derivative invocation
-            // and float32 roundoff. No potentially visible lane uses this exit.
-            let limit = max(p.shape.y, 0.0001) + 4 / min(frame.pixels_per_dip.x, frame.pixels_per_dip.y);
+            // Segment fields are 1-Lipschitz. Include the coverage derivative
+            // floor and an additive 128*f32-epsilon coordinate margin. The
+            // inner 2r output band and outer 4r execution band preserve every
+            // derivative neighbor of any unmasked sample, including rounding.
+            let guard = max(1 / min(frame.pixels_per_dip.x, frame.pixels_per_dip.y), 0.0001)
+                + coordinate_limit * 0.0000152587890625;
+            let limit = max(p.shape.y, 0.0001) + 4 * guard;
             let projected_length = dot(p.quad.zw, abs(tangent));
             // Enable only when the conservative strip can avoid distance work;
             // short, thick, axial and mostly clipped lines need no extra test.
@@ -192,7 +194,17 @@ fn segment_distance(point: vec2f, a: vec2f, b: vec2f, half_width: f32, cap: f32)
         }
         return color * ellipse_coverage(distance, p.shape.z);
     } else if (kind == 3u) {
-        distance = segment_distance(point, p.data.xy, p.data.zw, max(p.shape.y, 0.0001), p.shape.w);
+        let half_width = max(p.shape.y, 0.0001);
+        distance = segment_distance(point, p.data.xy, p.data.zw, half_width, p.shape.w);
+        let alpha = coverage(distance, p.shape.z);
+        // Returned lanes can perturb derivatives at the outer execution edge.
+        // Evaluate coverage first, retaining helpers throughout the guard band,
+        // then suppress its provably transparent output. Unmasked samples and
+        // all their neighbors execute the original distance and derivative path.
+        let inner_limit = half_width + (input.line_rejection.w - half_width) * 0.5;
+        if (input.line_rejection.w > 0
+            && abs(dot(point, input.line_rejection.xy) + input.line_rejection.z) > inner_limit) { discard; }
+        return color * alpha;
     } else if (kind == 4u) {
         if (p.extra.z > 0.5) {
             // Tiled image quads share one outer coverage boundary. Internal

@@ -42,7 +42,9 @@ The textured-primitive builder in [`WebGpuReportCanvas`](../src/ReportScene.Rend
 
 [`Report2D.wgsl`](../src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl) preserves the original axis-aligned quad vertices and interpolated point expression. For eligible thin diagonal lines, the vertex stage supplies a flat normal, plane bias and conservative distance limit. The fragment stage can exit outside that strip before evaluating the full capped-segment distance.
 
-The strip includes the half stroke plus `4 / min(pixels_per_dip.x, pixels_per_dip.y)` DIPs. This retains the antialiasing neighborhood, derivative helper lanes and float-rounding guard. Degenerate lines, distant endpoints and cases where the strip would not save work keep the original path. Rejected lanes execute both `discard` and an explicit entry-point `return`: WGSL discard alone demotes an invocation to a helper without terminating its execution. Caps, per-primitive clipping, the signed-distance function and premultiplied blending are unchanged. The optimization reduces work within the existing raster domain; it does not reduce the submitted quad area.
+The rejection scale is `r = max(1 / min(pixels_per_dip), 0.0001) + 2^-16 * M`, where `M = 4 * max(frame.size)` is also the existing bound on eligible endpoint coordinates and segment length. The first term covers one physical pixel and the coverage function's derivative floor; the second is a conservative float32 coordinate allowance. The outer strip extends to the half stroke `h` plus `4r`. Rejected lanes execute both `discard` and an explicit entry-point `return`: WGSL discard alone demotes an invocation to a helper without terminating its execution.
+
+Inside that strip, lines evaluate their original signed distance and coverage before discarding output beyond the inner limit `h + 2r`. That inner mask prevents indeterminate derivatives at the far return boundary from manufacturing coverage. Every potentially visible lane and all neighboring derivative lanes remain inside the outer strip. The CPU oracle checks all nine neighboring pixel centers of every inner-band survivor, without assuming a particular alignment of 2 × 2 derivative quads. Degenerate lines, distant endpoints and cases where the strip would not save work keep the original path. Caps, per-primitive clipping, the signed-distance function and premultiplied blending are unchanged. The optimization reduces work within the existing raster domain; it does not reduce the submitted quad area.
 
 ## Historical CPU comparison
 
@@ -97,6 +99,27 @@ The first execution on [run 43243208525](https://github.com/wieslawsoltes/Report
 
 These frame counters cover text command recording and glyph-cache activity. They do not time GPU execution or establish an application frame-rate improvement.
 
+### Verified warm scrolling checkpoint
+
+The complete [run 43248015197](https://github.com/wieslawsoltes/ReportScene/actions/runs/43248015197) at `9a5716649a14f8513bd46bb8d0f1a9a00ffb803d` passed all 79 browser scenarios without retries, skips or flakes, including this scenario. Its actual .NET WebAssembly conformance artifact reports 867/867 applicable cases; native conformance reports 877/877. The warm-text artifact was downloaded and checked against its GitHub SHA-256 digest before inspecting the recorded frames and PNGs.
+
+| Submitted-frame observation | Initial | Scrolled down | Scrolled back |
+| --- | ---: | ---: | ---: |
+| Submitted frame count | 2 | 5 | 9 |
+| Native vertical offset | 0 DIP | 20.325 DIP | 0 DIP |
+| Prepared candidates | 200 | 200 | 200 |
+| GPU primitives | 1,201 | 1,201 | 1,201 |
+| Glyph-cache hits | 1,089 | 1,100 | 1,100 |
+| Shaping operations | 0 | 0 | 0 |
+| Ink-bound queries | 1 | 0 | 0 |
+| Native font creations | 2 | 0 | 0 |
+| Glyph rasterizations | 11 | 0 | 0 |
+| Texture uploads | 11 | 0 | 0 |
+
+Both warm frames therefore perform no native text preparation or texture upload. They still upload the existing 1,201 × 128-byte primitive stream and 16-byte frame uniform, totaling 153,744 bytes. The initial frame already reuses prepared text shaping, while populating eleven unique glyphs. The prepared index remains at one build, and document identity, revision, history, clean state and empty diagnostics remain unchanged.
+
+Independent PNG decoding reproduced all recorded ink/background probe counts. The initial and returned PNG files are also completely byte-identical (231,687 bytes; SHA-256 `8b29b96ad95c86019d7edd0385f212722b9e15785939b0bce9e9b5a0b4f06f2c`). The [checkpoint provenance](performance/rendering-checkpoints-2026-11-12.json) and [raw JSON archive](performance/rendering-checkpoints-2026-11-12.zip) retain the unmodified scenario observations, verified summary and original screenshot digests. The screenshots themselves remain in [artifact 13959560194](https://github.com/wieslawsoltes/ReportScene/actions/runs/43248015197/artifacts/13959560194). These results identify this tested checkpoint explicitly; later shader experiments must pass their own quality and application gates.
+
 ## Shader quality and paired timing protocol
 
 The conservative shader passed the independent GPU gate in [run 43243208525](https://github.com/wieslawsoltes/ReportScene/actions/runs/43243208525). Its retained `webgpu-shader-validation` artifact reports:
@@ -136,7 +159,13 @@ The expanded comparison completed at `9a5716649a14f8513bd46bb8d0f1a9a00ffb803d` 
 
 The controls show a small consistent cost in several workloads, so this run is not described as neutral or faster. Its [summary and provenance](performance/webgpu-2026-11-12-discard-only.json) and [unaltered raw JSON/CSV archive](performance/webgpu-2026-11-12-discard-only.zip) are retained. The archive preserves both invocations' complete reports and samples; the summary records each original file's digest and the downloaded Actions artifact digest.
 
-The guard was active for all 64 targeted lines. Inspection of [WGSL discard semantics](https://www.w3.org/TR/2026/CRD-WGSL-20261021/#discard-statement) explains why discarding coverage alone does not require the remaining storage reads or distance work to stop: execution becomes a helper invocation. An [entry-point return](https://www.w3.org/TR/2026/CRD-WGSL-20261021/#return-statement) terminates the invocation. The correction adds `return vec4f(0)` immediately after the proven far-line `discard`. The guard still preserves all potentially covered lanes and their derivative neighbors; geometry, input bytes and every quality/equality threshold remain unchanged. Subsequent full paired runs must establish the actual timing effect. No speedup is inferred merely from the source change or the CPU support oracle.
+The guard was active for all 64 targeted lines. Inspection of [WGSL discard semantics](https://www.w3.org/TR/2026/CRD-WGSL-20261021/#discard-statement) explains why discarding coverage alone does not require the remaining storage reads or distance work to stop: execution becomes a helper invocation. An [entry-point return](https://www.w3.org/TR/2026/CRD-WGSL-20261021/#return-statement) terminates the invocation. Geometry, input bytes and every quality/equality threshold remain unchanged across the subsequent experiments. No speedup is inferred merely from source changes or the CPU support oracle.
+
+### Rejected unmasked return
+
+Adding only `return vec4f(0)` after the far-line discard was rejected at `a6e966a86e6617e10dc85f874a45adf1c96927aa` in [run 43251078071](https://github.com/wieslawsoltes/ReportScene/actions/runs/43251078071). The exact line-image comparisons found 24, 756 and 532 differing bytes at pixel densities `(1, 1)`, `(1.25, 1.5)` and `(2.75, 0.75)`, respectively; maximum channel errors were 76, 65 and 76. There were no compilation messages or device loss, but quality failure stopped the benchmark. This revision supplies no accepted timing result.
+
+The outer guard preserved neighbors around genuinely covered pixels. It did not prevent surviving transparent lanes at the far rejection boundary from evaluating derivatives after another lane returned. Their indeterminate derivative values could create spurious coverage. The [unaltered shader result](performance/rendering-checkpoints-2026-11-12.zip) and [artifact provenance](performance/rendering-checkpoints-2026-11-12.json) retain this failure. The two-band correction described above retains helper work around every unmasked pixel and explicitly suppresses output in the outer transparent guard band after evaluating derivatives. Its exact GPU comparisons and complete paired timing run remain the acceptance gates; the numerical support proof alone is insufficient.
 
 ## Reproduce the CPU comparison
 

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { screenshotPixels } from './screenshot-pixels.mjs';
 import { ellipseDistanceCases, ellipseIterationBudget } from './ellipse-reference.mjs';
-import { lineReferenceFrames, verifyLineRejectionSupport } from './line-reference.mjs';
+import { lineGuardReferenceFrames, lineReferenceFrames, verifyLineRejectionSupport } from './line-reference.mjs';
 
 const evidence = fileURLToPath(new URL('./shader-evidence/', import.meta.url));
 const shaderPath = new URL('../../src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl', import.meta.url);
@@ -18,10 +18,21 @@ test('line rejection retains independently bounded coverage and derivative helpe
   assert.equal(result.frames, 3);
   assert.ok(result.sampled > 300_000 && result.supported > 30_000);
   assert.ok(result.enabled > 20 && result.fallback > 10, 'Exercise optimized and conservative fallback paths.');
-  assert.equal(result.helperChecks, result.supported * 4);
+  assert.equal(result.helperChecks, result.unmasked * 9);
+  assert.ok(result.unmasked > result.supported && result.guardBandMasked > 0,
+    'Check every unmasked sample and retain a separate derivative-only guard band.');
   assert.ok(result.rejectedBeforeDistance > result.sampled * .6,
     'The deterministic fixtures must avoid distance work for at least 60% of samples without removing coverage or derivative helpers.');
   console.log('LINE REJECTION: ' + JSON.stringify(result));
+});
+
+test('line guard bands include the derivative floor and large finite coordinates', () => {
+  const result = verifyLineRejectionSupport(lineGuardReferenceFrames());
+  assert.equal(result.frames, 2);
+  assert.equal(result.enabled, 2);
+  assert.ok(result.supported > 1_000 && result.guardBandMasked > 0);
+  assert.equal(result.helperChecks, result.unmasked * 9);
+  console.log('LINE GUARD SCALE: ' + JSON.stringify(result));
 });
 
 test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blending and grid pixels', { timeout: 180_000 }, async () => {

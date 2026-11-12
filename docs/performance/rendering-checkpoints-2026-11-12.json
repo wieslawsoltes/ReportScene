@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Retain complete raw observations from the accepted warm-text checkpoint and rejected unmasked-return shader experiment.",
+  "archive": {
+    "path": "rendering-checkpoints-2026-11-12.zip",
+    "bytes": 9467,
+    "sha256": "3973e7e5e50792f5933a7aebe6bf0ae2820486af71c7d2141ebad9573436db53",
+    "files": [
+      {
+        "path": "warm-text-9a57166/native-webgpu-warm-text.json",
+        "bytes": 84541,
+        "sha256": "c299c38c994f049be33b49637ff4068a9e8e8cd9a043f8403724ff9802ea9c6a"
+      },
+      {
+        "path": "warm-text-9a57166/verified-summary.json",
+        "bytes": 5694,
+        "sha256": "8a2eda920233eb5fa0d40c04a41f4ac89647a9307a9a7abe553a389f5ca89c73"
+      },
+      {
+        "path": "return-unmasked-a6e966a/shader-results.json",
+        "bytes": 51474,
+        "sha256": "496d060b6d85fa960bafca279273db771412e97240cec528056dc8dac6f1ec38"
+      }
+    ]
+  },
+  "warmText": {
+    "status": "passed",
+    "head": "9a5716649a14f8513bd46bb8d0f1a9a00ffb803d",
+    "runId": 43248015197,
+    "artifactId": 13959560194,
+    "artifactSha256": "af74381fac1e6ce2e50ce630244ec5585b53fc3d8b911a45215234328e2a1ece",
+    "screenshots": [
+      {
+        "name": "warm-text-back.png",
+        "bytes": 231687,
+        "sha256": "8b29b96ad95c86019d7edd0385f212722b9e15785939b0bce9e9b5a0b4f06f2c",
+        "retainedInActionsArtifact": 13959560194
+      },
+      {
+        "name": "warm-text-down.png",
+        "bytes": 231444,
+        "sha256": "cf70fb2408c3de969163f4f3f42e52de8ef224d35a1c5278ca8ca80ea64c64f9",
+        "retainedInActionsArtifact": 13959560194
+      },
+      {
+        "name": "warm-text-initial.png",
+        "bytes": 231687,
+        "sha256": "8b29b96ad95c86019d7edd0385f212722b9e15785939b0bce9e9b5a0b4f06f2c",
+        "retainedInActionsArtifact": 13959560194
+      }
+    ],
+    "initialAndReturnedPngByteEqual": true,
+    "scope": "Actual Uno submitted-frame counters and image/state checks; no timing or FPS claim."
+  },
+  "unmaskedReturn": {
+    "status": "rejected-pixel-mismatch",
+    "head": "a6e966a86e6617e10dc85f874a45adf1c96927aa",
+    "runId": 43251078071,
+    "artifactId": 13958264120,
+    "artifactSha256": "53ae455a9af315791ad3cbf6066279032a8de63411b959ebaf19dd56ca90646a",
+    "frames": [
+      {
+        "pixelsPerDip": [
+          1,
+          1
+        ],
+        "primitiveCount": 17,
+        "firstInstance": 3,
+        "byteMismatches": 24,
+        "maximumChannelDifference": 76
+      },
+      {
+        "pixelsPerDip": [
+          1.25,
+          1.5
+        ],
+        "primitiveCount": 17,
+        "firstInstance": 3,
+        "byteMismatches": 756,
+        "maximumChannelDifference": 65
+      },
+      {
+        "pixelsPerDip": [
+          2.75,
+          0.75
+        ],
+        "primitiveCount": 17,
+        "firstInstance": 3,
+        "byteMismatches": 532,
+        "maximumChannelDifference": 76
+      }
+    ],
+    "compilationMessages": [],
+    "deviceLoss": null,
+    "scope": "Shader quality gate failed; no subsequent benchmark result is accepted."
+  }
+}
