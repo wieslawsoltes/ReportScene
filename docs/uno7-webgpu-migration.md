@@ -74,6 +74,14 @@ These opacity corrections cover the solid SrcOver fills produced by `ReportRende
 
 The original COLR/CPAL fixture includes palette/foreground layers, an ordinary outline glyph and a positioned overlapping pair. A separate outline-only face exercises the vector fast path. The fixtures and generator are included under the repository license; no third-party font is redistributed.
 
+### Text and fragment work reuse
+
+The metrics owner now retains bounded immutable HarfBuzz runs, exact native glyph ink bounds at each raster scale and private font metrics. Public `ShapeText` still returns caller-owned arrays. A separate native text-blob cache keys the original text/style and exact drawing origin, preserving HarfBuzz's offset accumulation instead of translating a zero-origin blob with different float rounding. Width-only pagination retains widths and does not eagerly populate rendering arrays. Oversized intrinsic-color drawing consumes the original HarfBuzz arrays directly, avoiding an additional whole-run glyph copy. Typeface eviction and owner disposal release native blobs/fonts and invalidate dependent runs together; immutable snapshots contain no native resources.
+
+WebGPU records warmed text through managed font descriptors and cached ink bounds. Visible atlas hits need no native font creation, shaping, bounds query or font-property reads. A visible miss creates a raster font lazily; clipping still precedes atlas lookup and current-frame pinning. Oversized runs keep fixed 128-glyph stack staging. Textured primitives construct their fixed fill fields directly, removing temporary native `SKPaint` objects per glyph, mask or image. The new per-frame counters distinguish warm reuse from actual rasterization and uploads.
+
+Long diagonal lines retain their original axis-aligned quads and interpolation. A flat conservative plane rejects guaranteed-transparent fragments before primitive-storage reads and segment-distance work. A four-physical-pixel margin retains antialiasing support and neighboring derivative invocations; degenerate, distant, short or thick lines retain the full path. Rasterized quad area is unchanged. An earlier rotated-quad attempt was rejected by exact GPU byte comparisons because it moved edge samples; the correction preserves the original geometry. The [rendering performance review](rendering-performance.md) records measured results and their scope.
+
 The same validation found a native Skia thick-circle artifact: a stroke wider than the diameter can reflect its inner contour and leave a transparent center or ring. Adding the original fill is insufficient at extreme stroke widths. For collapsed oval strokes, the Skia adapter fills one exact expanded disk for circles, or retains only the native stroked outline's closed outer contour for eccentric ovals, preserving its conic weights. The input is restricted to one finite positive convex oval, whose outer contour encloses all reflected inner loops. A cloned fill paint composites the result once; full radial scans check the entire interior, not just its center. A shared predicate covers both `Stroke` and `StrokeAndFill` and routes saturated GPU ovals through analytic coverage. Dashed/path-effect strokes retain native semantics.
 
 ### Procedural grid
@@ -101,7 +109,9 @@ Errors are visible in the native UI, including the unsupported-WebGPU path. Brow
 | Image tile interior | At most 2048 × 2048 pixels, reduced when the device limit requires it |
 | Image decode/staging | 32 megapixel source limit; one retained global mip (up to 128 MB), with a smaller next mip during downsampling |
 | Complex-path cache | 2,048 entries |
-| Shape-run cache | 2,048 runs and 131,072 retained text/family characters per metrics owner |
+| Private native fonts | 128 per metrics owner; typefaces retain the existing 128-entry bound |
+| Shaped runs / raster runs / native text blobs | Each cache independently: 2,048 entries, 131,072 retained UTF-16 text/family characters and 131,072 glyphs; at most 4,096 characters/glyphs in a cacheable run |
+| Width-only cache | 4,096 entries and 262,144 retained text/family characters; existing 1,024-character text limit |
 | Primitive stream | At most 262,144 instances, 32 MiB before batching metadata |
 | Procedural grid | Existing 1,048,576 visible-point default |
 | Texture dimensions | Validated against the actual device limit |
@@ -123,6 +133,7 @@ The design and preview views expose `GpuSnapshot` and `RenderingError`. Designer
 - CPU record/upload/submission duration;
 - primitive count, draw-call count, texture uploads, uploaded bytes and atlas-page count;
 - device texture dimension limit, tile size, retained image/mask bytes and CPU image staging bytes.
+- native text shaping, bounds queries and font creation during glyph-command recording, plus glyph-cache hits and rasterizations.
 
 Native viewport and popup observations also include a monotonic `ViewChangeVersion` and `IsIntermediate`. Browser input waits for a new native scroll event after dispatching a wheel, then final offsets and coherent screen geometry. A diagnostic publication counter alone cannot acknowledge an input still waiting in the native queue. Positioning corrections calibrate wheel-to-DIP gain from acknowledged, unclamped motion; final geometry and pixel tolerances remain unchanged.
 
@@ -130,7 +141,7 @@ These counters describe CPU-side submission work. They are not GPU execution tim
 
 ## Reproducible GPU measurements
 
-The standalone [WebGPU benchmark runner](webgpu-benchmarks.md) uses the production shader and instance/binding/blending contract with deterministic shape, cached-mask, mipmapped-image and mixed workloads. It records raw samples, per-repeat and pooled p50/p95, work counts, source/fixture hashes and adapter/browser metadata. CPU encoding, submit calls, serialized queue completion and optional GPU render-pass timestamps are separate fields. Timestamp features are requested only on the runner's own device. Normal mode does not force software rendering; CI explicitly selects software mode for a bounded execution smoke. These prepared workloads complement actual Uno validation and do not measure complete application FPS.
+The standalone [WebGPU benchmark runner](webgpu-benchmarks.md) uses the production shader and instance/binding/blending contract with deterministic shape, cached-mask, mipmapped-image and mixed workloads. It records raw samples, per-repeat and pooled p50/p95, work counts, source/fixture hashes and adapter/browser metadata. CPU encoding, submit calls, serialized queue completion and optional GPU render-pass timestamps are separate fields. Timestamp features are requested only on the runner's own device. Normal mode does not force software rendering; CI explicitly selects software mode for a bounded execution smoke. A paired baseline/candidate mode uses one device and identical resources, alternates variant order and rejects every changed RGBA byte. Targeted diagonal-line and ellipse-stroke workloads supplement the unchanged original fixtures. These prepared workloads complement actual Uno validation and do not measure complete application FPS.
 
 ## Validation
 
@@ -138,7 +149,7 @@ The initial drawing-contract commit `31eeda45c3201a080f80bc8c7bcfe14c5016e401` p
 
 The full Uno 7 / Skia 4 commit `5f35f5fe41490fa9bfd42e9a11dc262ea683485a` passed core conformance, benchmarks, all 54 core package checks, the desktop build, all 14 reusable packages, browser publication and all 37 original production-shader pixel assertions in [run 43109136759](https://github.com/wieslawsoltes/ReportScene/actions/runs/43109136759). Skia 4 typeface identity and immutable path-builder changes and Uno 7 layout signatures are integrated. Subsequent actual-application evidence identified the Chromium software-presentation configuration and native 2D depth-slice sentinel issues described above; both have explicit fixes and stronger validation gates.
 
-The expanded core suite covers image staging, color and mip transitions, deterministic glyph coverage and exports, collapsed oval strokes and positive-area clipping. Browser conformance executes the platform-applicable subset; its recorded count comes from the actual WebAssembly application. The complete application gate requires all 78 scenarios across eight shards. Existing browser pixel assertions, required scenario names and the zero-retry policy remain mandatory. See [validation and reproducibility](validation.md) for commands, package checks and artifact contents, and the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks) for current revision-specific results.
+The expanded core suite covers image staging, color and mip transitions, deterministic glyph coverage and exports, collapsed oval strokes, positive-area clipping and bounded text-cache ownership/exactness. Browser conformance executes the platform-applicable subset; its recorded count comes from the actual WebAssembly application. The complete application gate requires all 79 scenarios across eight shards. Existing browser pixel assertions, required scenario names and the zero-retry policy remain mandatory. See [validation and reproducibility](validation.md) for commands, package checks and artifact contents, and the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks) for current revision-specific results.
 
 The migration runs the same gates against Uno 7 / Skia 4, plus:
 
@@ -148,6 +159,8 @@ The migration runs the same gates against Uno 7 / Skia 4, plus:
 - native browser evidence for successful WebGPU submission, viewport-sized targets at high zoom, scroll/layout reuse and idle stability;
 - a native browser scenario using a transparent 9001 × 257 image at minified and original pixel sizes, scrolling across tile boundaries and inspecting screenshot pixels and cache bounds;
 - a native browser scenario rendering 200pt text at 400% zoom, requiring visible glyph pixels and bounded atlas pages while many distinct glyphs lie outside the text box;
+- a native browser scenario importing 100 repeated labels, preparing at 100% and scrolling through real wheel input; each measured warmed frame must retain visible ink, hit cached glyphs and perform zero native shaping/bounds/font creation, glyph rasterization or texture uploads;
+- 51 ordered line commands across three fractional/nonuniform DPR frames, requiring exact full-image equality with the unrejected distance path and retaining independent coverage/derivative-support checks;
 - a native browser scenario importing and preparing thick/eccentric ellipses through real controls, inspecting ten 3 × 3 screenshot patches for solid centers, inner holes, the medial stroke body and outer extents;
 - core raster checks for odd-size mip edges, long/narrow coordinate overflow, premultiplied transparent pixels, adjacent tile gutters, full-patch equivalence across mip transitions, sRGB conversion and invalid input;
 - exact premultiplied color-font palette/foreground opacity, positioned overlap, transformed clipping, native paint compatibility and self-contained SVG/HTML export checks;

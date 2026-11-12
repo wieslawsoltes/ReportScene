@@ -36,6 +36,8 @@ Uno Platform 7 uses WebGPU for interactive report design, preview and icons. The
 
 Ellipse strokes use true nearest-boundary distance and preserve their original thickness under nonuniform scaling. Color-font opacity is consistent across GPU rendering and the report export paths; SVG/HTML embed bounded, DPI-controlled color glyphs while ordinary text remains vector. A [standalone WebGPU benchmark runner](docs/webgpu-benchmarks.md) records deterministic workloads, source/fixture hashes and separate CPU, queue and optional GPU-pass timings for reproducible adapter measurements.
 
+Warm text rendering reuses bounded immutable HarfBuzz runs, exact raster bounds, managed font descriptors and native text blobs. GPU glyph hits avoid native font creation and property queries; invisible ink is still rejected before atlas lookup. Conservative line rejection skips guaranteed-transparent fragment work while preserving the original vertices and pixel interpolation. The [rendering performance review](docs/rendering-performance.md) documents measurements, cache ownership and exact-output acceptance checks.
+
 ## Reusable packages
 
 | Package | Responsibility |
@@ -80,7 +82,7 @@ npx playwright install chromium
 npx playwright test
 ```
 
-CI publishes one WebAssembly artifact, tests it across eight isolated shards, and requires every shard plus merged evidence before deployment. The current browser gate requires all 78 scenarios, including native GPU viewport, unavailable-device, oversized-image and clipped-text checks; the core package consumer has 54 checks. Local `playwright test` runs the complete suite with one worker. No automatic retries are enabled. The benchmark records differential checks, work counts, allocations and timings in `artifacts/performance.json`; fixture measurements are not universal or hardware-GPU speed claims.
+CI publishes one WebAssembly artifact, tests it across eight isolated shards, and requires every shard plus merged evidence before deployment. The current browser gate requires all 79 scenarios, including native GPU viewport, unavailable-device, oversized-image, clipped-text and warm-text scrolling checks; the core package consumer has 54 checks. Local `playwright test` runs the complete suite with one worker. No automatic retries are enabled. The benchmark records differential checks, work counts, allocations and timings in `artifacts/performance.json`; fixture measurements are not universal or hardware-GPU speed claims.
 
 Open **View → Samples → Matrix sales**, **Subreport dashboard**, or **Subreport master-detail**. Use **Report → Import data** to bind CSV, JSON or scalar XML data. Double-click a matrix or subreport to edit its definition. The left toolbar includes **Insert subreport and page**, **Edit selected subreport**, and **Open subreport page**. Report page tabs expose the target's normal band/object editor. **View → Panels → Reset layout** restores closed tool panes; each explorer tab's search and the property filter operate independently. Escape inside explorer search clears that tab's filter. Open **Designer Options** from the quick-access settings icon, File menu or View Settings group. In preview, **Outline** exposes prepared bookmarks and **Whole page** fits the current page.
 
