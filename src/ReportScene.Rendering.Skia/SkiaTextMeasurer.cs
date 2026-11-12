@@ -5,7 +5,7 @@ using SkiaSharp.HarfBuzz;
 namespace ReportScene.Rendering.Skia;
 
 /// <summary>Own one instance per rendering/preparation thread; dispose it with the containing view or export operation.</summary>
-public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
+public sealed partial class SkiaTextMeasurer : ITextMeasurer, IDisposable
 {
     private sealed record Face(SKTypeface Typeface, SKShaper Shaper, bool Fallback, bool IntrinsicColor);
     private readonly record struct WidthKey(string Text, string Family, bool Bold, bool Italic, double Size);
@@ -49,7 +49,7 @@ public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
         ObjectDisposedException.ThrowIf(disposed, this);
         var key = (style.FontFamily, style.Bold, style.Italic);
         if (faces.TryGetValue(key, out var cached)) return cached;
-        if (faces.Count >= 128) { foreach (var face in faces.Values) { face.Shaper.Dispose(); face.Typeface.Dispose(); } faces.Clear(); ClearWidths(); }
+        if (faces.Count >= 128) { ClearTextCaches(); foreach (var face in faces.Values) { face.Shaper.Dispose(); face.Typeface.Dispose(); } faces.Clear(); ClearWidths(); }
         using var fontStyle = new SKFontStyle(style.Bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal, SKFontStyleWidth.Normal, style.Italic ? SKFontStyleSlant.Italic : SKFontStyleSlant.Upright);
         SKTypeface? typeface = typefaceResolver?.Invoke(style.FontFamily, fontStyle); bool fallback = false;
         if (typeface is not null && typeface.Handle == IntPtr.Zero)
@@ -71,7 +71,9 @@ public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
     public SKFont CreateFont(ItemStyle style)
     {
         var face = GetFace(style);
-        return new(face.Typeface, (float)style.FontSize) { Edging = SKFontEdging.Antialias, Subpixel = true, Embolden = face.Fallback && style.Bold, SkewX = face.Fallback && style.Italic ? -.2f : 0 };
+        var font = new SKFont(face.Typeface, (float)style.FontSize) { Edging = SKFontEdging.Antialias, Subpixel = true, Embolden = face.Fallback && style.Bold, SkewX = face.Fallback && style.Italic ? -.2f : 0 };
+        NativeFontCreationCount++;
+        return font;
     }
     /// <summary>
     /// Returns glyph identifiers and positioned advances from the same HarfBuzz
@@ -84,6 +86,7 @@ public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
         ObjectDisposedException.ThrowIf(disposed, this);
         ArgumentNullException.ThrowIfNull(text); ArgumentNullException.ThrowIfNull(style);
         using var font = CreateFont(style);
+        ShapeOperationCount++;
         return GetFace(style).Shaper.Shape(text, font);
     }
 
@@ -93,7 +96,14 @@ public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
         if (text.Length == 0) return 0;
         var key = new WidthKey(text, style.FontFamily, style.Bold, style.Italic, style.FontSize);
         if (widths.TryGetValue(key, out var width)) return width;
-        using var font = CreateFont(style); width = GetFace(style).Shaper.Shape(text, font).Width;
+        if (runs.TryGetValue(key, out var run)) width = run.Width;
+        else
+        {
+            // Pagination probes need only widths. Do not eagerly create or
+            // retain rendering arrays for prefixes that may never be drawn.
+            var font = GetCachedFont(style).Font; ShapeOperationCount++;
+            width = GetFace(style).Shaper.Shape(text, font).Width;
+        }
         // Bound retained characters as well as entry count. Full paragraph probes must not
         // pin multi-megabyte strings in a long-lived designer. FIFO eviction avoids flush storms.
         int cost = text.Length + style.FontFamily.Length;
@@ -127,16 +137,16 @@ public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
         ObjectDisposedException.ThrowIf(disposed, this);
         ArgumentNullException.ThrowIfNull(canvas); ArgumentNullException.ThrowIfNull(style); ArgumentNullException.ThrowIfNull(paint);
         if (string.IsNullOrEmpty(text)) return;
-        using var font = CreateFont(style);
         var face = GetFace(style);
         if (!face.IntrinsicColor || !ReportGlyphRaster.IsSolidSourceOver(paint)
             || (colorGlyphRasterOptions is null && paint.Color.Alpha == 255))
         {
-            canvas.DrawShapedText(face.Shaper, text, x, baseline, SKTextAlign.Left, font, paint);
+            DrawNativeCached(canvas, text, x, baseline, style, paint);
             return;
         }
         if (canvas.IsClipEmpty || paint.Color.Alpha == 0) return;
-        var shaped = face.Shaper.Shape(text, font);
+        var font = GetCachedFont(style).Font;
+        var shaped = GetTextRun(text, style).Shaped;
         if (colorGlyphRasterOptions is null)
         {
             ReportGlyphRaster.DrawWithOpacity(canvas, font, shaped, x, baseline, paint);
@@ -153,6 +163,7 @@ public sealed class SkiaTextMeasurer : ITextMeasurer, IDisposable
     public void Dispose()
     {
         if (disposed) return;
+        ClearTextCaches();
         foreach (var face in faces.Values) { face.Shaper.Dispose(); face.Typeface.Dispose(); }
         faces.Clear(); ClearWidths(); disposed = true;
     }

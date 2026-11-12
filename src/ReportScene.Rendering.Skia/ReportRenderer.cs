@@ -81,17 +81,22 @@ public sealed class ReportRenderer : IDisposable
     }
     public void DrawText(ReportCanvas canvas, string text, RectD bounds, ItemStyle style)
     {
-        var lines = text.Split('\n'); canvas.Save();
+        // Most report cells contain one line. Avoid allocating a split array
+        // and avoid shaping solely to obtain an unused left-aligned width.
+        var lines = text.Contains('\n') ? text.Split('\n') : null;
+        int lineCount = lines?.Length ?? 1;
+        canvas.Save();
         try
         {
             canvas.ClipRect(Rect(bounds));
-            using var font = Metrics.CreateFont(style); using var paint = new SKPaint { Color = Color(style.Foreground), IsAntialias = true };
+            using var paint = new SKPaint { Color = Color(style.Foreground), IsAntialias = true };
             double lineHeight = Metrics.LineHeight(style), available = bounds.Height - 2 * style.Padding;
-            double offset = style.VerticalAlignment switch { VerticalAlign.Center => Math.Max(0, (available - lines.Length * lineHeight) / 2), VerticalAlign.Bottom => Math.Max(0, available - lines.Length * lineHeight), _ => 0 };
-            var fontMetrics = font.Metrics; double topPadding = Math.Max(0, (lineHeight - (fontMetrics.Descent - fontMetrics.Ascent)) / 2);
-            for (int n = 0; n < lines.Length; n++)
+            double offset = style.VerticalAlignment switch { VerticalAlign.Center => Math.Max(0, (available - lineCount * lineHeight) / 2), VerticalAlign.Bottom => Math.Max(0, available - lineCount * lineHeight), _ => 0 };
+            var fontMetrics = Metrics.GetFontMetrics(style); double topPadding = Math.Max(0, (lineHeight - (fontMetrics.Descent - fontMetrics.Ascent)) / 2);
+            for (int n = 0; n < lineCount; n++)
             {
-                string line = lines[n]; double width = Metrics.MeasureWidth(line, style);
+                string line = lines is null ? text : lines[n];
+                double width = style.Alignment != TextAlign.Left || style.Underline ? Metrics.MeasureWidth(line, style) : 0;
                 double x = bounds.X + style.Padding + (style.Alignment switch { TextAlign.Center => (bounds.Width - style.Padding * 2 - width) / 2, TextAlign.Right => bounds.Width - style.Padding * 2 - width, _ => 0 });
                 double y = bounds.Y + style.Padding + offset + n * lineHeight + topPadding - fontMetrics.Ascent;
                 canvas.DrawText(Metrics, line, (float)x, (float)y, style, paint);
