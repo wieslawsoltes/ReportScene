@@ -182,7 +182,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
     }
     public override void DrawOval(SKRect rect, SKPaint paint)
     {
-        if (paint.Style == SKPaintStyle.StrokeAndFill)
+        if (paint.Style == SKPaintStyle.StrokeAndFill && !HasCollapsedOvalStroke(rect, paint))
         {
             using var builder = new SKPathBuilder(); builder.AddOval(rect); using var path = builder.Detach(); DrawPath(path, paint); return;
         }

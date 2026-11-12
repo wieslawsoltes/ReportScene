@@ -16,6 +16,19 @@ namespace ReportScene.Rendering.Skia;
 /// </remarks>
 public abstract class ReportCanvas
 {
+    /// <summary>
+    /// Recognizes a finite solid oval stroke whose inward offset has disappeared.
+    /// Both stroke styles then cover the entire outer parallel shape. Backends
+    /// share this predicate so native reflected inner loops cannot reintroduce a
+    /// hole. Effects that break the single convex outline retain their native path.
+    /// </summary>
+    protected static bool HasCollapsedOvalStroke(SKRect rect, SKPaint paint) =>
+        (paint.Style is SKPaintStyle.Stroke or SKPaintStyle.StrokeAndFill)
+        && paint.PathEffect is null && float.IsFinite(paint.StrokeWidth) && paint.StrokeWidth > 0
+        && float.IsFinite(rect.Left) && float.IsFinite(rect.Top) && float.IsFinite(rect.Right) && float.IsFinite(rect.Bottom)
+        && float.IsFinite(rect.Width) && float.IsFinite(rect.Height)
+        && ReportViewportClip.HasPositiveArea(rect) && paint.StrokeWidth >= MathF.Min(rect.Width, rect.Height);
+
     public abstract SKRect LocalClipBounds { get; }
     public abstract SKMatrix TotalMatrix { get; }
     public abstract void Save();
@@ -144,25 +157,17 @@ public sealed class SkiaReportCanvas : ReportCanvas
     public override void DrawOval(SKRect rect, SKPaint paint)
     {
         ArgumentNullException.ThrowIfNull(paint);
-        if (!FillsOvalInterior(rect, paint)) { Canvas.DrawOval(rect, paint); return; }
+        if (!HasCollapsedOvalStroke(rect, paint)) { Canvas.DrawOval(rect, paint); return; }
         DrawFilledOvalStroke(rect, paint);
     }
     public override void DrawCircle(float centerX, float centerY, float radius, SKPaint paint)
     {
         ArgumentNullException.ThrowIfNull(paint);
         var rect = new SKRect(centerX - radius, centerY - radius, centerX + radius, centerY + radius);
-        if (!FillsOvalInterior(rect, paint)) { Canvas.DrawCircle(centerX, centerY, radius, paint); return; }
+        if (!HasCollapsedOvalStroke(rect, paint)) { Canvas.DrawCircle(centerX, centerY, radius, paint); return; }
         using var fill = paint.Clone(); fill.Style = SKPaintStyle.Fill;
         Canvas.DrawCircle(centerX, centerY, radius + paint.StrokeWidth * .5f, fill);
     }
-    // The inward offset disappears once the stroke reaches the minor radius.
-    // Native Skia can retain a reflected inner loop after this point. Adding the
-    // original fill is insufficient when that loop extends beyond the oval.
-    private static bool FillsOvalInterior(SKRect rect, SKPaint paint) => paint.Style == SKPaintStyle.Stroke
-        && paint.PathEffect is null && float.IsFinite(paint.StrokeWidth) && paint.StrokeWidth > 0
-        && float.IsFinite(rect.Left) && float.IsFinite(rect.Top) && float.IsFinite(rect.Right) && float.IsFinite(rect.Bottom)
-        && float.IsFinite(rect.Width) && float.IsFinite(rect.Height)
-        && ReportViewportClip.HasPositiveArea(rect) && paint.StrokeWidth >= MathF.Min(rect.Width, rect.Height);
     private void DrawFilledOvalStroke(SKRect rect, SKPaint paint)
     {
         using var fill = paint.Clone(); fill.Style = SKPaintStyle.Fill;
@@ -227,7 +232,7 @@ public sealed class SkiaReportCanvas : ReportCanvas
     public override void DrawArc(SKRect oval, float startAngle, float sweepAngle, bool useCenter, SKPaint paint)
     {
         ArgumentNullException.ThrowIfNull(paint);
-        if (float.IsFinite(startAngle) && float.IsFinite(sweepAngle) && MathF.Abs(sweepAngle) >= 360 && FillsOvalInterior(oval, paint))
+        if (float.IsFinite(startAngle) && float.IsFinite(sweepAngle) && MathF.Abs(sweepAngle) >= 360 && HasCollapsedOvalStroke(oval, paint))
             DrawOval(oval, paint);
         else Canvas.DrawArc(oval, startAngle, sweepAngle, useCenter, paint);
     }
