@@ -17,7 +17,7 @@ public static class ReportGlyphRasterTests
             ushort glyph = font.GetGlyphs("\uE000").Single();
             Conformance.Equal((ushort)1, glyph);
             var bounds = Bounds(font, glyph);
-            foreach (var foreground in new[] { new SKColor(0, 255, 0, 128), new SKColor(0, 0, 255, 64) })
+            foreach (var foreground in new[] { new SKColor(0, 255, 0, 255), new SKColor(0, 255, 0, 128), new SKColor(0, 0, 255, 64) })
             {
                 using var bitmap = ReportGlyphRaster.Rasterize(font, glyph, bounds, foreground, intrinsicColor: true);
                 int left = (int)(25 - bounds.Left), right = (int)(75 - bounds.Left), y = (int)(-40 - bounds.Top);
@@ -40,15 +40,16 @@ public static class ReportGlyphRasterTests
         });
     }
 
-    private static SKTypeface Fixture()
+    internal static SKTypeface Fixture(bool outline = false)
     {
-        using var stream = typeof(ReportGlyphRasterTests).Assembly.GetManifestResourceStream("ReportScene.Validation.ColorGlyphFixture.ttf")
+        string name = outline ? "OutlineGlyphFixture.ttf" : "ColorGlyphFixture.ttf";
+        using var stream = typeof(ReportGlyphRasterTests).Assembly.GetManifestResourceStream("ReportScene.Validation." + name)
             ?? throw new InvalidOperationException("The deterministic color-glyph font fixture is missing.");
         using var data = SKData.Create(stream);
         return SKTypeface.FromData(data) ?? throw new InvalidOperationException("The color-glyph font fixture is invalid.");
     }
 
-    private static SKRect Bounds(SKFont font, ushort glyph)
+    internal static SKRect Bounds(SKFont font, ushort glyph)
     {
         Span<ushort> glyphs = stackalloc ushort[1] { glyph };
         Span<SKRect> bounds = stackalloc SKRect[1];
@@ -58,7 +59,7 @@ public static class ReportGlyphRasterTests
             MathF.Ceiling(bounds[0].Right) + guard, MathF.Ceiling(bounds[0].Bottom) + guard);
     }
 
-    private static void AssertPixel(SKBitmap bitmap, int x, int y, SKColor expected)
+    internal static void AssertPixel(SKBitmap bitmap, int x, int y, SKColor expected)
     {
         // The GPU samples raw premultiplied bytes, so inspect that representation
         // rather than relying only on SKBitmap.GetPixel's unpremultiplied value.

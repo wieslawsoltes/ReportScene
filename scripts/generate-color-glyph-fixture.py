@@ -8,6 +8,7 @@ repository license; no external font is copied or subsetted.
 from pathlib import Path
 from fontTools.colorLib.builder import buildCOLR, buildCPAL
 from fontTools.fontBuilder import FontBuilder
+from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 
 
@@ -24,7 +25,7 @@ def rectangle(left, bottom, right, top):
 builder = FontBuilder(1000, isTTF=True)
 order = [".notdef", "color", "red", "foreground"]
 builder.setupGlyphOrder(order)
-builder.setupCharacterMap({0xE000: "color"})
+builder.setupCharacterMap({0xE000: "color", 0xE001: "red"})
 builder.setupGlyf({
     ".notdef": TTGlyphPen(None).glyph(),
     "color": rectangle(0, 0, 1000, 800),
@@ -46,11 +47,30 @@ builder.setupNameTable({
 builder.setupOS2(sTypoAscender=800, sTypoDescender=-200, usWinAscent=800, usWinDescent=200)
 builder.setupPost()
 builder.setupMaxp()
+# Positioned overlap distinguishes per-glyph opacity from a single opacity
+# layer around the entire shaped run. At 100pt these glyphs start at x=0,60.
+addOpenTypeFeaturesFromString(builder.font, "feature kern { pos color color -400; } kern;")
 builder.font["COLR"] = buildCOLR({"color": [("red", 0), ("foreground", 0xFFFF)]}, version=0)
 builder.font["CPAL"] = buildCPAL([[(1.0, 0.0, 0.0, 1.0)]])
 builder.font.recalcTimestamp = False
 builder.font["head"].created = builder.font["head"].modified = 2082844800
 target = Path(__file__).resolve().parents[1] / "src/ReportScene.Validation/Assets/ColorGlyphFixture.ttf"
 target.parent.mkdir(parents=True, exist_ok=True)
+builder.font.save(target)
+print(target)
+
+# The same original outlines without color tables exercise the ordinary text
+# path deterministically, including in browser hosts without a system font manager.
+del builder.font["COLR"]
+del builder.font["CPAL"]
+builder.setupNameTable({
+    "familyName": "ReportScene Outline Glyph Fixture",
+    "styleName": "Regular",
+    "uniqueFontIdentifier": "ReportScene.OutlineGlyphFixture.1",
+    "fullName": "ReportScene Outline Glyph Fixture Regular",
+    "psName": "ReportSceneOutlineGlyphFixture-Regular",
+    "version": "Version 1.0",
+})
+target = target.with_name("OutlineGlyphFixture.ttf")
 builder.font.save(target)
 print(target)

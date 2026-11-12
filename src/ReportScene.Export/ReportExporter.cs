@@ -22,6 +22,22 @@ public interface IReportExporter
 
 public sealed partial class ReportExporter : IReportExporter
 {
+    private readonly Func<SkiaTextMeasurer>? metricsFactory;
+
+    public ReportExporter() { }
+
+    /// <summary>
+    /// Supplies a fresh font-metrics owner for each drawing export. Ownership of
+    /// the returned instance transfers to the exporter and ends with that export,
+    /// including failures. The factory is not called for CSV, Text or PreparedJson.
+    /// Use this with a metrics font resolver to export application-supplied fonts.
+    /// </summary>
+    public ReportExporter(Func<SkiaTextMeasurer> metricsFactory)
+    {
+        ArgumentNullException.ThrowIfNull(metricsFactory);
+        this.metricsFactory = metricsFactory;
+    }
+
     public IReadOnlyList<ExportFormat> Formats { get; } = Enum.GetValues<ExportFormat>();
     public ExportFile Export(PreparedReport report, ExportFormat format, ExportOptions? options = null, ReportDocument? document = null, CancellationToken cancellationToken = default)
     {
@@ -37,7 +53,7 @@ public sealed partial class ReportExporter : IReportExporter
         }
         return ExportPages(report, format, options, document, pages, cancellationToken);
     }
-    private static ExportFile ExportPages(PreparedReport report, ExportFormat format, ExportOptions options,
+    private ExportFile ExportPages(PreparedReport report, ExportFormat format, ExportOptions options,
         ReportDocument? document, IReadOnlyList<PreparedPage> pages, CancellationToken cancellationToken)
     {
         if (pages.Count == 0 && format != ExportFormat.Csv) throw new ArgumentException("The selected page range is empty.");
@@ -63,7 +79,9 @@ public sealed partial class ReportExporter : IReportExporter
                 return new ExportFile($"{index + 1:D3}-{SafeFileName(table.Name)}.csv", "text/csv", Encoding.UTF8.GetBytes(DataReaders.WriteCsv(table)));
             }));
         }
-        using var renderer = new ReportRenderer();
+        using var metrics = metricsFactory is null ? new SkiaTextMeasurer() : metricsFactory()
+            ?? throw new InvalidOperationException("The export metrics factory returned null.");
+        using var renderer = new ReportRenderer(metrics);
         switch (format)
         {
             case ExportFormat.Pdf:
@@ -77,7 +95,7 @@ public sealed partial class ReportExporter : IReportExporter
                     return new(safeName + ".pdf", "application/pdf", output.ToArray());
                 }
             case ExportFormat.Svg:
-                return PagesOrZip("svg", "image/svg+xml", p => Encoding.UTF8.GetBytes(Svg(renderer, p)));
+                return PagesOrZip("svg", "image/svg+xml", p => Encoding.UTF8.GetBytes(Svg(renderer, p, options)));
             case ExportFormat.Png:
                 return PagesOrZip("png", "image/png", p => Png(renderer, p, options));
             case ExportFormat.Html:
@@ -86,7 +104,7 @@ public sealed partial class ReportExporter : IReportExporter
                 foreach (var page in pages)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    html.Append("<section class=\"page\" aria-label=\"Page ").Append(page.Number).Append("\" style=\"width:").Append(N(page.Width)).Append("pt;height:").Append(N(page.Height)).Append("pt\">").Append(Svg(renderer, page));
+                    html.Append("<section class=\"page\" aria-label=\"Page ").Append(page.Number).Append("\" style=\"width:").Append(N(page.Width)).Append("pt;height:").Append(N(page.Height)).Append("pt\">").Append(Svg(renderer, page, options));
                     foreach (var (item, bounds) in VisibleItems(page, cancellationToken).Where(v => SafeLink(v.Item.Source.Hyperlink)))
                         html.Append("<a class=\"link\" rel=\"noopener noreferrer\" href=\"").Append(WebUtility.HtmlEncode(item.Source.Hyperlink)).Append("\" aria-label=\"").Append(WebUtility.HtmlEncode(item.Text)).Append("\" style=\"left:").Append(N(bounds.X)).Append("pt;top:").Append(N(bounds.Y)).Append("pt;width:").Append(N(bounds.Width)).Append("pt;height:").Append(N(bounds.Height)).Append("pt\"></a>");
                     html.Append("</section>");
@@ -122,11 +140,20 @@ public sealed partial class ReportExporter : IReportExporter
         using var image = surface.Snapshot(); using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
         return encoded.ToArray();
     }
-    public static string Svg(ReportRenderer renderer, PreparedPage page)
+    public static string Svg(ReportRenderer renderer, PreparedPage page) => Svg(renderer, page, new ExportOptions());
+
+    /// <summary>
+    /// Writes vector report content and ordinary text. Intrinsic color glyphs are
+    /// embedded as clipped sRGB PNGs because Skia SVG lacks native color-font and
+    /// opacity-layer support. DPI controls their scale; MaximumPixels limits each
+    /// visible glyph image, in addition to the shared glyph dimension/area limits.
+    /// </summary>
+    public static string Svg(ReportRenderer renderer, PreparedPage page, ExportOptions options)
     {
-        ArgumentNullException.ThrowIfNull(renderer); ValidatePage(page);
+        ArgumentNullException.ThrowIfNull(renderer); ArgumentNullException.ThrowIfNull(options); ValidatePage(page); ValidateOptions(options);
         using var stream = new MemoryStream();
-        using (var canvas = SKSvgCanvas.Create(SKRect.Create((float)page.Width, (float)page.Height), stream) ?? throw new NotSupportedException("The current Skia build does not provide an SVG backend.")) renderer.DrawPage(canvas, page);
+        using (var canvas = SKSvgCanvas.Create(SKRect.Create((float)page.Width, (float)page.Height), stream) ?? throw new NotSupportedException("The current Skia build does not provide an SVG backend."))
+            renderer.DrawPage(new SkiaReportCanvas(canvas, new ColorGlyphRasterOptions(options.Dpi, options.MaximumPixels)), page);
         var svg = Encoding.UTF8.GetString(stream.ToArray());
         int start = svg.IndexOf("<svg", StringComparison.Ordinal); return start >= 0 ? svg[start..] : throw new InvalidOperationException("SVG output is invalid.");
     }
