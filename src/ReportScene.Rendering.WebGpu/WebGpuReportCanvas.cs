@@ -114,6 +114,22 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
                 paint.StrokeJoin switch { SKStrokeJoin.Round => 2, SKStrokeJoin.Bevel => 1, _ => paint.StrokeMiter < 1.414214f ? 1 : 0 })
         };
     }
+    private GpuPrimitive TexturedPrimitive(SKRect rect, SKColor color, bool antialias)
+    {
+        // Texture coverage already defines the fill. Construct its fixed state
+        // directly instead of allocating and disposing a native SKPaint for
+        // every visible glyph, path mask, image, or image tile.
+        float fringe = antialias ? 1.5f / Math.Min(pixelsX, pixelsY) : 0;
+        var quad = new SKRect(rect.Left - fringe, rect.Top - fringe, rect.Right + fringe, rect.Bottom + fringe);
+        return new()
+        {
+            Rect = new(rect.Left, rect.Top, rect.Width, rect.Height),
+            Quad = new(quad.Left, quad.Top, quad.Width, quad.Height),
+            Clip = new(state.Clip.Left, state.Clip.Top, state.Clip.Right, state.Clip.Bottom),
+            Color = Premultiplied(color),
+            Shape = new(4, -1, antialias ? 1 : 0, 0)
+        };
+    }
     private void Add(GpuPrimitive primitive, GpuTexture? texture = null)
     {
         if (primitive.Color.W <= 0 || !ReportViewportClip.HasPositiveArea(state.Clip)) return;
@@ -280,19 +296,18 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         coverage.Inflate(1.5f / Math.Min(pixelsX, pixelsY), 1.5f / Math.Min(pixelsX, pixelsY));
         var visible = Intersection(coverage, state.Clip);
         if (!ReportViewportClip.HasPositiveArea(visible)) return;
-        using var paint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         if (image.Width > textures.ImageTileSize || image.Height > textures.ImageTileSize)
         {
-            DrawTiledImage(image, rect, visible, paint);
+            DrawTiledImage(image, rect, visible);
             return;
         }
         var texture = textures.GetImage(image);
-        var p = Primitive(rect, paint, 4);
+        var p = TexturedPrimitive(rect, SKColors.White, antialias: true);
         p.Uv = new(0, 0, 1, 1);
         Add(p, texture);
     }
 
-    private void DrawTiledImage(SKImage image, SKRect rect, SKRect visible, SKPaint paint)
+    private void DrawTiledImage(SKImage image, SKRect rect, SKRect visible)
     {
         if (image.Width <= 0 || image.Height <= 0 || (long)image.Width * image.Height > ReportImageRaster.MaximumDecodedPixels)
             throw new InvalidOperationException("Decoded image exceeds the 32-megapixel report image budget.");
@@ -313,7 +328,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         int firstY = Math.Clamp((int)Math.Floor((visible.Top - rect.Top) / (double)rect.Height * image.Height / sourcePixelsPerTile), 0, rows - 1);
         int lastX = Math.Clamp((int)Math.Ceiling((visible.Right - rect.Left) / (double)rect.Width * image.Width / sourcePixelsPerTile) - 1, firstX, columns - 1);
         int lastY = Math.Clamp((int)Math.Ceiling((visible.Bottom - rect.Top) / (double)rect.Height * image.Height / sourcePixelsPerTile) - 1, firstY, rows - 1);
-        var whole = Primitive(rect, paint, 4);
+        var whole = TexturedPrimitive(rect, SKColors.White, antialias: true);
         for (int y = firstY; y <= lastY; y++)
             for (int x = firstX; x <= lastX; x++)
             {
@@ -324,7 +339,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
                     rect.Top + source.Top / image.Height * rect.Height,
                     rect.Left + source.Right / image.Width * rect.Width,
                     rect.Top + source.Bottom / image.Height * rect.Height);
-                var p = Primitive(target, paint, 4);
+                var p = TexturedPrimitive(target, SKColors.White, antialias: true);
                 p.Uv = new(tile.Uv.Left, tile.Uv.Top, tile.Uv.Right, tile.Uv.Bottom);
                 p.Data = whole.Rect;
                 p.Extra.Z = 1; // Sample this tile; antialias only the whole image boundary.
@@ -406,8 +421,7 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         if (!ReportViewportClip.HasPositiveArea(coverage.Bounds)) return;
         var b = coverage.Bounds;
         var rect = Map(new SKRect(x + b.Left / scale, baseline + b.Top / scale, x + b.Right / scale, baseline + b.Bottom / scale));
-        using var paint = new SKPaint { Color = coverage.IsColor ? SKColors.White : color, IsAntialias = false };
-        var p = Primitive(rect, paint, 4);
+        var p = TexturedPrimitive(rect, coverage.IsColor ? SKColors.White : color, antialias: false);
         var uv = coverage.Uv;
         p.Uv = new(uv.Left, uv.Top, uv.Right, uv.Bottom);
         p.Extra.W = coverage.IsColor ? 0 : 1;
