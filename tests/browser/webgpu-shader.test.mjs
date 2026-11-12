@@ -7,6 +7,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { screenshotPixels } from './screenshot-pixels.mjs';
+import { ellipseDistanceCases, ellipseIterationBudget } from './ellipse-reference.mjs';
 
 const evidence = fileURLToPath(new URL('./shader-evidence/', import.meta.url));
 const shaderPath = new URL('../../src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl', import.meta.url);
@@ -14,6 +15,27 @@ const shaderPath = new URL('../../src/ReportScene.Rendering.WebGpu/Shaders/Repor
 test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blending and grid pixels', { timeout: 180_000 }, async () => {
   await mkdir(evidence, { recursive: true });
   const code = await readFile(shaderPath, 'utf8');
+  const ellipseReference = ellipseDistanceCases();
+  const oval = (cx, cy, rx, ry, stroke, color, sx = 1, sy = 1) => {
+    const rect = [cx - rx * sx, cy - ry * sy, rx * sx * 2, ry * sy * 2];
+    const padX = Math.max(0, stroke) * sx + 1.5, padY = Math.max(0, stroke) * sy + 1.5;
+    return { rect, color, options: {
+      stroke, data: [1 / sx, 1 / sy, ellipseIterationBudget(Math.max(rx * sx, ry * sy)), 0],
+      quad: [rect[0] - padX, rect[1] - padY, rect[2] + padX * 2, rect[3] + padY * 2]
+    } };
+  };
+  const ellipses = [
+    oval(48.5, 304.5, 10, 10, 20, [0, .5, 1, 1]),
+    oval(112.5, 304.5, 10, 10, 10, [0, 1, 0, 1]),
+    oval(176.5, 304.5, 20, 20, 2, [1, .5, 0, 1]),
+    oval(320.5, 300.5, 60, 10, 8, [1, 0, .5, 1]),
+    oval(320.5, 390.5, 60, 10, 20, [.5, 0, 1, 1]),
+    oval(448.5, 390.5, 10, 10, 4, [0, 1, 1, 1], 3, 1),
+    oval(112.5, 430.5, 80, 2, 6, [1, 1, 0, 1]),
+    oval(448.5, 48.5, 40, 20, -1, [0, 1, .5, 1]),
+    oval(448.5, 150.5, 40e-25, 20e-25, 8e-25, [1, .5, .5, 1], 1e25, 1e25),
+    oval(448.5, 230.5, 40e25, 20e25, 8e25, [.5, 1, .5, 1], 1e-25, 1e-25)
+  ];
   const server = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     response.end('<!doctype html><title>ReportScene WGSL contract validation</title>');
@@ -31,7 +53,7 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
     page.on('console', message => consoleMessages.push({ type: message.type(), text: message.text() }));
     page.on('pageerror', error => consoleMessages.push({ type: 'pageerror', text: error.message }));
     await page.goto('http://127.0.0.1:' + server.address().port + '/');
-    const result = await page.evaluate(async shader => {
+    const result = await page.evaluate(async ({ shader, ellipses, distanceCases }) => {
       if (!navigator.gpu) throw new Error('WebGPU is unavailable: shader validation cannot be skipped or replaced by WebGL.');
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
       if (!adapter) throw new Error('No WebGPU adapter was created with the configured software Vulkan driver.');
@@ -44,7 +66,17 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
       let retainedForPresentation = false;
       try {
         device.pushErrorScope('validation');
-        const module = device.createShaderModule({ label: 'ReportScene production WGSL', code: shader });
+        // The compute entry invokes the same production stroke function used by
+        // the fragment stage. It contains no copied distance implementation.
+        const distanceProbe = `
+@group(0) @binding(2) var<storage, read_write> ellipse_probe_distances: array<f32>;
+@compute @workgroup_size(64)
+fn ellipse_distance_probe(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= arrayLength(&ellipse_probe_distances)) { return; }
+    let p = primitives[id.x];
+    ellipse_probe_distances[id.x] = ellipse_stroke_distance(p.data.xy, p.rect.zw, p.shape.y, u32(p.data.z));
+}`;
+        const module = device.createShaderModule({ label: 'ReportScene production WGSL', code: shader + distanceProbe });
         const compilation = await module.getCompilationInfo();
         const messages = compilation.messages.map(message => ({
           type: message.type, text: message.message, line: message.lineNum, column: message.linePos
@@ -74,7 +106,7 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
           primitive: { topology: 'triangle-list', cullMode: 'none' }
         });
 
-        const width = 256, height = 256;
+        const width = 512, height = 512;
         const commands = [];
         // Same 128-byte ABI as WebGpuPrimitive: eight ordered vec4 fields.
         function primitive(rect, color, kind = 0, options = {}) {
@@ -109,6 +141,32 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
             stroke: 4, cap, aa: 0, data: [x, 212, x, 212], quad: [x - 5, 207, 10, 10]
           });
         }
+        for (const ellipse of ellipses) primitive(ellipse.rect, ellipse.color, 2, ellipse.options);
+
+        const probeInput = new Float32Array(distanceCases.length * 32);
+        for (let index = 0; index < distanceCases.length; index++) {
+          const c = distanceCases[index], offset = index * 32;
+          probeInput.set(c.radius, offset + 2);
+          probeInput[offset + 13] = c.halfStroke;
+          probeInput.set(c.point, offset + 16);
+          probeInput[offset + 18] = c.iterations;
+        }
+        const probeStorage = own(device.createBuffer({ size: probeInput.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }));
+        const probeOutput = own(device.createBuffer({ size: distanceCases.length * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }));
+        const probeReadback = own(device.createBuffer({ size: distanceCases.length * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }));
+        device.queue.writeBuffer(probeStorage, 0, probeInput);
+        const probeLayout = device.createBindGroupLayout({ entries: [
+          { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage', minBindingSize: 128 } },
+          { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage', minBindingSize: 4 } }
+        ] });
+        const probePipeline = await device.createComputePipelineAsync({
+          label: 'Production ellipse distance against independent double-precision normal-equation oracle',
+          layout: device.createPipelineLayout({ bindGroupLayouts: [probeLayout] }),
+          compute: { module, entryPoint: 'ellipse_distance_probe' }
+        });
+        const probeGroup = device.createBindGroup({ layout: probeLayout, entries: [
+          { binding: 1, resource: { buffer: probeStorage } }, { binding: 2, resource: { buffer: probeOutput } }
+        ] });
 
         const primitives = new Float32Array(commands.flat());
         if (primitives.byteLength !== commands.length * 128) throw new Error('Primitive ABI must be exactly 128 bytes.');
@@ -155,6 +213,11 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
           size: width * height * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
         }));
         const encoder = device.createCommandEncoder();
+        const computePass = encoder.beginComputePass();
+        computePass.setPipeline(probePipeline); computePass.setBindGroup(0, probeGroup);
+        computePass.dispatchWorkgroups(Math.ceil(distanceCases.length / 64));
+        computePass.end();
+        encoder.copyBufferToBuffer(probeOutput, 0, probeReadback, 0, distanceCases.length * 4);
         const pass = encoder.beginRenderPass({ colorAttachments: [{
           view: target.createView(), clearValue: [0, 0, 0, 0], loadOp: 'clear', storeOp: 'store'
         }] });
@@ -179,6 +242,9 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
           { texture: canvasTexture }, { buffer: canvasReadback, bytesPerRow: width * 4, rowsPerImage: height }, [width, height]
         );
         device.queue.submit([encoder.finish()]);
+        await probeReadback.mapAsync(GPUMapMode.READ);
+        const ellipseDistances = Array.from(new Float32Array(probeReadback.getMappedRange()));
+        probeReadback.unmap();
         await readback.mapAsync(GPUMapMode.READ);
         const pixels = new Uint8Array(readback.getMappedRange()).slice();
         readback.unmap();
@@ -237,6 +303,40 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
         sample('zero-length round line center', 96, 212, [255, 255, 255, 255]);
         sample('zero-length round line excludes square corner', 92, 208, [0, 0, 0, 0]);
         sample('untouched target remains transparent', 240, 240, [0, 0, 0, 0]);
+        sample('thick circle center is solid', 48, 304, [0, 128, 255, 255]);
+        sample('thick circle near center is solid', 49, 304, [0, 128, 255, 255]);
+        sample('thick circle outer stroke interior', 77, 304, [0, 128, 255, 255]);
+        sample('thick circle outer boundary coverage', 78, 304, [0, 64, 128, 128], 2);
+        sample('thick circle outer geometry is not a clipped oversized ellipse', 79, 304, [0, 0, 0, 0]);
+        sample('collapsed circle inner contour has no half-alpha center', 112, 304, [0, 255, 0, 255]);
+        sample('collapsed circle outer boundary coverage', 132, 304, [0, 128, 0, 128], 2);
+        sample('thin circle preserves inner hole', 176, 304, [0, 0, 0, 0]);
+        sample('thin circle exact inner boundary', 194, 304, [128, 64, 0, 128], 2);
+        sample('thin circle stroke body', 197, 304, [255, 128, 0, 255]);
+        sample('thin circle exact outer boundary', 198, 304, [128, 64, 0, 128], 2);
+        sample('eccentric ellipse medial stroke body', 360, 300, [255, 0, 128, 255]);
+        sample('eccentric ellipse preserves remaining inner hole', 320, 300, [0, 0, 0, 0]);
+        sample('eccentric ellipse outer stroke body', 360, 314, [255, 0, 128, 255]);
+        sample('eccentric ellipse corner outside true stroke', 380, 315, [0, 0, 0, 0]);
+        sample('eccentric ellipse major-axis boundary', 388, 300, [128, 0, 64, 128], 2);
+        sample('eccentric ellipse minor-axis boundary', 320, 318, [128, 0, 64, 128], 2);
+        sample('thick eccentric ellipse has solid center', 320, 390, [128, 0, 255, 255]);
+        sample('thick eccentric ellipse outer minor-axis boundary', 320, 420, [64, 0, 128, 128], 2);
+        sample('nonuniform transform preserves horizontal stroke extent', 489, 390, [0, 255, 255, 255]);
+        sample('nonuniform transform horizontal boundary', 490, 390, [0, 128, 128, 128], 2);
+        sample('nonuniform transform vertical boundary', 448, 404, [0, 128, 128, 128], 2);
+        sample('very eccentric ellipse has solid center', 112, 430, [255, 255, 0, 255]);
+        sample('very eccentric ellipse minor-axis boundary', 112, 438, [128, 128, 0, 128], 2);
+        sample('very eccentric ellipse major-axis boundary', 198, 430, [128, 128, 0, 128], 2);
+        sample('filled ellipse exact center', 448, 48, [0, 255, 128, 255]);
+        sample('filled ellipse center neighbor has no gradient pole', 449, 48, [0, 255, 128, 255]);
+        sample('filled ellipse diagonal center neighbor', 449, 49, [0, 255, 128, 255]);
+        sample('tiny local ellipse units preserve inner hole', 448, 150, [0, 0, 0, 0]);
+        sample('tiny local ellipse units preserve opaque stroke', 495, 150, [255, 128, 128, 255]);
+        sample('tiny local ellipse units preserve boundary coverage', 496, 150, [128, 64, 64, 128], 2);
+        sample('huge local ellipse units preserve inner hole', 448, 230, [0, 0, 0, 0]);
+        sample('huge local ellipse units preserve opaque stroke', 495, 230, [128, 255, 128, 255]);
+        sample('huge local ellipse units preserve boundary coverage', 496, 230, [64, 128, 64, 128], 2);
 
         // PNG is only a visual aid. Assertions use raw premultiplied readback bytes.
         const display = new Uint8ClampedArray(pixels.length);
@@ -261,7 +361,7 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
           },
           limits: { maxTextureDimension2D: device.limits.maxTextureDimension2D, maxStorageBufferBindingSize: device.limits.maxStorageBufferBindingSize },
           compilationMessages: messages, width, height, primitiveCount: commands.length, drawCalls: 2,
-          samples, imageDataUrl: canvas.toDataURL('image/png')
+          samples, ellipseDistances, imageDataUrl: canvas.toDataURL('image/png')
         };
       } finally {
         if (!retainedForPresentation) {
@@ -269,7 +369,22 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
           device.destroy();
         }
       }
-    }, code);
+    }, { shader: code, ellipses, distanceCases: ellipseReference.cases });
+    const distanceErrors = result.ellipseDistances.map((actual, index) => {
+      const c = ellipseReference.cases[index];
+      const error = Math.abs(actual - c.expected);
+      return { index, actual, error, projectedErrorPixels: error * (c.localToPixel ?? 1), ...c };
+    });
+    const distanceFailures = distanceErrors.filter(c => !Number.isFinite(c.actual) || c.error > c.tolerance);
+    result.ellipseDistanceValidation = {
+      seed: ellipseReference.seed, cases: distanceErrors.length,
+      maximumLocalAbsoluteError: Math.max(...distanceErrors.map(c => c.error)),
+      maximumProjectedErrorPixels: Math.max(...distanceErrors.map(c => c.projectedErrorPixels)),
+      maximumToleranceRatio: Math.max(...distanceErrors.map(c => c.error / c.tolerance)),
+      worstCase: distanceErrors.reduce((a, b) => a.projectedErrorPixels > b.projectedErrorPixels ? a : b),
+      failureCount: distanceFailures.length, failures: distanceFailures.slice(0, 20)
+    };
+    delete result.ellipseDistances;
     const imageDataUrl = result.imageDataUrl;
     delete result.imageDataUrl;
     await writeFile(evidence + '/pixels.png', Buffer.from(imageDataUrl.split(',')[1], 'base64'));
@@ -289,6 +404,8 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
       tolerance: Math.max(2, sample.tolerance)
     }));
     await writeFile(evidence + '/results.json', JSON.stringify(result, null, 2));
+    assert.equal(distanceErrors.length, ellipseReference.cases.length, 'Every seeded ellipse query must be executed by the production WGSL function.');
+    assert.equal(result.ellipseDistanceValidation.failureCount, 0, 'Production ellipse distance exceeds its geometric plus float32 error bound; inspect shader-evidence/results.json.');
     assert.equal(result.canvasPixelMismatches, 0, 'GPUCanvasContext texels must equal the offscreen production shader result.');
     assert.equal(result.deviceLoss, null, 'The real presented canvas must retain a valid WebGPU device.');
     assert.ok(result.presentedColorCount > 30, 'The browser must present shader colors, not a blank canvas.');
@@ -299,7 +416,7 @@ test('Report2D WGSL compiles and preserves geometry, clips, premultiplied blendi
       Math.abs(value - sample.expected[channel]) > sample.tolerance));
     assert.deepEqual(failed, [], 'Production WGSL pixel mismatches; inspect shader-evidence/results.json and pixels.png.');
     assert.equal(result.compilationMessages.filter(message => message.type === 'error').length, 0);
-    assert.equal(result.primitiveCount, 15);
+    assert.equal(result.primitiveCount, 25);
     assert.equal(result.drawCalls, 2);
     console.log('WGSL PIXELS: ' + result.samples.length + '/' + result.samples.length + ' passed; explicit native WebGPU pipeline, adapter=' + JSON.stringify(result.adapter));
   } catch (error) {

@@ -186,7 +186,33 @@ internal sealed class WebGpuReportCanvas : ReportCanvas
         {
             using var builder = new SKPathBuilder(); builder.AddOval(rect); using var path = builder.Detach(); DrawPath(path, paint); return;
         }
-        Add(Primitive(Map(rect), paint, 2));
+        var mapped = Map(rect);
+        var primitive = Primitive(mapped, paint, 2);
+        if (primitive.Shape.Y >= 0)
+        {
+            // Preserve the original stroke metric under nonuniform transforms.
+            // A transformed circle has unequal device-space stroke extensions;
+            // averaging ScaleX/ScaleY cannot reproduce that geometry.
+            float halfStroke = paint.StrokeWidth > 0 ? paint.StrokeWidth * .5f : primitive.Shape.Y;
+            float scaleX = paint.StrokeWidth > 0 ? state.ScaleX : 1;
+            float scaleY = paint.StrokeWidth > 0 ? state.ScaleY : 1;
+            float localPerDipX = 1 / scaleX, localPerDipY = 1 / scaleY;
+            if (!float.IsFinite(localPerDipX) || !float.IsFinite(localPerDipY) || localPerDipX <= 0 || localPerDipY <= 0)
+                throw new ArgumentException("Oval transforms must have finite positive float32 inverse scales.");
+            float fringe = paint.IsAntialias ? 1.5f / Math.Min(pixelsX, pixelsY) : 0;
+            float padX = halfStroke * scaleX + fringe, padY = halfStroke * scaleY + fringe;
+            primitive.Quad = new(mapped.Left - padX, mapped.Top - padY,
+                mapped.Width + 2 * padX, mapped.Height + 2 * padY);
+            primitive.Shape.Y = halfStroke;
+            // Half-angle bisection has nearest-point error <= R / 2^iterations.
+            // Target a 1/1024 physical-pixel bracket; the 24-iteration cap keeps
+            // the explicit R / 2^24 bound for larger radii, plus float32 rounding.
+            // Circles take the shader's constant-cost path.
+            double projectedRadius = Math.Max(mapped.Width * .5 * pixelsX, mapped.Height * .5 * pixelsY);
+            int iterations = Math.Clamp((int)Math.Ceiling(Math.Log2(Math.Max(1, projectedRadius))) + 10, 10, 24);
+            primitive.Data = new(localPerDipX, localPerDipY, iterations, 0);
+        }
+        Add(primitive);
     }
     public override void DrawLine(float x1, float y1, float x2, float y2, SKPaint paint)
     {
