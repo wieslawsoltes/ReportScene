@@ -23,7 +23,6 @@ struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) point: vec2f,
     @location(1) @interpolate(flat) index: u32,
-    @location(2) @interpolate(flat) line_rejection: vec4f, // normal.xy, bias, conservative distance limit (0 disables)
 };
 @vertex fn vertex_main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> VertexOutput {
     let corners = array<vec2f, 6>(
@@ -31,37 +30,10 @@ struct VertexOutput {
         vec2f(0, 1), vec2f(1, 0), vec2f(1, 1));
     let p = primitives[instance];
     let point = p.quad.xy + corners[vertex] * p.quad.zw;
-    var line_rejection = vec4f(0);
-    if (u32(p.shape.x + 0.5) == 3u) {
-        let delta = p.data.zw - p.data.xy;
-        let line_length = length(delta);
-        // Distant endpoints and degenerate lines retain the complete original
-        // distance path. This also bounds cancellation in the rejection plane.
-        let coordinate_limit = max(frame.size.x, frame.size.y) * 4;
-        if (line_length >= 0.0001 && line_length < 3.0e38 && line_length <= coordinate_limit
-            && all(abs(p.data) <= vec4f(coordinate_limit))) {
-            let tangent = delta / line_length;
-            // Segment fields are 1-Lipschitz. Include the coverage derivative
-            // floor and an additive 128*f32-epsilon coordinate margin. The
-            // inner 2r output band and outer 4r execution band preserve every
-            // derivative neighbor of any unmasked sample, including rounding.
-            let guard = max(1 / min(frame.pixels_per_dip.x, frame.pixels_per_dip.y), 0.0001)
-                + coordinate_limit * 0.0000152587890625;
-            let limit = max(p.shape.y, 0.0001) + 4 * guard;
-            let projected_length = dot(p.quad.zw, abs(tangent));
-            // Enable only when the conservative strip can avoid distance work;
-            // short, thick, axial and mostly clipped lines need no extra test.
-            if (2 * limit * projected_length < p.quad.z * p.quad.w) {
-                let normal = vec2f(-tangent.y, tangent.x);
-                line_rejection = vec4f(normal, -dot(p.data.xy, normal), limit);
-            }
-        }
-    }
     var output: VertexOutput;
     output.position = vec4f(point.x / frame.size.x * 2 - 1, 1 - point.y / frame.size.y * 2, 0, 1);
     output.point = point;
     output.index = instance;
-    output.line_rejection = line_rejection;
     return output;
 }
 fn box_distance(p: vec2f, half_size: vec2f) -> f32 {
@@ -152,20 +124,8 @@ fn segment_distance(point: vec2f, a: vec2f, b: vec2f, half_width: f32, cap: f32)
     return box_distance(local, vec2f(len * 0.5 + extension, half_width));
 }
 @fragment fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
-    let point = input.point;
-    // Keep the original quad and point interpolation bit-for-bit. Discard only
-    // guaranteed transparent portions of large diagonal-line bounds, before
-    // loading the primitive or evaluating distance/blending. Neighboring lanes of
-    // any potentially covered fragment retain the unmodified distance path.
-    if (input.line_rejection.w > 0
-        && abs(dot(point, input.line_rejection.xy) + input.line_rejection.z) > input.line_rejection.w) {
-        // Discard only demotes to a helper invocation; explicitly return to
-        // avoid continuing through storage reads and the distance calculation.
-        // https://www.w3.org/TR/WGSL/#discard-statement
-        discard;
-        return vec4f(0);
-    }
     let p = primitives[input.index];
+    let point = input.point;
     // Exact per-primitive clips preserve painter order without scissor state churn.
     if (point.x < p.clip.x || point.y < p.clip.y || point.x >= p.clip.z || point.y >= p.clip.w) { discard; }
     let center = p.rect.xy + p.rect.zw * 0.5;
@@ -194,17 +154,7 @@ fn segment_distance(point: vec2f, a: vec2f, b: vec2f, half_width: f32, cap: f32)
         }
         return color * ellipse_coverage(distance, p.shape.z);
     } else if (kind == 3u) {
-        let half_width = max(p.shape.y, 0.0001);
-        distance = segment_distance(point, p.data.xy, p.data.zw, half_width, p.shape.w);
-        let alpha = coverage(distance, p.shape.z);
-        // Returned lanes can perturb derivatives at the outer execution edge.
-        // Evaluate coverage first, retaining helpers throughout the guard band,
-        // then suppress its provably transparent output. Unmasked samples and
-        // all their neighbors execute the original distance and derivative path.
-        let inner_limit = half_width + (input.line_rejection.w - half_width) * 0.5;
-        if (input.line_rejection.w > 0
-            && abs(dot(point, input.line_rejection.xy) + input.line_rejection.z) > inner_limit) { discard; }
-        return color * alpha;
+        distance = segment_distance(point, p.data.xy, p.data.zw, max(p.shape.y, 0.0001), p.shape.w);
     } else if (kind == 4u) {
         if (p.extra.z > 0.5) {
             // Tiled image quads share one outer coverage boundary. Internal

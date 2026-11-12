@@ -1,0 +1,1196 @@
+{
+  "schema": 1,
+  "status": "rejected-performance-regression",
+  "candidateRevision": "539a4d4b3701bc7c78a2c7fbe7d1600b2bd41128",
+  "baselineRevision": "22939aadd71c26917ce9fb7911be5467dcc76eaf",
+  "candidateSourceTree": "3e13969277d76d31c50e610fde43a6a3efa491a0",
+  "testedMergeCommit": "b544912e877909640ebc117c0189767c8d93cc86",
+  "runId": 43253010999,
+  "artifactId": 13961256178,
+  "artifactSha256": "5d28086914ef5595263a49d63cfb8fd2171e83963ca5fab14495eee64e1e9733",
+  "scope": "Same-device paired software SwiftShader GPU render-pass timestamps. Exact output passed, but the guarded-return candidate regressed the targeted line workload and controls. Production restores the baseline shader; these results are not retained-implementation speedups.",
+  "rawFiles": {
+    "comparison-main/results.json": {
+      "bytes": 430323,
+      "sha256": "bdc487c9e503df95a45d992712ded9a5eb59c06f59d370751551f3a7804e8c25"
+    },
+    "comparison-main/samples.csv": {
+      "bytes": 50749,
+      "sha256": "53875c7b650ec791e669e69afb02fb550a96118ff629aaf30c6c522d2ec486fb"
+    },
+    "comparison-ellipses/results.json": {
+      "bytes": 97588,
+      "sha256": "251ccf4e7682d9ec9f4193fcd587512ac7fc22bbb77bba0c7d5d2b565817df27"
+    },
+    "comparison-ellipses/samples.csv": {
+      "bytes": 12204,
+      "sha256": "d7d46b087d852733ea56dce6e45ce911ab0962899e8b0571e85921fc134c8db1"
+    }
+  },
+  "workloads": [
+    {
+      "name": "shapes",
+      "instances": 64,
+      "adapter": {
+        "vendor": "google",
+        "architecture": "swiftshader",
+        "device": "",
+        "description": "",
+        "isFallbackAdapter": true
+      },
+      "host": {
+        "platform": "linux",
+        "release": "7.0.0-1019-azure",
+        "architecture": "x64",
+        "logicalCpus": 4,
+        "cpuModel": "AMD EPYC 9V45 96-Core Processor",
+        "node": "v22.23.4"
+      },
+      "source": {
+        "commit": "b544912e877909640ebc117c0189767c8d93cc86",
+        "dirty": false,
+        "shaderPath": "src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl",
+        "shaderSha256": "76c32c2628cf97c1b78a80827c7ab721cd86a9b7ddcdf9ee46fbaa80218c77a7",
+        "baselineShader": {
+          "path": "/home/runner/work/ReportScene/ReportScene/artifacts/benchmark-baselines/Report2D.22939aa.wgsl",
+          "sha256": "c25f1586df0bc4c25fbfb2f3f59e1bacb4ff3074af72e8f53c6f8aa214de7fa8"
+        },
+        "harnessSha256": {
+          "webgpu-benchmark.mjs": "f16374158bf387c66c7a513cbe663233fe2375429a7b4a4e82c74935cb64d3f0",
+          "webgpu-benchmark-page.mjs": "bdf3be9da5457c77b2dd32ce5a3efb8fc7c146070469cfe52776a2a3b86ec969",
+          "webgpu-benchmark-workloads.mjs": "9e79ccb7f9b22d69dc47f3fe5220b18a857c794f37bbba377106b07af52cff89",
+          "ellipse-reference.mjs": "107818af08eeb94225f599fb0a3be13f6fc4779bfb73a6f193b379bca1dfc14a"
+        }
+      },
+      "pooledGpuRenderPassMs": {
+        "baseline": {
+          "count": 48,
+          "min": 3.706421,
+          "max": 5.291572,
+          "mean": 4.0983508125,
+          "p50": 4.058572,
+          "p95": 5.203801
+        },
+        "candidate": {
+          "count": 48,
+          "min": 4.67214,
+          "max": 6.655166,
+          "mean": 5.1338051458333345,
+          "p50": 5.081338,
+          "p95": 6.482185
+        },
+        "baselineOverCandidateP50": 0.7987211242393244,
+        "baselineOverCandidateP95": 0.802785017706221
+      },
+      "perRepeatGpuRenderPassMs": [
+        {
+          "repeat": 0,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 4.094507,
+              "max": 5.291572,
+              "mean": 4.544812416666667,
+              "p50": 4.301346,
+              "p95": 5.291572
+            },
+            "candidate": {
+              "count": 12,
+              "min": 5.096081,
+              "max": 5.275058,
+              "mean": 5.162782166666666,
+              "p50": 5.145415,
+              "p95": 5.275058
+            },
+            "baselineOverCandidateP50": 0.8359570608007323,
+            "baselineOverCandidateP95": 1.0031305816921825
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 1,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 3.895128,
+              "max": 4.081499,
+              "mean": 3.9385936666666663,
+              "p50": 3.922148,
+              "p95": 4.081499
+            },
+            "candidate": {
+              "count": 12,
+              "min": 4.919286,
+              "max": 5.051776,
+              "mean": 4.973017333333334,
+              "p50": 4.960237,
+              "p95": 5.051776
+            },
+            "baselineOverCandidateP50": 0.7907178628763101,
+            "baselineOverCandidateP95": 0.8079334871538246
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 2,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 4.058572,
+              "max": 4.320278,
+              "mean": 4.163829,
+              "p50": 4.158954,
+              "p95": 4.320278
+            },
+            "candidate": {
+              "count": 12,
+              "min": 5.063331,
+              "max": 6.655166,
+              "mean": 5.419063416666666,
+              "p50": 5.15543,
+              "p95": 6.655166
+            },
+            "baselineOverCandidateP50": 0.806713310043973,
+            "baselineOverCandidateP95": 0.6491615686220298
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 3,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 3.706421,
+              "max": 3.773081,
+              "mean": 3.7461681666666666,
+              "p50": 3.749606,
+              "p95": 3.773081
+            },
+            "candidate": {
+              "count": 12,
+              "min": 4.67214,
+              "max": 6.538299,
+              "mean": 4.980357666666667,
+              "p50": 4.737108,
+              "p95": 6.538299
+            },
+            "baselineOverCandidateP50": 0.7915390571631468,
+            "baselineOverCandidateP95": 0.577073792434393
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "glyphs",
+      "instances": 64,
+      "adapter": {
+        "vendor": "google",
+        "architecture": "swiftshader",
+        "device": "",
+        "description": "",
+        "isFallbackAdapter": true
+      },
+      "host": {
+        "platform": "linux",
+        "release": "7.0.0-1019-azure",
+        "architecture": "x64",
+        "logicalCpus": 4,
+        "cpuModel": "AMD EPYC 9V45 96-Core Processor",
+        "node": "v22.23.4"
+      },
+      "source": {
+        "commit": "b544912e877909640ebc117c0189767c8d93cc86",
+        "dirty": false,
+        "shaderPath": "src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl",
+        "shaderSha256": "76c32c2628cf97c1b78a80827c7ab721cd86a9b7ddcdf9ee46fbaa80218c77a7",
+        "baselineShader": {
+          "path": "/home/runner/work/ReportScene/ReportScene/artifacts/benchmark-baselines/Report2D.22939aa.wgsl",
+          "sha256": "c25f1586df0bc4c25fbfb2f3f59e1bacb4ff3074af72e8f53c6f8aa214de7fa8"
+        },
+        "harnessSha256": {
+          "webgpu-benchmark.mjs": "f16374158bf387c66c7a513cbe663233fe2375429a7b4a4e82c74935cb64d3f0",
+          "webgpu-benchmark-page.mjs": "bdf3be9da5457c77b2dd32ce5a3efb8fc7c146070469cfe52776a2a3b86ec969",
+          "webgpu-benchmark-workloads.mjs": "9e79ccb7f9b22d69dc47f3fe5220b18a857c794f37bbba377106b07af52cff89",
+          "ellipse-reference.mjs": "107818af08eeb94225f599fb0a3be13f6fc4779bfb73a6f193b379bca1dfc14a"
+        }
+      },
+      "pooledGpuRenderPassMs": {
+        "baseline": {
+          "count": 48,
+          "min": 1.864328,
+          "max": 3.67311,
+          "mean": 2.093059166666666,
+          "p50": 2.010127,
+          "p95": 2.596174
+        },
+        "candidate": {
+          "count": 48,
+          "min": 1.876145,
+          "max": 3.998624,
+          "mean": 2.1727585625,
+          "p50": 2.059415,
+          "p95": 2.554987
+        },
+        "baselineOverCandidateP50": 0.9760669898976166,
+        "baselineOverCandidateP95": 1.0161202385765562
+      },
+      "perRepeatGpuRenderPassMs": [
+        {
+          "repeat": 0,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 2.007144,
+              "max": 2.314933,
+              "mean": 2.1054577500000002,
+              "p50": 2.058971,
+              "p95": 2.314933
+            },
+            "candidate": {
+              "count": 12,
+              "min": 2.017356,
+              "max": 2.195048,
+              "mean": 2.07783775,
+              "p50": 2.059415,
+              "p95": 2.195048
+            },
+            "baselineOverCandidateP50": 0.9997844047945655,
+            "baselineOverCandidateP95": 1.0546161177340996
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 1,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 1.932872,
+              "max": 2.596174,
+              "mean": 2.1485450833333335,
+              "p50": 1.978761,
+              "p95": 2.596174
+            },
+            "candidate": {
+              "count": 12,
+              "min": 2.46806,
+              "max": 3.998624,
+              "mean": 2.6365234166666665,
+              "p50": 2.491786,
+              "p95": 3.998624
+            },
+            "baselineOverCandidateP50": 0.7941135394452012,
+            "baselineOverCandidateP95": 0.6492668477956417
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 2,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 1.983808,
+              "max": 3.67311,
+              "mean": 2.2178779166666667,
+              "p50": 2.030008,
+              "p95": 3.67311
+            },
+            "candidate": {
+              "count": 12,
+              "min": 2.002486,
+              "max": 2.194306,
+              "mean": 2.06325825,
+              "p50": 2.050488,
+              "p95": 2.194306
+            },
+            "baselineOverCandidateP50": 0.9900121336969541,
+            "baselineOverCandidateP95": 1.6739278842604448
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 3,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 1.864328,
+              "max": 1.970017,
+              "mean": 1.9003559166666666,
+              "p50": 1.887121,
+              "p95": 1.970017
+            },
+            "candidate": {
+              "count": 12,
+              "min": 1.876145,
+              "max": 1.955215,
+              "mean": 1.9134148333333332,
+              "p50": 1.908344,
+              "p95": 1.955215
+            },
+            "baselineOverCandidateP50": 0.9888788394545218,
+            "baselineOverCandidateP95": 1.007570522934818
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "images",
+      "instances": 64,
+      "adapter": {
+        "vendor": "google",
+        "architecture": "swiftshader",
+        "device": "",
+        "description": "",
+        "isFallbackAdapter": true
+      },
+      "host": {
+        "platform": "linux",
+        "release": "7.0.0-1019-azure",
+        "architecture": "x64",
+        "logicalCpus": 4,
+        "cpuModel": "AMD EPYC 9V45 96-Core Processor",
+        "node": "v22.23.4"
+      },
+      "source": {
+        "commit": "b544912e877909640ebc117c0189767c8d93cc86",
+        "dirty": false,
+        "shaderPath": "src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl",
+        "shaderSha256": "76c32c2628cf97c1b78a80827c7ab721cd86a9b7ddcdf9ee46fbaa80218c77a7",
+        "baselineShader": {
+          "path": "/home/runner/work/ReportScene/ReportScene/artifacts/benchmark-baselines/Report2D.22939aa.wgsl",
+          "sha256": "c25f1586df0bc4c25fbfb2f3f59e1bacb4ff3074af72e8f53c6f8aa214de7fa8"
+        },
+        "harnessSha256": {
+          "webgpu-benchmark.mjs": "f16374158bf387c66c7a513cbe663233fe2375429a7b4a4e82c74935cb64d3f0",
+          "webgpu-benchmark-page.mjs": "bdf3be9da5457c77b2dd32ce5a3efb8fc7c146070469cfe52776a2a3b86ec969",
+          "webgpu-benchmark-workloads.mjs": "9e79ccb7f9b22d69dc47f3fe5220b18a857c794f37bbba377106b07af52cff89",
+          "ellipse-reference.mjs": "107818af08eeb94225f599fb0a3be13f6fc4779bfb73a6f193b379bca1dfc14a"
+        }
+      },
+      "pooledGpuRenderPassMs": {
+        "baseline": {
+          "count": 48,
+          "min": 27.276498,
+          "max": 33.021176,
+          "mean": 28.306428895833324,
+          "p50": 28.02408,
+          "p95": 29.483081
+        },
+        "candidate": {
+          "count": 48,
+          "min": 31.840795,
+          "max": 38.278622,
+          "mean": 33.49784483333333,
+          "p50": 33.250755,
+          "p95": 35.22318
+        },
+        "baselineOverCandidateP50": 0.8428103361863514,
+        "baselineOverCandidateP95": 0.8370363209681806
+      },
+      "perRepeatGpuRenderPassMs": [
+        {
+          "repeat": 0,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 28.374834,
+              "max": 33.021176,
+              "mean": 29.410737666666666,
+              "p50": 29.059464,
+              "p95": 33.021176
+            },
+            "candidate": {
+              "count": 12,
+              "min": 33.704003,
+              "max": 35.22318,
+              "mean": 34.483075666666664,
+              "p50": 34.282362,
+              "p95": 35.22318
+            },
+            "baselineOverCandidateP50": 0.8476505790353651,
+            "baselineOverCandidateP95": 0.9374842362330714
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 1,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 27.838696,
+              "max": 28.242411,
+              "mean": 28.060993666666672,
+              "p50": 28.091092,
+              "p95": 28.242411
+            },
+            "candidate": {
+              "count": 12,
+              "min": 33.590655,
+              "max": 38.278622,
+              "mean": 34.583110749999996,
+              "p50": 33.992613,
+              "p95": 38.278622
+            },
+            "baselineOverCandidateP50": 0.8263881332100007,
+            "baselineOverCandidateP95": 0.7378115910233133
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 2,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 27.612586,
+              "max": 28.936136,
+              "mean": 27.93531833333333,
+              "p50": 27.768671,
+              "p95": 28.936136
+            },
+            "candidate": {
+              "count": 12,
+              "min": 32.310926,
+              "max": 32.981235,
+              "mean": 32.52127433333334,
+              "p50": 32.46511,
+              "p95": 32.981235
+            },
+            "baselineOverCandidateP50": 0.8553388853449133,
+            "baselineOverCandidateP95": 0.8773515000272125
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 3,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 27.276498,
+              "max": 29.483081,
+              "mean": 27.818665916666664,
+              "p50": 27.710994,
+              "p95": 29.483081
+            },
+            "candidate": {
+              "count": 12,
+              "min": 31.840795,
+              "max": 33.250755,
+              "mean": 32.403918583333336,
+              "p50": 32.263993,
+              "p95": 33.250755
+            },
+            "baselineOverCandidateP50": 0.8588829659118759,
+            "baselineOverCandidateP95": 0.8866890691654972
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "mixed",
+      "instances": 64,
+      "adapter": {
+        "vendor": "google",
+        "architecture": "swiftshader",
+        "device": "",
+        "description": "",
+        "isFallbackAdapter": true
+      },
+      "host": {
+        "platform": "linux",
+        "release": "7.0.0-1019-azure",
+        "architecture": "x64",
+        "logicalCpus": 4,
+        "cpuModel": "AMD EPYC 9V45 96-Core Processor",
+        "node": "v22.23.4"
+      },
+      "source": {
+        "commit": "b544912e877909640ebc117c0189767c8d93cc86",
+        "dirty": false,
+        "shaderPath": "src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl",
+        "shaderSha256": "76c32c2628cf97c1b78a80827c7ab721cd86a9b7ddcdf9ee46fbaa80218c77a7",
+        "baselineShader": {
+          "path": "/home/runner/work/ReportScene/ReportScene/artifacts/benchmark-baselines/Report2D.22939aa.wgsl",
+          "sha256": "c25f1586df0bc4c25fbfb2f3f59e1bacb4ff3074af72e8f53c6f8aa214de7fa8"
+        },
+        "harnessSha256": {
+          "webgpu-benchmark.mjs": "f16374158bf387c66c7a513cbe663233fe2375429a7b4a4e82c74935cb64d3f0",
+          "webgpu-benchmark-page.mjs": "bdf3be9da5457c77b2dd32ce5a3efb8fc7c146070469cfe52776a2a3b86ec969",
+          "webgpu-benchmark-workloads.mjs": "9e79ccb7f9b22d69dc47f3fe5220b18a857c794f37bbba377106b07af52cff89",
+          "ellipse-reference.mjs": "107818af08eeb94225f599fb0a3be13f6fc4779bfb73a6f193b379bca1dfc14a"
+        }
+      },
+      "pooledGpuRenderPassMs": {
+        "baseline": {
+          "count": 48,
+          "min": 3.992024,
+          "max": 5.663107,
+          "mean": 4.302490458333334,
+          "p50": 4.233529,
+          "p95": 5.086166
+        },
+        "candidate": {
+          "count": 48,
+          "min": 4.435083,
+          "max": 6.077236,
+          "mean": 4.811927104166666,
+          "p50": 4.760373,
+          "p95": 5.39238
+        },
+        "baselineOverCandidateP50": 0.8893271598675144,
+        "baselineOverCandidateP95": 0.9432135717438311
+      },
+      "perRepeatGpuRenderPassMs": [
+        {
+          "repeat": 0,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 4.17667,
+              "max": 5.663107,
+              "mean": 4.579880833333333,
+              "p50": 4.312191,
+              "p95": 5.663107
+            },
+            "candidate": {
+              "count": 12,
+              "min": 4.61291,
+              "max": 5.639852,
+              "mean": 4.896411166666666,
+              "p50": 4.811056,
+              "p95": 5.639852
+            },
+            "baselineOverCandidateP50": 0.8963086274614139,
+            "baselineOverCandidateP95": 1.0041233351513479
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 1,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 4.058605,
+              "max": 4.25432,
+              "mean": 4.164636083333333,
+              "p50": 4.140769,
+              "p95": 4.25432
+            },
+            "candidate": {
+              "count": 12,
+              "min": 4.53825,
+              "max": 6.077236,
+              "mean": 4.8829701666666665,
+              "p50": 4.676169,
+              "p95": 6.077236
+            },
+            "baselineOverCandidateP50": 0.8855045658101749,
+            "baselineOverCandidateP95": 0.7000419269549512
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 2,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 3.992024,
+              "max": 4.233529,
+              "mean": 4.072692333333333,
+              "p50": 4.038303,
+              "p95": 4.233529
+            },
+            "candidate": {
+              "count": 12,
+              "min": 4.435083,
+              "max": 5.161707,
+              "mean": 4.64723975,
+              "p50": 4.540227,
+              "p95": 5.161707
+            },
+            "baselineOverCandidateP50": 0.8894495803844169,
+            "baselineOverCandidateP95": 0.8201800295909861
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 3,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 4.280869,
+              "max": 4.508873,
+              "mean": 4.392752583333334,
+              "p50": 4.337294,
+              "p95": 4.508873
+            },
+            "candidate": {
+              "count": 12,
+              "min": 4.6988,
+              "max": 5.047457,
+              "mean": 4.821087333333334,
+              "p50": 4.77151,
+              "p95": 5.047457
+            },
+            "baselineOverCandidateP50": 0.9089981997313219,
+            "baselineOverCandidateP95": 0.8932959706244156
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "diagonal-lines",
+      "instances": 64,
+      "adapter": {
+        "vendor": "google",
+        "architecture": "swiftshader",
+        "device": "",
+        "description": "",
+        "isFallbackAdapter": true
+      },
+      "host": {
+        "platform": "linux",
+        "release": "7.0.0-1019-azure",
+        "architecture": "x64",
+        "logicalCpus": 4,
+        "cpuModel": "AMD EPYC 9V45 96-Core Processor",
+        "node": "v22.23.4"
+      },
+      "source": {
+        "commit": "b544912e877909640ebc117c0189767c8d93cc86",
+        "dirty": false,
+        "shaderPath": "src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl",
+        "shaderSha256": "76c32c2628cf97c1b78a80827c7ab721cd86a9b7ddcdf9ee46fbaa80218c77a7",
+        "baselineShader": {
+          "path": "/home/runner/work/ReportScene/ReportScene/artifacts/benchmark-baselines/Report2D.22939aa.wgsl",
+          "sha256": "c25f1586df0bc4c25fbfb2f3f59e1bacb4ff3074af72e8f53c6f8aa214de7fa8"
+        },
+        "harnessSha256": {
+          "webgpu-benchmark.mjs": "f16374158bf387c66c7a513cbe663233fe2375429a7b4a4e82c74935cb64d3f0",
+          "webgpu-benchmark-page.mjs": "bdf3be9da5457c77b2dd32ce5a3efb8fc7c146070469cfe52776a2a3b86ec969",
+          "webgpu-benchmark-workloads.mjs": "9e79ccb7f9b22d69dc47f3fe5220b18a857c794f37bbba377106b07af52cff89",
+          "ellipse-reference.mjs": "107818af08eeb94225f599fb0a3be13f6fc4779bfb73a6f193b379bca1dfc14a"
+        }
+      },
+      "pooledGpuRenderPassMs": {
+        "baseline": {
+          "count": 48,
+          "min": 778.338231,
+          "max": 1096.512465,
+          "mean": 830.7917517083332,
+          "p50": 807.815692,
+          "p95": 995.846349
+        },
+        "candidate": {
+          "count": 48,
+          "min": 1058.999408,
+          "max": 1155.233035,
+          "mean": 1109.8340191875,
+          "p50": 1113.362189,
+          "p95": 1136.099687
+        },
+        "baselineOverCandidateP50": 0.7255641515233818,
+        "baselineOverCandidateP95": 0.8765483877824536
+      },
+      "perRepeatGpuRenderPassMs": [
+        {
+          "repeat": 0,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 785.590935,
+              "max": 1096.512465,
+              "mean": 914.4584844166667,
+              "p50": 883.003184,
+              "p95": 1096.512465
+            },
+            "candidate": {
+              "count": 12,
+              "min": 1111.390491,
+              "max": 1136.099687,
+              "mean": 1122.3055021666667,
+              "p50": 1119.490875,
+              "p95": 1136.099687
+            },
+            "baselineOverCandidateP50": 0.7887542486668326,
+            "baselineOverCandidateP95": 0.9651551510373756
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 1,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 795.329021,
+              "max": 825.294685,
+              "mean": 802.89311275,
+              "p50": 800.734141,
+              "p95": 825.294685
+            },
+            "candidate": {
+              "count": 12,
+              "min": 1102.693445,
+              "max": 1155.233035,
+              "mean": 1124.2447066666668,
+              "p50": 1122.036645,
+              "p95": 1155.233035
+            },
+            "baselineOverCandidateP50": 0.7136434844336124,
+            "baselineOverCandidateP95": 0.7143967147719248
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 2,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 810.35242,
+              "max": 837.49761,
+              "mean": 818.3906965833335,
+              "p50": 814.10767,
+              "p95": 837.49761
+            },
+            "candidate": {
+              "count": 12,
+              "min": 1073.807884,
+              "max": 1121.034222,
+              "mean": 1101.2013583333335,
+              "p50": 1098.590842,
+              "p95": 1121.034222
+            },
+            "baselineOverCandidateP50": 0.7410472023578001,
+            "baselineOverCandidateP95": 0.7470758640229986
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 3,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 778.338231,
+              "max": 818.868191,
+              "mean": 787.4247130833332,
+              "p50": 783.268152,
+              "p95": 818.868191
+            },
+            "candidate": {
+              "count": 12,
+              "min": 1058.999408,
+              "max": 1116.087282,
+              "mean": 1091.5845095833333,
+              "p50": 1091.686128,
+              "p95": 1116.087282
+            },
+            "baselineOverCandidateP50": 0.7174847530901299,
+            "baselineOverCandidateP95": 0.733695477232398
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "ellipse-strokes",
+      "instances": 16,
+      "adapter": {
+        "vendor": "google",
+        "architecture": "swiftshader",
+        "device": "",
+        "description": "",
+        "isFallbackAdapter": true
+      },
+      "host": {
+        "platform": "linux",
+        "release": "7.0.0-1019-azure",
+        "architecture": "x64",
+        "logicalCpus": 4,
+        "cpuModel": "AMD EPYC 9V45 96-Core Processor",
+        "node": "v22.23.4"
+      },
+      "source": {
+        "commit": "b544912e877909640ebc117c0189767c8d93cc86",
+        "dirty": false,
+        "shaderPath": "src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl",
+        "shaderSha256": "76c32c2628cf97c1b78a80827c7ab721cd86a9b7ddcdf9ee46fbaa80218c77a7",
+        "baselineShader": {
+          "path": "/home/runner/work/ReportScene/ReportScene/artifacts/benchmark-baselines/Report2D.22939aa.wgsl",
+          "sha256": "c25f1586df0bc4c25fbfb2f3f59e1bacb4ff3074af72e8f53c6f8aa214de7fa8"
+        },
+        "harnessSha256": {
+          "webgpu-benchmark.mjs": "f16374158bf387c66c7a513cbe663233fe2375429a7b4a4e82c74935cb64d3f0",
+          "webgpu-benchmark-page.mjs": "bdf3be9da5457c77b2dd32ce5a3efb8fc7c146070469cfe52776a2a3b86ec969",
+          "webgpu-benchmark-workloads.mjs": "9e79ccb7f9b22d69dc47f3fe5220b18a857c794f37bbba377106b07af52cff89",
+          "ellipse-reference.mjs": "107818af08eeb94225f599fb0a3be13f6fc4779bfb73a6f193b379bca1dfc14a"
+        }
+      },
+      "pooledGpuRenderPassMs": {
+        "baseline": {
+          "count": 48,
+          "min": 133.150821,
+          "max": 141.466465,
+          "mean": 136.19783014583336,
+          "p50": 135.979723,
+          "p95": 139.549748
+        },
+        "candidate": {
+          "count": 48,
+          "min": 141.111278,
+          "max": 160.776818,
+          "mean": 145.53752045833332,
+          "p50": 144.832536,
+          "p95": 149.387289
+        },
+        "baselineOverCandidateP50": 0.9388755231075979,
+        "baselineOverCandidateP95": 0.9341474025946075
+      },
+      "perRepeatGpuRenderPassMs": [
+        {
+          "repeat": 0,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 135.958305,
+              "max": 138.525805,
+              "mean": 137.05172741666667,
+              "p50": 136.833088,
+              "p95": 138.525805
+            },
+            "candidate": {
+              "count": 12,
+              "min": 142.85033,
+              "max": 149.047705,
+              "mean": 146.21360708333333,
+              "p50": 146.635395,
+              "p95": 149.047705
+            },
+            "baselineOverCandidateP50": 0.9331518355442082,
+            "baselineOverCandidateP95": 0.929405823457664
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 1,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 133.375035,
+              "max": 137.635534,
+              "mean": 135.58264816666667,
+              "p50": 135.528054,
+              "p95": 137.635534
+            },
+            "candidate": {
+              "count": 12,
+              "min": 142.253268,
+              "max": 149.387289,
+              "mean": 145.17093741666665,
+              "p50": 144.277827,
+              "p95": 149.387289
+            },
+            "baselineOverCandidateP50": 0.9393546937742554,
+            "baselineOverCandidateP95": 0.921333635018974
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 2,
+          "variantOrder": [
+            "baseline",
+            "candidate"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 133.150821,
+              "max": 137.280312,
+              "mean": 134.70954525,
+              "p50": 134.384686,
+              "p95": 137.280312
+            },
+            "candidate": {
+              "count": 12,
+              "min": 141.111278,
+              "max": 148.341348,
+              "mean": 144.70010158333332,
+              "p50": 144.146546,
+              "p95": 148.341348
+            },
+            "baselineOverCandidateP50": 0.9322782246894767,
+            "baselineOverCandidateP95": 0.9254352468200572
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        },
+        {
+          "repeat": 3,
+          "variantOrder": [
+            "candidate",
+            "baseline"
+          ],
+          "comparison": {
+            "baseline": {
+              "count": 12,
+              "min": 134.564449,
+              "max": 141.466465,
+              "mean": 137.44739975000002,
+              "p50": 136.026724,
+              "p95": 141.466465
+            },
+            "candidate": {
+              "count": 12,
+              "min": 141.68437,
+              "max": 160.776818,
+              "mean": 146.06543575,
+              "p50": 142.778027,
+              "p95": 160.776818
+            },
+            "baselineOverCandidateP50": 0.9527146918762226,
+            "baselineOverCandidateP95": 0.8798934246851434
+          },
+          "pixelComparison": {
+            "bytesCompared": 1228800,
+            "differingBytes": 0,
+            "differingPixels": 0,
+            "maximumChannelDifference": 0,
+            "examples": []
+          }
+        }
+      ]
+    }
+  ],
+  "pairedTrials": 24,
+  "rawArchive": {
+    "file": "webgpu-2026-11-12-guarded-return.zip",
+    "bytes": 56940,
+    "sha256": "ab537e51ad627ec3b1637bbb1737d50a7e188d1e63bf188dc69c33bfe4c815f2"
+  }
+}

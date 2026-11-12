@@ -1,6 +1,10 @@
 # Rendering performance evidence
 
-This update reduces repeated text work in the production renderer and avoids expensive line-distance work for fragments that cannot contribute coverage. The recorded CPU comparisons use the real baseline assemblies from `22939aadd71c26917ce9fb7911be5467dcc76eaf` and candidate assemblies from `f12ce32082705fe1eb94c235a4613147b99a1e9d`. The candidate CPU implementation was introduced in `de98c2b`; the later candidate revision also contains its native WebGPU integration and the conservative line shader.
+This update reduces repeated text work and native allocation in the production renderer. Warm native drawing, report text layout and width-probe time medians fell by 35.3%, 19.2% and 27.7% in the recorded public-API comparison. Actual Uno scrolling verifies zero warm shaping, bounds queries, font creation, glyph rasterization and texture upload. These measurements have the specific scopes and sample limits described below.
+
+The attempted line shader optimizations are **not retained in production**. Exact-output tests rejected two geometric/execution variants; the final guarded-return variant preserved pixels but regressed paired GPU timings, including the targeted line workload by 37.8%. Production restores the exact WGSL from `22939aadd71c26917ce9fb7911be5467dcc76eaf`, SHA-256 `c25f1586df0bc4c25fbfb2f3f59e1bacb4ff3074af72e8f53c6f8aa214de7fa8`. The benchmark infrastructure and all adverse evidence remain available.
+
+The recorded CPU comparisons use the real baseline assemblies from `22939aadd71c26917ce9fb7911be5467dcc76eaf` and candidate assemblies from `f12ce32082705fe1eb94c235a4613147b99a1e9d`. The candidate CPU implementation was introduced in `de98c2b`; the later measured revision also contains its native WebGPU text integration. Subsequent shader experiments do not establish or invalidate those separate native CPU measurements.
 
 The measurements cover four separate parts of rendering:
 
@@ -38,13 +42,11 @@ A retained run must also fit the 4,096-character text-plus-family and 4,096-glyp
 
 The textured-primitive builder in [`WebGpuReportCanvas`](../src/ReportScene.Rendering.WebGpu/WebGpuReportCanvas.cs), introduced in `16112ea`, constructs the fixed GPU fields directly for glyphs, path masks and images. It removes the per-primitive native `SKPaint` allocation while preserving the original coordinate, color, clipping and antialiasing arithmetic. Primitive byte counts, the existing span-upload path, painter/batch order, the 128-byte ABI and device ownership retain their established behavior.
 
-### Reject transparent line fragments conservatively
+### Restore the measured shader baseline
 
-[`Report2D.wgsl`](../src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl) preserves the original axis-aligned quad vertices and interpolated point expression. For eligible thin diagonal lines, the vertex stage supplies a flat normal, plane bias and conservative distance limit. The fragment stage can exit outside that strip before evaluating the full capped-segment distance.
+[`Report2D.wgsl`](../src/ReportScene.Rendering.WebGpu/Shaders/Report2D.wgsl) is byte-for-byte identical to the accepted pre-experiment shader. The additional rejection varying, vertex calculations and fragment branches are removed. Original geometry, antialiasing, Euclidean ellipse strokes, clipping, cap semantics, premultiplied blending and texture gradients remain intact. This continuation makes no retained production-shader throughput improvement claim.
 
-The rejection scale is `r = max(1 / min(pixels_per_dip), 0.0001) + 2^-16 * M`, where `M = 4 * max(frame.size)` is also the existing bound on eligible endpoint coordinates and segment length. The first term covers one physical pixel and the coverage function's derivative floor; the second is a conservative float32 coordinate allowance. The outer strip extends to the half stroke `h` plus `4r`. Rejected lanes execute both `discard` and an explicit entry-point `return`: WGSL discard alone demotes an invocation to a helper without terminating its execution.
-
-Inside that strip, lines evaluate their original signed distance and coverage before discarding output beyond the inner limit `h + 2r`. That inner mask prevents indeterminate derivatives at the far return boundary from manufacturing coverage. Every potentially visible lane and all neighboring derivative lanes remain inside the outer strip. The CPU oracle checks all nine neighboring pixel centers of every inner-band survivor, without assuming a particular alignment of 2 × 2 derivative quads. Degenerate lines, distant endpoints and cases where the strip would not save work keep the original path. Caps, per-primitive clipping, the signed-distance function and premultiplied blending are unchanged. The optimization reduces work within the existing raster domain; it does not reduce the submitted quad area.
+The paired GPU runner and expanded line/ellipse workloads remain useful controls for future changes. The 51-command line gate compares production vertex geometry/interpolation with a frozen AABB vertex entry point at three pixel densities. Both entries use the production fragment implementation; this is a geometry comparison, not an independent cap-distance oracle. Fixed pixel expectations and the pinned full-WGSL A/B comparison provide separate shader-output checks. Optimization-only CPU support helpers and tests are removed from the active suite; their exact source remains in the rejected commits.
 
 ## Historical CPU comparison
 
@@ -122,14 +124,14 @@ Independent PNG decoding reproduced all recorded ink/background probe counts. Th
 
 ## Shader quality and paired timing protocol
 
-The conservative shader passed the independent GPU gate in [run 43243208525](https://github.com/wieslawsoltes/ReportScene/actions/runs/43243208525). Its retained `webgpu-shader-validation` artifact reports:
+The discard-only experiment passed the independent GPU gate in [run 43243208525](https://github.com/wieslawsoltes/ReportScene/actions/runs/43243208525), before its complete timing result rejected the performance hypothesis. Its retained `webgpu-shader-validation` artifact reports:
 
 - Zero differing RGBA bytes for 51 line cases across three full-image comparisons, including fractional/nonuniform pixel densities and nonzero `firstInstance`, against the unchanged distance path with early rejection disabled.
 - All existing 73 raw pixel assertions and 73 presented pixel assertions passing with their existing tolerances, plus zero full-canvas presentation mismatches.
 - All 4,104 independent ellipse-distance probes passing; maximum projected error was approximately 0.001534 physical pixels for that corpus.
 - No shader compilation messages and no device loss on the reported SwiftShader adapter.
 
-The earlier oriented-quad experiment was rejected after strict pixel equality failed. Its reduced geometric area is not an accepted performance result. The accepted shader retains the original vertex envelope and point interpolation; the [migration record](uno7-webgpu-migration.md) documents that change in direction.
+The earlier oriented-quad experiment was rejected after strict pixel equality failed. Its reduced geometric area is not an accepted performance result. The restored production shader retains the original vertex envelope and point interpolation; the [migration record](uno7-webgpu-migration.md) documents the experiment and restoration.
 
 The separate production A/B runner uses the exact baseline WGSL extracted from `22939aadd71c26917ce9fb7911be5467dcc76eaf`. Both pipelines share one private device, target, buffers, resident textures, sampler, ordered draw batches, upload mode and timestamp setting. Input and output bytes have SHA-256 fingerprints. Every completed pair must pass full-frame RGBA8 byte equality; a single changed byte fails the comparison. Baseline runs first on even repeats and candidate first on odd repeats; each variant receives its own warmup. Workload order rotates independently. The [benchmark guide](webgpu-benchmarks.md) documents the full runner interface and timing definitions.
 
@@ -140,7 +142,7 @@ The first combined 64-instance line/ellipse comparison reached its 300-second de
 | Main comparison | Shapes, glyphs, images, mixed content, diagonal lines | 64 | `comparison-main` |
 | Ellipse control | Thin eccentric ellipse strokes | 16 | `comparison-ellipses` |
 
-The general workloads check for regressions from the shader's additional flat varying and branch; the targeted diagonal workload checks the intended optimization. Each workload supplies 48 measured frames per variant. CPU preparation, submit-call time, queue-completion wall time and optional GPU-pass timestamps remain separate. GPU timestamps are never replaced with queue wall time, and zero/unavailable denominators produce no ratio. Software-adapter results remain specific to that adapter and fixture.
+The general workloads exposed regressions from the experiments' additional varying and control flow; the diagonal workload stresses the line-distance path. Each workload supplies 48 measured frames per variant. CPU preparation, submit-call time, queue-completion wall time and optional GPU-pass timestamps remain separate. GPU timestamps are never replaced with queue wall time, and zero/unavailable denominators produce no ratio. Software-adapter results remain specific to that adapter and fixture.
 
 If a later run fails or times out while the page remains responsive, `failure.json` now retains `progress.completedEvidence` with `complete: false`. It contains only completed raw trial records, input/output hashes and strict accepted-pair equality results. It stores no packed pixel arrays, pooled performance summaries or speedup ratios, and does not change the failed status. A complete successful report is still required for a completed A/B result. The evolving full results are retained under `webgpu-benchmark-smoke` in the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks).
 
@@ -165,7 +167,30 @@ The guard was active for all 64 targeted lines. Inspection of [WGSL discard sema
 
 Adding only `return vec4f(0)` after the far-line discard was rejected at `a6e966a86e6617e10dc85f874a45adf1c96927aa` in [run 43251078071](https://github.com/wieslawsoltes/ReportScene/actions/runs/43251078071). The exact line-image comparisons found 24, 756 and 532 differing bytes at pixel densities `(1, 1)`, `(1.25, 1.5)` and `(2.75, 0.75)`, respectively; maximum channel errors were 76, 65 and 76. There were no compilation messages or device loss, but quality failure stopped the benchmark. This revision supplies no accepted timing result.
 
-The outer guard preserved neighbors around genuinely covered pixels. It did not prevent surviving transparent lanes at the far rejection boundary from evaluating derivatives after another lane returned. Their indeterminate derivative values could create spurious coverage. The [unaltered shader result](performance/rendering-checkpoints-2026-11-12.zip) and [artifact provenance](performance/rendering-checkpoints-2026-11-12.json) retain this failure. The two-band correction described above retains helper work around every unmasked pixel and explicitly suppresses output in the outer transparent guard band after evaluating derivatives. Its exact GPU comparisons and complete paired timing run remain the acceptance gates; the numerical support proof alone is insufficient.
+The outer guard preserved neighbors around genuinely covered pixels. It did not prevent surviving transparent lanes at the far rejection boundary from evaluating derivatives after another lane returned. Their indeterminate derivative values could create spurious coverage. The [unaltered shader result](performance/rendering-checkpoints-2026-11-12.zip) and [artifact provenance](performance/rendering-checkpoints-2026-11-12.json) retain this failure.
+
+### Guarded return passed pixels but regressed performance
+
+The final experiment at `539a4d4b3701bc7c78a2c7fbe7d1600b2bd41128` used a two-band guard. Its support scale was `r = max(1 / min(pixels_per_dip), 0.0001) + 2^-16 * M`, with `M = 4 * max(frame.size)`. That included the coverage derivative floor and a conservative float32 coordinate allowance. Fragments outside `h + 4r` executed discard and return. Remaining line fragments evaluated their original distance and coverage before discarding output outside `h + 2r`. The inner mask prevented far-boundary derivative artifacts from producing pixels.
+
+Its numerical oracle checked all nine neighboring positions around every unmasked sample, including separate high-density and large-coordinate cases. The full GPU quality gate then passed 51 exact line-image cases, 73 raw and 73 presented pixel checks, all 4,104 ellipse-distance queries and every complete baseline/candidate image comparison. These results established output preservation for the corpus, but did not establish improved performance.
+
+The complete [paired run 43253010999](https://github.com/wieslawsoltes/ReportScene/actions/runs/43253010999) reported the following GPU render-pass p50 values. Each row has 48 measured samples per variant and four complete exact-byte paired trials:
+
+| Workload | Baseline | Guarded-return candidate | Candidate time change |
+| --- | ---: | ---: | ---: |
+| Shapes, 64 instances | 4.0586 ms | 5.0813 ms | +25.2% |
+| Glyphs, 64 instances | 2.0101 ms | 2.0594 ms | +2.5% |
+| Images, 64 instances | 28.0241 ms | 33.2508 ms | +18.7% |
+| Mixed, 64 instances | 4.2335 ms | 4.7604 ms | +12.4% |
+| Diagonal lines, 64 instances | 807.8157 ms | 1113.3622 ms | +37.8% |
+| Ellipse control, 16 instances | 135.9797 ms | 144.8325 ms | +6.5% |
+
+Every diagonal-line repeat regressed. Its four baseline/candidate p50 ratios were approximately 0.789, 0.714, 0.741 and 0.717. The shorter overall run compared with the earlier experiment came from a different runner host, not a shader improvement; comparisons must use the paired baseline on the same device. The raw report identifies this host as AMD EPYC 9V45 and the adapter as SwiftShader. This evidence does not establish what a different hardware adapter would do, but it rejects this candidate for the tested workload and is sufficient reason not to introduce its overhead into production.
+
+The [summary and provenance](performance/webgpu-2026-11-12-guarded-return.json) and [unaltered JSON/CSV archive](performance/webgpu-2026-11-12-guarded-return.zip) retain all 576 measured frames and 24 exact-image pairs. The summary's pooled timestamp counts and p50/p95 values were independently recomputed from the raw samples. The candidate source tree `3e13969277d76d31c50e610fde43a6a3efa491a0` matches the retained Actions source archive across all 361 tracked files. Its shader SHA-256 is `76c32c2628cf97c1b78a80827c7ab721cd86a9b7ddcdf9ee46fbaa80218c77a7`; the restored production shader is the baseline hash given at the start of this review.
+
+The retained performance changes are the text caches, removal of repeated native work and direct primitive encoding. Shader experimentation remains documented and reproducible, while the production shader carries none of the measured rejection overhead.
 
 ## Reproduce the CPU comparison
 

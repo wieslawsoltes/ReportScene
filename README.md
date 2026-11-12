@@ -36,7 +36,7 @@ Uno Platform 7 uses WebGPU for interactive report design, preview and icons. The
 
 Ellipse strokes use true nearest-boundary distance and preserve their original thickness under nonuniform scaling. Color-font opacity is consistent across GPU rendering and the report export paths; SVG/HTML embed bounded, DPI-controlled color glyphs while ordinary text remains vector. A [standalone WebGPU benchmark runner](docs/webgpu-benchmarks.md) records deterministic workloads, source/fixture hashes and separate CPU, queue and optional GPU-pass timings for reproducible adapter measurements.
 
-Warm text rendering reuses bounded immutable HarfBuzz runs, exact raster bounds, managed font descriptors and native text blobs. GPU glyph hits avoid native font creation and property queries; invisible ink is still rejected before atlas lookup. Conservative line rejection skips guaranteed-transparent fragment work while preserving the original vertices and pixel interpolation. The [rendering performance review](docs/rendering-performance.md) documents measurements, cache ownership and exact-output acceptance checks.
+Warm text rendering reuses bounded immutable HarfBuzz runs, exact raster bounds, managed font descriptors and native text blobs. GPU glyph hits avoid native font creation and property queries; invisible ink is still rejected before atlas lookup. Direct textured-primitive encoding removes temporary native paint allocation for glyphs, masks and images. The [rendering performance review](docs/rendering-performance.md) documents measured CPU gains, actual warm-scroll counters, cache ownership and the shader experiments rejected by exact-output or paired-performance checks.
 
 ## Reusable packages
 
