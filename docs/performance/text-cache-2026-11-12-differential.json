@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "framework": ".NET 10.0.14",
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "architecture": "X64",
+  "processors": 9,
+  "timestampUtc": "2026-11-12T15:25:15.8806463Z",
+  "note": "Median of three in-process repetitions after one warmup; index build cost recorded separately. No hardware GPU, FPS or browser latency claim.",
+  "workingTreeSourceSha256": {
+    "src/ReportScene.Rendering.Skia/SkiaTextMeasurer.cs": "D8CD757E7398B013E654EF2B7994C8E0A7B6F38F3CEAD6DFD9BCB584BCB38A6C",
+    "src/ReportScene.Rendering.Skia/SkiaTextMeasurer.Cache.cs": "ABE3E468162DCFD2A2DC0ECF2118A9010252E003EB7550B383782CB66ADB629B",
+    "src/ReportScene.Rendering.Skia/ReportTextRun.cs": "93BD08781EEB061601FF0E6000E77AF9EAE59D41A04ED11C05DBDC6611165A55",
+    "src/ReportScene.Rendering.Skia/ReportRenderer.cs": "6921BDC76EBECB70631A6505DF0F95DA82C8C34EC809EF63535902265C4AB609",
+    "src/ReportScene.Validation/TextRunCacheTests.cs": "0D63FF13CB535DE37A7FA0039E744D9B96767DBE86AF3827276A5E4A45FC6788",
+    "tests/ReportScene.Benchmarks/TextRenderingBenchmarks.cs": "7E58FFD82CF79DA50B9F8A962D43DB27652953D728ADF4D8438EA132C173E91C",
+    "tests/ReportScene.Benchmarks/Program.cs": "F2173DF41B59BE067CE594F69C3587EA70AE64AFAE7C316F2BF5D45CAE28778F"
+  },
+  "workingTreeProvenance": "The renderer source includes the oversized-native-color allocation correction committed in 83e9824a69c2e784eef74987d32e8b3c20bcb67d. The local checkout was still at its parent f12ce32 with those identical frozen source changes; the corrected benchmark awaited its next commit. File hashes identify the exact measured content independently of subsequent publication.",
+  "checkoutRevisionAtMeasurement": "f12ce32082705fe1eb94c235a4613147b99a1e9d",
+  "sourceRevision": "83e9824a69c2e784eef74987d32e8b3c20bcb67d",
+  "measuredAssemblySha256": {
+    "tests/ReportScene.Benchmarks/bin/Release/net10.0/ReportScene.Benchmarks.dll": "83D1A003CEFC8D588548B0DF1AE53C3285160C2F3D30FEC99CFC4F423372833F",
+    "tests/ReportScene.Benchmarks/bin/Release/net10.0/ReportScene.Rendering.Skia.dll": "38CCB02E1D519C22BDF67EB3D884F2618C831EEB13B5DB7276156F1112FD0575"
+  },
+  "scopeCorrection": "Both paths reject non-positive glyph bounds before native descriptor/fingerprint work. Counts are obtained from the existing untimed correctness passes, with no additional cache-priming loop. Initial overcounted measurements and an intermediate priming experiment are retained as diagnostic data in text-cache-2026-11-12-differential-initial.json.",
+  "results": [
+    {
+      "name": "text-native-repeated-draw",
+      "uniqueRuns": 128,
+      "framesPerMeasurement": 64,
+      "drawsPerMeasurement": 8192,
+      "referenceDraw": {
+        "Milliseconds": 110.6027,
+        "AllocatedBytes": 7471240,
+        "Checksum": 8192
+      },
+      "cachedDraw": {
+        "Milliseconds": 90.3448,
+        "AllocatedBytes": 40,
+        "Checksum": 8192
+      },
+      "cachedShapeOperations": 0,
+      "cachedBlobBuilds": 0,
+      "cachedFontCreations": 0,
+      "CachedNativeBlobCount": 128,
+      "CachedBlobCharacterCount": 4992,
+      "CachedBlobGlyphCount": 4224,
+      "note": "Exact native raster pixels checked. Reference reuses the same font and HarfBuzz shaper but rebuilds shaped arrays/text blobs as DrawShapedText does; optimized draws reuse bounded offset-exact native blobs. CPU raster work only, not GPU/FPS evidence."
+    },
+    {
+      "name": "text-raster-run-preparation",
+      "uniqueRuns": 128,
+      "runsPerMeasurement": 4096,
+      "shapedGlyphsPerMeasurement": 135168,
+      "positiveInkGlyphsPerMeasurement": 110592,
+      "zeroInkGlyphsPerMeasurement": 24576,
+      "rasterScale": 1.25,
+      "referenceRaster": {
+        "Milliseconds": 42.6252,
+        "AllocatedBytes": 426024,
+        "Checksum": -1201228288
+      },
+      "cachedRaster": {
+        "Milliseconds": 1.1901,
+        "AllocatedBytes": 40,
+        "Checksum": -1201228288
+      },
+      "cachedBoundsQueries": 0,
+      "cachedFontCreations": 0,
+      "cachedShapeOperations": 0,
+      "CachedRasterRunCount": 128,
+      "CachedRasterCharacterCount": 4992,
+      "CachedRasterGlyphCount": 4224,
+      "note": "Differential CPU pre-atlas work: original bounded glyph-bound queries and per-positive-ink-glyph native font-key reads versus immutable cached geometry/descriptor lookup. Both paths reject zero-ink bounds with ReportViewportClip.HasPositiveArea before descriptor/fingerprint work, matching production. Exact positive-ink counts and descriptor/bounds checksums match. No additional viewport clipping is simulated. Atlas lookup, rasterization, GPU upload, submission, presentation and UI are excluded."
+    }
+  ]
+}

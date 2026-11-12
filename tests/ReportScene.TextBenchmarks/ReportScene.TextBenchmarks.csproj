@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ReportSceneRoot Condition="'$(ReportSceneRoot)' == ''">$(MSBuildThisFileDirectory)../..</ReportSceneRoot>
+  </PropertyGroup>
+  <!-- Also supports copying this harness into an isolated build directory and
+       selecting a historical checkout with -p:ReportSceneRoot=/absolute/path. -->
+  <Import Project="$(ReportSceneRoot)/Directory.Build.props" Condition="'$(SkiaSharpVersion)' == ''" />
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(ReportSceneRoot)/src/ReportScene.Rendering.Skia/ReportScene.Rendering.Skia.csproj" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="$(SkiaSharpVersion)" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="$(HarfBuzzSharpVersion)" />
+    <Content Include="Program.cs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

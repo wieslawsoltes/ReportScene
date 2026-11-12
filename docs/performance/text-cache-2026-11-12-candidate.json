@@ -1,0 +1,270 @@
+{
+  "schema": 1,
+  "variant": "candidate",
+  "processOrder": [
+    "baseline-1",
+    "candidate-1",
+    "candidate-2",
+    "baseline-2"
+  ],
+  "aggregation": "Median of all ten measured samples for each variant; elapsed time and allocation medians selected independently. Each of two fresh processes performs one warmup and five samples per workload. Width owners are fresh for every invocation; width code runs before rendering in both variants.",
+  "sourceRevision": "f12ce32082705fe1eb94c235a4613147b99a1e9d",
+  "harnessSourceSha256": "CDDAFCF1E1870A1F61AA6E52C6A65A36E578A99535631EB8B39FB5AC7BE4EE63",
+  "summary": {
+    "draw": {
+      "medianMilliseconds": 94.09970000000001,
+      "medianAllocatedBytes": 40.0,
+      "checksum": 8192
+    },
+    "layout": {
+      "medianMilliseconds": 110.37989999999999,
+      "medianAllocatedBytes": 1470568.0,
+      "checksum": 8192
+    },
+    "widths": {
+      "medianMilliseconds": 39.706199999999995,
+      "medianAllocatedBytes": 7786888.0,
+      "checksum": 1363798.125
+    }
+  },
+  "runs": [
+    {
+      "sourceRevision": "f12ce32082705fe1eb94c235a4613147b99a1e9d",
+      "timestampUtc": "2026-11-12T15:08:34.3587486Z",
+      "framework": ".NET 10.0.14",
+      "os": "Debian GNU/Linux 13 (trixie)",
+      "architecture": "X64",
+      "drawsPerMeasurement": 8192,
+      "uniqueRuns": 128,
+      "widthProbesPerMeasurement": 8192,
+      "workloadOrder": [
+        "widths",
+        "draw",
+        "layout"
+      ],
+      "warmupCount": 1,
+      "measuredSamples": 5,
+      "tieredCompilation": "runtime-default",
+      "rendererAssemblySha256": "919A5BD5A760AE7BD59B0B7929C4DC59F5D89EF325EB1C5816017FFC5B78E6C7",
+      "harnessSourceSha256": "CDDAFCF1E1870A1F61AA6E52C6A65A36E578A99535631EB8B39FB5AC7BE4EE63",
+      "draw": {
+        "Milliseconds": 97.6012,
+        "AllocatedBytes": 40,
+        "Checksum": 8192
+      },
+      "drawSamples": [
+        {
+          "Milliseconds": 158.9761,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 135.6662,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 97.6012,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 86.0469,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 85.719,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        }
+      ],
+      "drawPixels": "FE025ADD4A58845A9C4D7641436C0C8D14C88530AADE08FE910AA1AE21890199",
+      "layout": {
+        "Milliseconds": 111.7075,
+        "AllocatedBytes": 1572904,
+        "Checksum": 8192
+      },
+      "layoutSamples": [
+        {
+          "Milliseconds": 111.7075,
+          "AllocatedBytes": 1572904,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 115.3791,
+          "AllocatedBytes": 1573000,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 112.9032,
+          "AllocatedBytes": 1470568,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 100.0981,
+          "AllocatedBytes": 1470568,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 106.1374,
+          "AllocatedBytes": 1470568,
+          "Checksum": 8192
+        }
+      ],
+      "layoutPixels": "4B81CF582589FDAEF9F39C291B3BA3849D18968AF68FB09FAD1257CBF8FD0AD5",
+      "widths": {
+        "Milliseconds": 39.9362,
+        "AllocatedBytes": 7786888,
+        "Checksum": 1363798.125
+      },
+      "widthSamples": [
+        {
+          "Milliseconds": 52.6463,
+          "AllocatedBytes": 7786936,
+          "Checksum": 1363798.125
+        },
+        {
+          "Milliseconds": 39.9362,
+          "AllocatedBytes": 7786888,
+          "Checksum": 1363798.125
+        },
+        {
+          "Milliseconds": 39.4762,
+          "AllocatedBytes": 7786888,
+          "Checksum": 1363798.125
+        },
+        {
+          "Milliseconds": 38.1168,
+          "AllocatedBytes": 7786888,
+          "Checksum": 1363798.125
+        },
+        {
+          "Milliseconds": 40.7198,
+          "AllocatedBytes": 7786888,
+          "Checksum": 1363798.125
+        }
+      ],
+      "note": "The identical public-API harness was separately built against baseline 22939aa and candidate assemblies. Median of five process-local repetitions after one warmup; all times include real CPU drawing/width calls. Warm draw/layout caches; cold unique width owner. Widths run first so the old left-aligned renderer cannot give only the baseline width code an additional warmup. Native surface SHA256 and exact width sums are differential correctness checks. No GPU timing claim."
+    },
+    {
+      "sourceRevision": "f12ce32082705fe1eb94c235a4613147b99a1e9d",
+      "timestampUtc": "2026-11-12T15:08:36.1254556Z",
+      "framework": ".NET 10.0.14",
+      "os": "Debian GNU/Linux 13 (trixie)",
+      "architecture": "X64",
+      "drawsPerMeasurement": 8192,
+      "uniqueRuns": 128,
+      "widthProbesPerMeasurement": 8192,
+      "workloadOrder": [
+        "widths",
+        "draw",
+        "layout"
+      ],
+      "warmupCount": 1,
+      "measuredSamples": 5,
+      "tieredCompilation": "runtime-default",
+      "rendererAssemblySha256": "919A5BD5A760AE7BD59B0B7929C4DC59F5D89EF325EB1C5816017FFC5B78E6C7",
+      "harnessSourceSha256": "CDDAFCF1E1870A1F61AA6E52C6A65A36E578A99535631EB8B39FB5AC7BE4EE63",
+      "draw": {
+        "Milliseconds": 90.5982,
+        "AllocatedBytes": 40,
+        "Checksum": 8192
+      },
+      "drawSamples": [
+        {
+          "Milliseconds": 121.1353,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 101.8424,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 90.0478,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 89.2232,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 90.5982,
+          "AllocatedBytes": 40,
+          "Checksum": 8192
+        }
+      ],
+      "drawPixels": "FE025ADD4A58845A9C4D7641436C0C8D14C88530AADE08FE910AA1AE21890199",
+      "layout": {
+        "Milliseconds": 109.0523,
+        "AllocatedBytes": 1572904,
+        "Checksum": 8192
+      },
+      "layoutSamples": [
+        {
+          "Milliseconds": 114.9432,
+          "AllocatedBytes": 1572904,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 109.0523,
+          "AllocatedBytes": 1572904,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 105.0573,
+          "AllocatedBytes": 1470568,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 92.5187,
+          "AllocatedBytes": 1470568,
+          "Checksum": 8192
+        },
+        {
+          "Milliseconds": 123.2044,
+          "AllocatedBytes": 1470568,
+          "Checksum": 8192
+        }
+      ],
+      "layoutPixels": "4B81CF582589FDAEF9F39C291B3BA3849D18968AF68FB09FAD1257CBF8FD0AD5",
+      "widths": {
+        "Milliseconds": 37.8487,
+        "AllocatedBytes": 7786888,
+        "Checksum": 1363798.125
+      },
+      "widthSamples": [
+        {
+          "Milliseconds": 44.2988,
+          "AllocatedBytes": 7786936,
+          "Checksum": 1363798.125
+        },
+        {
+          "Milliseconds": 37.5248,
+          "AllocatedBytes": 7786888,
+          "Checksum": 1363798.125
+        },
+        {
+          "Milliseconds": 40.1093,
+          "AllocatedBytes": 7786888,
+          "Checksum": 1363798.125
+        },
+        {
+          "Milliseconds": 37.8487,
+          "AllocatedBytes": 7786888,
+          "Checksum": 1363798.125
+        },
+        {
+          "Milliseconds": 35.1888,
+          "AllocatedBytes": 7786888,
+          "Checksum": 1363798.125
+        }
+      ],
+      "note": "The identical public-API harness was separately built against baseline 22939aa and candidate assemblies. Median of five process-local repetitions after one warmup; all times include real CPU drawing/width calls. Warm draw/layout caches; cold unique width owner. Widths run first so the old left-aligned renderer cannot give only the baseline width code an additional warmup. Native surface SHA256 and exact width sums are differential correctness checks. No GPU timing claim."
+    }
+  ]
+}

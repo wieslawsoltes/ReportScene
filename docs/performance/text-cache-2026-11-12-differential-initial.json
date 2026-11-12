@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "framework": ".NET 10.0.14",
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "architecture": "X64",
+  "processors": 9,
+  "timestampUtc": "2026-11-12T15:11:34.9379049Z",
+  "note": "Median of three in-process repetitions after one warmup; index build cost recorded separately. No hardware GPU, FPS or browser latency claim.",
+  "sourceRevision": "f12ce32082705fe1eb94c235a4613147b99a1e9d",
+  "results": [
+    {
+      "name": "text-native-repeated-draw",
+      "uniqueRuns": 128,
+      "framesPerMeasurement": 64,
+      "drawsPerMeasurement": 8192,
+      "referenceDraw": {
+        "Milliseconds": 109.6011,
+        "AllocatedBytes": 7471144,
+        "Checksum": 8192
+      },
+      "cachedDraw": {
+        "Milliseconds": 89.7012,
+        "AllocatedBytes": 40,
+        "Checksum": 8192
+      },
+      "cachedShapeOperations": 0,
+      "cachedBlobBuilds": 0,
+      "cachedFontCreations": 0,
+      "CachedNativeBlobCount": 128,
+      "CachedBlobCharacterCount": 4992,
+      "CachedBlobGlyphCount": 4224,
+      "note": "Exact native raster pixels checked. Reference reuses the same font and HarfBuzz shaper but rebuilds shaped arrays/text blobs as DrawShapedText does; optimized draws reuse bounded offset-exact native blobs. CPU raster work only, not GPU/FPS evidence."
+    },
+    {
+      "name": "text-raster-run-preparation",
+      "uniqueRuns": 128,
+      "runsPerMeasurement": 4096,
+      "glyphsPerMeasurement": 135168,
+      "rasterScale": 1.25,
+      "referenceRaster": {
+        "Milliseconds": 62.6962,
+        "AllocatedBytes": 426024,
+        "Checksum": -992676352
+      },
+      "cachedRaster": {
+        "Milliseconds": 4.5607,
+        "AllocatedBytes": 40,
+        "Checksum": -992676352
+      },
+      "cachedBoundsQueries": 0,
+      "cachedFontCreations": 0,
+      "cachedShapeOperations": 0,
+      "CachedRasterRunCount": 128,
+      "CachedRasterCharacterCount": 4992,
+      "CachedRasterGlyphCount": 4224,
+      "note": "Differential CPU pre-atlas work: original bounded glyph-bound queries and per-visible-glyph native font-key reads versus immutable cached geometry/descriptor lookup. Exact descriptor/bounds checksums match. Atlas lookup, GPU upload, submission, presentation and UI are excluded."
+    }
+  ],
+  "acceptance": "Diagnostic only: the initial raster reference read native font descriptors for zero-ink spaces, unlike production. This overcounts descriptor queries; its raster timing and ratio are not accepted performance evidence. The native repeated-draw reference is unaffected. Raw numbers below are preserved unchanged.",
+  "supersededBy": "text-cache-2026-11-12-differential.json",
+  "initialBenchmarkSource": "text-cache-2026-11-12-raster-initial.cs.txt",
+  "initialBenchmarkSourceSha256": "8DEC17808327D32346D0B9FA8A3A5456AC34E4334621FFCE046E9DC7E19BA1AC",
+  "filteredPrimingDiagnostic": {
+    "note": "Intermediate diagnostic only. Both paths filter zero-ink bounds correctly, but the preliminary count loop performs 4,096 extra cached raster lookups before comparison. The final benchmark derives counts from the existing untimed correctness passes and removes this extra priming. Retained instead of silently replacing the run.",
+    "sourceRevision": "83e9824a69c2e784eef74987d32e8b3c20bcb67d",
+    "benchmarkSourceSha256": "59BA515933CFAA4D9A8205D817ED3C070550091F389E0DE9934C671D82652FD6",
+    "benchmarkSource": "using System.Diagnostics;\nusing ReportScene.Model;\nusing ReportScene.Rendering.Skia;\nusing SkiaSharp;\nusing SkiaSharp.HarfBuzz;\n\ninternal static class TextRenderingBenchmarks\n{\n    public static IEnumerable<object> Run()\n    {\n        var style = new ItemStyle { FontSize = 10, Padding = 0 };\n        string[] texts = Enumerable.Range(0, 128).Select(n => $\"Invoice AV office caf\u00e9 a\\u0301 item {n:D3}\").ToArray();\n        using var metrics = new SkiaTextMeasurer();\n        using var font = metrics.CreateFont(style); using var shaper = new SKShaper(font.Typeface);\n        using var paint = new SKPaint { Color = SKColors.Black, IsAntialias = true };\n        using var actual = ReportImageRaster.Create(1000, 520); using var expected = ReportImageRaster.Create(1000, 520);\n        using var actualCanvas = new SKCanvas(actual); using var expectedCanvas = new SKCanvas(expected);\n        int Draw(bool cached, int frames)\n        {\n            var canvas = cached ? actualCanvas : expectedCanvas;\n            for (int frame = 0; frame < frames; frame++)\n            {\n                canvas.Clear(SKColors.White);\n                for (int i = 0; i < texts.Length; i++)\n                {\n                    float x = 4 + i % 4 * 245, y = 14 + i / 4 * 16;\n                    if (cached) metrics.Draw(canvas, texts[i], x, y, style, paint);\n                    else canvas.DrawShapedText(shaper, texts[i], x, y, SKTextAlign.Left, font, paint);\n                }\n            }\n            canvas.Flush(); return frames * texts.Length;\n        }\n        Draw(false, 1); Draw(true, 1);\n        if (!actual.GetPixelSpan().SequenceEqual(expected.GetPixelSpan())) throw new InvalidOperationException(\"Cached text drawing differs from native DrawShapedText.\");\n        if (!actual.GetPixelSpan().ToArray().Any(b => b != 255)) throw new InvalidOperationException(\"Text benchmark rendered an empty white surface.\");\n        const int frames = 64;\n        var referenceDraw = Measure(() => Draw(false, frames));\n        long shapeStart = metrics.ShapeOperationCount, blobStart = metrics.NativeBlobBuildCount, fontStart = metrics.NativeFontCreationCount;\n        var cachedDraw = Measure(() => Draw(true, frames));\n        long shapes = metrics.ShapeOperationCount - shapeStart, blobs = metrics.NativeBlobBuildCount - blobStart, fonts = metrics.NativeFontCreationCount - fontStart;\n        if (shapes != 0 || blobs != 0 || fonts != 0) throw new InvalidOperationException(\"Warm native text drawing rebuilt a shape, text blob, or font.\");\n        if (!actual.GetPixelSpan().SequenceEqual(expected.GetPixelSpan())) throw new InvalidOperationException(\"Measured text draws changed pixels.\");\n        yield return new\n        {\n            name = \"text-native-repeated-draw\", uniqueRuns = texts.Length, framesPerMeasurement = frames, drawsPerMeasurement = frames * texts.Length,\n            referenceDraw, cachedDraw, cachedShapeOperations = shapes, cachedBlobBuilds = blobs, cachedFontCreations = fonts,\n            metrics.CachedNativeBlobCount, metrics.CachedBlobCharacterCount, metrics.CachedBlobGlyphCount,\n            note = \"Exact native raster pixels checked. Reference reuses the same font and HarfBuzz shaper but rebuilds shaped arrays/text blobs as DrawShapedText does; optimized draws reuse bounded offset-exact native blobs. CPU raster work only, not GPU/FPS evidence.\"\n        };\n\n        const float rasterScale = 1.25f;\n        const int rasterIterations = 4096;\n        var runs = texts.Select(text => metrics.GetTextRun(text, style)).ToArray();\n        int shapedGlyphsPerMeasurement = 0, positiveInkGlyphsPerMeasurement = 0;\n        for (int iteration = 0; iteration < rasterIterations; iteration++)\n        {\n            if (!metrics.TryGetRasterTextRun(texts[iteration % texts.Length], style, rasterScale, out var run))\n                throw new InvalidOperationException(\"The bounded fixture must fit the raster-run cache.\");\n            shapedGlyphsPerMeasurement += run.TextRun.Glyphs.Length;\n            foreach (var bounds in run.InkBounds)\n                if (ReportViewportClip.HasPositiveArea(bounds)) positiveInkGlyphsPerMeasurement++;\n        }\n        if (positiveInkGlyphsPerMeasurement == 0 || positiveInkGlyphsPerMeasurement >= shapedGlyphsPerMeasurement)\n            throw new InvalidOperationException(\"The raster fixture must exercise both visible ink and zero-ink glyphs.\");\n        int referenceInkCount = 0, cachedInkCount = 0;\n        int ReferenceRaster()\n        {\n            int checksum = 0; referenceInkCount = 0;\n            Span<SKRect> bounds = stackalloc SKRect[128];\n            for (int iteration = 0; iteration < rasterIterations; iteration++)\n            {\n                var run = runs[iteration % runs.Length];\n                using var rasterFont = metrics.CreateFont(style); rasterFont.Size *= rasterScale;\n                for (int start = 0; start < run.Glyphs.Length; start += 128)\n                {\n                    int count = Math.Min(128, run.Glyphs.Length - start);\n                    rasterFont.GetGlyphWidths(run.Glyphs.Slice(start, count), Span<float>.Empty, bounds[..count]);\n                    for (int i = 0; i < count; i++)\n                    {\n                        // Production rejects spaces and other zero-ink glyphs\n                        // before reading the native font's atlas-key fields.\n                        if (!ReportViewportClip.HasPositiveArea(bounds[i])) continue;\n                        referenceInkCount++;\n                        // The old atlas-key path read these native font properties\n                        // per visible glyph, even when the atlas already held it.\n                        var descriptor = ReportRasterFont.FromFont(rasterFont);\n                        checksum = unchecked(checksum + Fingerprint(run.Glyphs[start + i], bounds[i], descriptor));\n                    }\n                }\n            }\n            return checksum;\n        }\n        int CachedRaster()\n        {\n            int checksum = 0; cachedInkCount = 0;\n            for (int iteration = 0; iteration < rasterIterations; iteration++)\n            {\n                if (!metrics.TryGetRasterTextRun(texts[iteration % texts.Length], style, rasterScale, out var run)) throw new InvalidOperationException(\"The bounded fixture must fit the raster-run cache.\");\n                for (int i = 0; i < run.TextRun.Glyphs.Length; i++)\n                {\n                    if (!ReportViewportClip.HasPositiveArea(run.InkBounds[i])) continue;\n                    cachedInkCount++;\n                    checksum = unchecked(checksum + Fingerprint(run.TextRun.Glyphs[i], run.InkBounds[i], run.Font));\n                }\n            }\n            return checksum;\n        }\n        if (ReferenceRaster() != CachedRaster()) throw new InvalidOperationException(\"Cached raster geometry/font descriptors differ from native queries.\");\n        if (referenceInkCount != positiveInkGlyphsPerMeasurement || cachedInkCount != positiveInkGlyphsPerMeasurement)\n            throw new InvalidOperationException(\"Reference and cached traversal must reject exactly the same zero-ink glyphs.\");\n        var referenceRaster = Measure(ReferenceRaster);\n        long rasterStart = metrics.RasterBoundsQueryCount; fontStart = metrics.NativeFontCreationCount; shapeStart = metrics.ShapeOperationCount;\n        var cachedRaster = Measure(CachedRaster);\n        long rasterQueries = metrics.RasterBoundsQueryCount - rasterStart;\n        fonts = metrics.NativeFontCreationCount - fontStart; shapes = metrics.ShapeOperationCount - shapeStart;\n        if (rasterQueries != 0 || fonts != 0 || shapes != 0) throw new InvalidOperationException(\"Warm raster geometry performs native font/shaping work.\");\n        if (referenceInkCount != positiveInkGlyphsPerMeasurement || cachedInkCount != positiveInkGlyphsPerMeasurement)\n            throw new InvalidOperationException(\"Measured raster traversal changed the positive-ink glyph count.\");\n        yield return new\n        {\n            name = \"text-raster-run-preparation\", uniqueRuns = texts.Length, runsPerMeasurement = rasterIterations,\n            shapedGlyphsPerMeasurement, positiveInkGlyphsPerMeasurement,\n            zeroInkGlyphsPerMeasurement = shapedGlyphsPerMeasurement - positiveInkGlyphsPerMeasurement, rasterScale,\n            referenceRaster, cachedRaster, cachedBoundsQueries = rasterQueries, cachedFontCreations = fonts, cachedShapeOperations = shapes,\n            metrics.CachedRasterRunCount, metrics.CachedRasterCharacterCount, metrics.CachedRasterGlyphCount,\n            note = \"Differential CPU pre-atlas work: original bounded glyph-bound queries and per-positive-ink-glyph native font-key reads versus immutable cached geometry/descriptor lookup. Both paths reject zero-ink bounds with ReportViewportClip.HasPositiveArea before descriptor/fingerprint work, matching production. Exact positive-ink counts and descriptor/bounds checksums match. No additional viewport clipping is simulated. Atlas lookup, rasterization, GPU upload, submission, presentation and UI are excluded.\"\n        };\n    }\n\n    private static int Fingerprint(ushort glyph, SKRect bounds, ReportRasterFont font) => unchecked(\n        glyph + BitConverter.SingleToInt32Bits(bounds.Left) + BitConverter.SingleToInt32Bits(bounds.Top)\n        + BitConverter.SingleToInt32Bits(bounds.Right) + BitConverter.SingleToInt32Bits(bounds.Bottom)\n        + BitConverter.SingleToInt32Bits(font.Size) + BitConverter.SingleToInt32Bits(font.ScaleX) + BitConverter.SingleToInt32Bits(font.SkewX)\n        + font.Flags + (int)font.TypefaceIdentity + (font.IntrinsicColor ? 1 : 0));\n\n    private static Measurement Measure(Func<int> action)\n    {\n        _ = action(); var runs = new List<Measurement>();\n        for (int i = 0; i < 3; i++)\n        {\n            long bytes = GC.GetAllocatedBytesForCurrentThread(), started = Stopwatch.GetTimestamp(); int checksum = action();\n            runs.Add(new(Stopwatch.GetElapsedTime(started).TotalMilliseconds, GC.GetAllocatedBytesForCurrentThread() - bytes, checksum));\n        }\n        return runs.OrderBy(run => run.Milliseconds).ElementAt(1);\n    }\n}\n",
+    "evidence": {
+      "schema": 1,
+      "framework": ".NET 10.0.14",
+      "os": "Debian GNU/Linux 13 (trixie)",
+      "architecture": "X64",
+      "processors": 9,
+      "timestampUtc": "2026-11-12T15:21:08.9425148Z",
+      "note": "Median of three in-process repetitions after one warmup; index build cost recorded separately. No hardware GPU, FPS or browser latency claim.",
+      "results": [
+        {
+          "name": "text-native-repeated-draw",
+          "uniqueRuns": 128,
+          "framesPerMeasurement": 64,
+          "drawsPerMeasurement": 8192,
+          "referenceDraw": {
+            "Milliseconds": 142.5902,
+            "AllocatedBytes": 7471200,
+            "Checksum": 8192
+          },
+          "cachedDraw": {
+            "Milliseconds": 95.2996,
+            "AllocatedBytes": 40,
+            "Checksum": 8192
+          },
+          "cachedShapeOperations": 0,
+          "cachedBlobBuilds": 0,
+          "cachedFontCreations": 0,
+          "CachedNativeBlobCount": 128,
+          "CachedBlobCharacterCount": 4992,
+          "CachedBlobGlyphCount": 4224,
+          "note": "Exact native raster pixels checked. Reference reuses the same font and HarfBuzz shaper but rebuilds shaped arrays/text blobs as DrawShapedText does; optimized draws reuse bounded offset-exact native blobs. CPU raster work only, not GPU/FPS evidence."
+        },
+        {
+          "name": "text-raster-run-preparation",
+          "uniqueRuns": 128,
+          "runsPerMeasurement": 4096,
+          "shapedGlyphsPerMeasurement": 135168,
+          "positiveInkGlyphsPerMeasurement": 110592,
+          "zeroInkGlyphsPerMeasurement": 24576,
+          "rasterScale": 1.25,
+          "referenceRaster": {
+            "Milliseconds": 49.4855,
+            "AllocatedBytes": 426024,
+            "Checksum": -1201228288
+          },
+          "cachedRaster": {
+            "Milliseconds": 1.2943,
+            "AllocatedBytes": 40,
+            "Checksum": -1201228288
+          },
+          "cachedBoundsQueries": 0,
+          "cachedFontCreations": 0,
+          "cachedShapeOperations": 0,
+          "CachedRasterRunCount": 128,
+          "CachedRasterCharacterCount": 4992,
+          "CachedRasterGlyphCount": 4224,
+          "note": "Differential CPU pre-atlas work: original bounded glyph-bound queries and per-positive-ink-glyph native font-key reads versus immutable cached geometry/descriptor lookup. Both paths reject zero-ink bounds with ReportViewportClip.HasPositiveArea before descriptor/fingerprint work, matching production. Exact positive-ink counts and descriptor/bounds checksums match. No additional viewport clipping is simulated. Atlas lookup, rasterization, GPU upload, submission, presentation and UI are excluded."
+        }
+      ]
+    }
+  }
+}
