@@ -28,11 +28,23 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Compile and render WGSL on software WebGPU
         run: node --test tests/browser/webgpu-shader.test.mjs
+      - name: Validate benchmark contracts and software timing paths
+        working-directory: tests/browser
+        run: |
+          npm run test:benchmark
+          npm run benchmark:webgpu -- --software --workloads shapes,glyphs,images,mixed --instances 128 --width 640 --height 480 --warmup 2 --samples 3 --repeats 1 --timestamps auto --timeout-ms 120000 --output benchmark-evidence/offscreen
+          npm run benchmark:webgpu -- --software --workloads mixed --instances 128 --width 320 --height 240 --warmup 1 --samples 3 --repeats 1 --timestamps off --target canvas --uploads none --batch-limit 1 --timeout-ms 120000 --output benchmark-evidence/canvas
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: webgpu-shader-validation
           path: tests/browser/shader-evidence
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webgpu-benchmark-smoke
+          path: tests/browser/benchmark-evidence
           if-no-files-found: error
   core:
     runs-on: ubuntu-latest
