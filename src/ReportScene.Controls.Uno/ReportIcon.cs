@@ -1,21 +1,34 @@
 using SkiaSharp;
-using Uno.WinUI.Graphics2DSK;
+using ReportScene.Rendering.Skia;
 using Windows.Foundation;
 
 namespace ReportScene.Controls.Uno;
 
 /// <summary>Original vector icons; no proprietary FastReport artwork or font glyph dependency.</summary>
-public sealed class ReportIcon : SKCanvasElement
+public sealed class ReportIcon : ReportCanvasElement
 {
-    public string Icon { get; set; } = "report";
-    protected override void RenderOverride(SKCanvas canvas, Size area)
+    private string icon = "report";
+    public string Icon
+    {
+        get => icon;
+        set { if (icon == value) return; icon = value ?? "report"; Invalidate(); }
+    }
+    protected override bool ShowRenderingErrors => false;
+    protected override void RenderOverride(ReportCanvas canvas, Size area)
     {
         canvas.Save(); canvas.Scale((float)(area.Width / 24), (float)(area.Height / 24));
         using var line = new SKPaint { Color = new(62, 88, 112), Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
         using var fill = new SKPaint { Color = new(126, 176, 219), IsAntialias = true };
         void L(float x, float y, float x2, float y2) => canvas.DrawLine(x, y, x2, y2, line);
         void R(float x, float y, float w, float h, bool solid = false) => canvas.DrawRect(x, y, w, h, solid ? fill : line);
-        void Path(params float[] xy) { using var p = new SKPath(); p.MoveTo(xy[0], xy[1]); for (int n = 2; n < xy.Length; n += 2) p.LineTo(xy[n], xy[n + 1]); canvas.DrawPath(p, line); }
+        void Path(params float[] xy)
+        {
+            using var builder = new SKPathBuilder();
+            builder.MoveTo(xy[0], xy[1]);
+            for (int n = 2; n < xy.Length; n += 2) builder.LineTo(xy[n], xy[n + 1]);
+            using var path = builder.Detach();
+            canvas.DrawPath(path, line);
+        }
         switch (Icon.ToLowerInvariant())
         {
             case "new": case "report": R(5, 2, 14, 20); L(8, 7, 16, 7); L(8, 11, 16, 11); L(8, 15, 14, 15); break;

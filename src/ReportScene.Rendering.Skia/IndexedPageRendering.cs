@@ -6,7 +6,11 @@ namespace ReportScene.Rendering.Skia;
 public static class IndexedPageRendering
 {
     /// <summary>Draws only spatial candidates, in original painter order; returns examined leaf entries.</summary>
-    public static int DrawIndexedPage(this ReportRenderer renderer, SKCanvas canvas, PreparedPageIndex index, RectD viewport, bool paper = true)
+    public static int DrawIndexedPage(this ReportRenderer renderer, SKCanvas canvas, PreparedPageIndex index, RectD viewport, bool paper = true) =>
+        DrawIndexedPage(renderer, new SkiaReportCanvas(canvas), index, viewport, paper);
+
+    /// <summary>Draws only spatial candidates, in original painter order; returns examined leaf entries.</summary>
+    public static int DrawIndexedPage(this ReportRenderer renderer, ReportCanvas canvas, PreparedPageIndex index, RectD viewport, bool paper = true)
     {
         ArgumentNullException.ThrowIfNull(renderer); ArgumentNullException.ThrowIfNull(canvas); ArgumentNullException.ThrowIfNull(index);
         var page = index.Page; canvas.Save();

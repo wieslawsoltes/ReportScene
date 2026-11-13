@@ -56,6 +56,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         DesignView.EditRequested += item => Run(() => EditAnyObjectAsync(item));
         DesignView.Failed += ShowError; PreviewView.Failed += ShowError; properties.Failed += ShowError;
         DesignView.ViewChanged += ViewChanged; PreviewView.ViewChanged += ViewChanged;
+        DesignView.RenderingStateChanged += RenderingStateChanged; PreviewView.RenderingStateChanged += RenderingStateChanged;
         DesignView.InteractionCompleted += () => SelectedChanged(this, EventArgs.Empty);
         DesignView.FormatPainter.StateChanged += FormatPainterChanged;
         tree.Invoked += entry => Run(() => InvokeOutline(entry)); tree.ViewChanged += NotifyState;
@@ -85,7 +86,14 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
         BuildRibbon(); RefreshStructure(true); RefreshPropertyEditors(); UpdateStatus();
     }
     private void ViewChanged() { SyncStatusZoom(); NotifyState(); }
-    private void AddRoot(UIElement element, int row) { Grid.SetRow(element, row); root.Children.Add(element); }
+    private void RenderingStateChanged() { UpdateStatus(preserveMessage: statusGeneration != 0); NotifyState(); }
+    private string RenderingStatus => (previewMode ? PreviewView.GpuSnapshot.State : DesignView.GpuSnapshot.State) switch
+    {
+        "WebGPU" => "Uno / WebGPU",
+        "Unavailable" or "Failed" => "WebGPU unavailable",
+        _ => "Initializing WebGPU"
+    };
+    private void AddRoot(FrameworkElement element, int row) { Grid.SetRow(element, row); root.Children.Add(element); }
     private Button Command(string id, string label, string icon, Action action, bool large = false, bool text = true)
     {
         var button = ControlTheme.Button(id, label, icon, () => Run(action), large, text);
@@ -106,7 +114,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
     private void PreparePreview()
     {
         var report = Prepare(); prepared = report; searchSession = null; searchHits.Clear(); searchIndex = -1;
-        PreviewView.Report = report; SetPreview(true); BuildRibbon(); SetStatus($"Prepared {report.Pages.Count} page(s) in {report.Elapsed.TotalMilliseconds:0} ms · Uno / Skia renderer");
+        PreviewView.Report = report; SetPreview(true); BuildRibbon(); SetStatus($"Prepared {report.Pages.Count} page(s) in {report.Elapsed.TotalMilliseconds:0} ms");
     }
     private PreparedReport Prepare()
     {
@@ -206,7 +214,7 @@ public sealed partial class ReportDesignerControl : UserControl, IDisposable
             return;
         }
         var count = Session.SelectedIds.Count;
-        status.Text = previewMode ? $"Preview · page {PreviewView.PageIndex + 1} of {PreviewView.Report?.Pages.Count ?? 0} · Uno / Skia" : $"{Session.Page.Name} · {(count == 0 ? Session.SelectedBand?.Name ?? "No selection" : count + " object(s) selected")} · {DesignerGeometry.UnitLabel(displayUnit)} · Uno / Skia";
+        status.Text = previewMode ? $"Preview · page {PreviewView.PageIndex + 1} of {PreviewView.Report?.Pages.Count ?? 0} · {RenderingStatus}" : $"{Session.Page.Name} · {(count == 0 ? Session.SelectedBand?.Name ?? "No selection" : count + " object(s) selected")} · {DesignerGeometry.UnitLabel(displayUnit)} · {RenderingStatus}";
     }
     private void SetStatus(string text) { statusGeneration++; status.Text = text; NotifyState(); }
     private void ToggleMessages() => root.RowDefinitions[4].Height = new(root.RowDefinitions[4].Height.Value == 0 ? 105 : 0);

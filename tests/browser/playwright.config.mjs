@@ -10,7 +10,15 @@ export default defineConfig({
   use: {
     baseURL: process.env.REPORTSCENE_URL || 'http://127.0.0.1:8000/ReportScene/',
     viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1, browserName: 'chromium',
-    launchOptions: { args: ['--enable-webgl', '--ignore-gpu-blocklist', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] },
+    // Exercise real WebGPU pipelines on Dawn's software Vulkan adapter in CI.
+    // These runs validate pixels and behavior; they are not hardware GPU benchmarks.
+    // Select the software Vulkan implementation for canvas/shared-image interop:
+    // https://issues.chromium.org/issues/575926500
+    launchOptions: { executablePath: process.env.REPORTSCENE_BROWSER_EXECUTABLE, args: [
+      '--enable-webgpu', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist',
+      '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+      '--use-vulkan=swiftshader', '--enable-features=Vulkan'
+    ] },
     acceptDownloads: true, screenshot: 'only-on-failure', trace: 'retain-on-failure'
   }
 });

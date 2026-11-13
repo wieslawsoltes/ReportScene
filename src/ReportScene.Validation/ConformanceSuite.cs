@@ -5,10 +5,10 @@ public static class ConformanceSuite
 {
     public static List<TestResult> Run() => Conformance.Run().Concat(ImportDefaultTests.Run())
         .Concat(AggregateRegressionTests.Run()).Concat(MatrixTests.Run()).Concat(MatrixReportingTests.Run())
-        .Concat(MatrixRenderingTests.Run()).Concat(XmlDataTests.Run()).Concat(AdoDataTests.Run())
+        .Concat(ReportImageRasterTests.Run()).Concat(ReportGlyphRasterTests.Run()).Concat(ColorGlyphDrawingTests.Run()).Concat(ColorGlyphExportTests.Run()).Concat(ReportCanvasTests.Run()).Concat(EllipseStrokeTests.Run()).Concat(MatrixRenderingTests.Run()).Concat(XmlDataTests.Run()).Concat(AdoDataTests.Run())
         .Concat(DataImportEdgeTests.Run()).Concat(DataBudgetRegressionTests.Run()).Concat(SubreportTests.Run())
         .Concat(SubreportDesignerTests.Run()).Concat(SubreportRenderingTests.Run()).Concat(SubreportGraphTests.Run())
-        .Concat(SubreportPhysicalPageTests.Run()).Concat(SubreportNavigationTests.Run()).Concat(TextLayoutPerformanceTests.Run())
+        .Concat(SubreportPhysicalPageTests.Run()).Concat(SubreportNavigationTests.Run()).Concat(TextLayoutPerformanceTests.Run()).Concat(TextRunCacheTests.Run())
         .Concat(PreparedPageIndexTests.Run()).Concat(PreparedStrokeTests.Run()).Concat(PreparedCheckMarkTests.Run()).Concat(LinearStrokeTests.Run()).Concat(PreparedQueryTests.Run()).Concat(DesignerActivityTests.Run()).Concat(PreparedSearchTests.Run()).Concat(ParameterScopeTests.Run())
         .Concat(PaginationPerformanceTests.Run()).Concat(PreparationCancellationTests.Run()).Concat(RecoveryReadinessTests.Run()).Concat(ExportVisibilityTests.Run())
         .Concat(ImplicitSubreportRowTests.Run()).Concat(RelationIndexTests.Run()).Concat(DesignerGeometryTests.Run()).Concat(DesignerBatchTests.Run())

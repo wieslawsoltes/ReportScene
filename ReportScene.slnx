@@ -9,6 +9,7 @@
     <Project Path="src/ReportScene.Serialization/ReportScene.Serialization.csproj" />
     <Project Path="src/ReportScene.Designer/ReportScene.Designer.csproj" />
     <Project Path="src/ReportScene.Rendering.Skia/ReportScene.Rendering.Skia.csproj" />
+    <Project Path="src/ReportScene.Rendering.WebGpu/ReportScene.Rendering.WebGpu.csproj" />
     <Project Path="src/ReportScene.Export/ReportScene.Export.csproj" />
     <Project Path="src/ReportScene.Controls.Uno/ReportScene.Controls.Uno.csproj" />
     <Project Path="src/ReportScene.Designer.Uno/ReportScene.Designer.Uno.csproj" />

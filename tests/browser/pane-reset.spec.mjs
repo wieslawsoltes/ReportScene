@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ready, state, bounds, fresh, save, artifact, screenshot } from './uno-driver.mjs';
+import { ready, state, fresh, save, artifact, screenshot } from './uno-driver.mjs';
 import { loadDesignerFixture } from './designer-fixture.mjs';
 
 test('pane double-click resets on release while rapid resize Escape preserves committed sizes and storage', async ({ page }, info) => {
@@ -10,11 +10,27 @@ test('pane double-click resets on release while rapid resize Escape preserves co
     ['sidebar-splitter', 'SidebarWidth', 'ArrowLeft', 280, -32, 0],
     ['tree-splitter', 'TreePaneHeight', 'ArrowDown', 210, 0, 32]
   ]) {
-    let r = await bounds(page, id);
+    const vertical = id === 'sidebar-splitter';
+    const initialBounds = initial.Commands[id];
+    const anchor = vertical ? initialBounds.X + initial[key] : initialBounds.Y - initial[key];
+    async function settledBounds() {
+      let rect;
+      // Pane size changes synchronously; native XAML arrangement is deferred.
+      // Do not target the former four-DIP hit area using a mixed-state snapshot.
+      await expect.poll(async () => {
+        const snapshot = await state(page);
+        rect = snapshot.Commands[id];
+        if (!rect) return Infinity;
+        const position = vertical ? rect.X + snapshot[key] : rect.Y - snapshot[key];
+        return Math.abs(position - anchor);
+      }, { message: id + ' native layout matches the committed pane size' }).toBeLessThan(.01);
+      return rect;
+    }
+    let r = await settledBounds();
     const point = r => id === 'sidebar-splitter' ? [r.X + r.Width / 2, r.Y + 80] : [r.X + 70, r.Y + r.Height / 2];
     let [x, y] = point(r); await page.mouse.click(x, y); await page.keyboard.press(arrow);
     await expect.poll(async () => (await state(page))[key]).toBe(normal + 8);
-    r = await bounds(page, id); [x, y] = point(r);
+    r = await settledBounds(); [x, y] = point(r);
     // A separate native reset gesture must not pair with the preceding
     // keyboard-sizing click. Move >10 DIPs along the same splitter, without
     // sleeping or changing its resize axis, before the genuine double-click.
@@ -23,11 +39,11 @@ test('pane double-click resets on release while rapid resize Escape preserves co
     expect(resetY).toBeGreaterThan(r.Y); expect(resetY).toBeLessThan(r.Y + r.Height);
     await page.mouse.dblclick(resetX, resetY);
     await expect.poll(async () => (await state(page))[key], { message: 'A genuine native double click still resets layout' }).toBe(normal);
-    r = await bounds(page, id); [x, y] = point(r);
+    r = await settledBounds(); [x, y] = point(r);
     await page.mouse.click(x, y); await page.keyboard.press(arrow);
     await expect.poll(async () => (await state(page))[key]).toBe(normal + 8);
     await expect.poll(async () => (await state(page)).PreferencesPending).toBe(false);
-    const before = await state(page); r = await bounds(page, id); [x, y] = point(r);
+    const before = await state(page); r = await settledBounds(); [x, y] = point(r);
     // Real adjacent native taps: keep the second button held, then move and cancel.
     // No delay, synthetic application event, diagnostic mutation or retry hides reset.
     await page.mouse.click(x, y); await page.mouse.move(x, y); await page.mouse.down();

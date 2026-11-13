@@ -148,6 +148,6 @@ public sealed partial class ReportPreviewView
     public new void Dispose()
     {
         if (disposed) return; disposed = true; pendingReveal = null; report = null; outlineSnapshot = null;
-        outlineView.SetSnapshot(null); surface.ResetPage(); base.Dispose();
+        outlineView.SetSnapshot(null); surface.ResetPage(); surface.Dispose(); base.Dispose();
     }
 }

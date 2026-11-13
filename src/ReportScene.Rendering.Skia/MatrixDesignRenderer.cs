@@ -6,7 +6,10 @@ namespace ReportScene.Rendering.Skia;
 /// <summary>Expression-based authoring representation; actual source values are only shown after preparation.</summary>
 public static class MatrixDesignRenderer
 {
-    public static void Draw(SKCanvas canvas, MatrixItem matrix, RectD bounds, ReportRenderer renderer)
+    public static void Draw(SKCanvas canvas, MatrixItem matrix, RectD bounds, ReportRenderer renderer) =>
+        Draw(new SkiaReportCanvas(canvas), matrix, bounds, renderer);
+
+    public static void Draw(ReportCanvas canvas, MatrixItem matrix, RectD bounds, ReportRenderer renderer)
     {
         canvas.Save();
         try

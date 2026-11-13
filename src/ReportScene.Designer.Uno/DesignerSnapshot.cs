@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -10,12 +11,17 @@ using ReportScene.Model;
 namespace ReportScene.Designer.Uno;
 
 public sealed record ElementBounds(double X, double Y, double Width, double Height);
+public sealed record PopupScrollSnapshot(double HorizontalOffset, double VerticalOffset, double ViewportWidth,
+    double ViewportHeight, double ExtentWidth, double ExtentHeight, bool IsIntermediate, long ViewChangeVersion);
 public sealed record ObjectSnapshot(string Id, string Name, string Kind, RectD Bounds, string? Text, bool Selected, ElementBounds? Screen)
 {
     public bool Locked { get; init; }
 }
 public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview, int TemplatePages, int PreparedPages, int PreviewPage, int ObjectCount, int SelectedCount, bool CanUndo, bool CanRedo, int HistoryCount, double Zoom, long RenderCount, string Status, IReadOnlyList<Diagnostic> Diagnostics, Dictionary<string, ElementBounds> Commands, Dictionary<string, ElementBounds> Properties, IReadOnlyList<ObjectSnapshot> Objects, Dictionary<string, string> Inputs, long SnapshotSequence)
 {
+    public Dictionary<string, PopupScrollSnapshot> PopupScrolls { get; init; } = [];
+    public ReportGpuSurfaceSnapshot DesignGpu { get; init; }
+    public ReportGpuSurfaceSnapshot PreviewGpu { get; init; }
     public Guid DocumentId { get; init; }
     public long ContentRevision { get; init; }
     public long PreviewIndexBuilds { get; init; }
@@ -36,6 +42,7 @@ public sealed record DesignerSnapshot(string Document, bool Dirty, bool Preview,
     public int SearchMatches { get; init; }
     public bool RecoveryPending { get; init; }
     public long DesignLayoutBuilds { get; init; }
+    public DesignViewportSnapshot DesignViewport { get; init; }
     public RectD DesignPaintViewport { get; init; }
     public int DesignDrawnObjects { get; init; }
     public RectD DesignRecordingClip { get; init; }
@@ -93,6 +100,20 @@ public partial class DesignerSnapshotJsonContext : System.Text.Json.Serializatio
 
 public sealed partial class ReportDesignerControl
 {
+    // Passive observers follow each popup ScrollViewer's lifetime. Diagnostic
+    // publication alone is not proof that a queued native wheel was processed.
+    private static readonly ConditionalWeakTable<ScrollViewer, PopupScrollObserver> popupScrollObservers = new();
+    private sealed class PopupScrollObserver
+    {
+        private long version;
+        private bool isIntermediate;
+        public PopupScrollObserver(ScrollViewer scroll)
+            => scroll.ViewChanged += (_, args) => { version++; isIntermediate = args.IsIntermediate; };
+        public PopupScrollSnapshot Read(ScrollViewer scroll)
+            => new(scroll.HorizontalOffset, scroll.VerticalOffset, scroll.ViewportWidth, scroll.ViewportHeight,
+                scroll.ExtentWidth, scroll.ExtentHeight, isIntermediate, version);
+    }
+
     private long snapshotSequence;
     /// <summary>Read-only diagnostic data. Test drivers deliver real input, never invoke application commands.</summary>
     public DesignerSnapshot Snapshot()
@@ -115,13 +136,15 @@ public sealed partial class ReportDesignerControl
             double x = Math.Max(a.X, b.X), y = Math.Max(a.Y, b.Y);
             return new(x, y, Math.Max(0, Math.Min(a.X + a.Width, b.X + b.Width) - x), Math.Max(0, Math.Min(a.Y + a.Height, b.Y + b.Height) - y));
         }
-        ElementBounds? PopupItemBounds(FrameworkElement option, out ElementBounds? popupBounds)
+        ElementBounds? PopupItemBounds(FrameworkElement option, out ElementBounds? popupBounds, out ScrollViewer? popupScroll)
         {
             popupBounds = null;
+            popupScroll = null;
             if (Bounds(option) is not { } visible) return null;
             for (DependencyObject? p = VisualTreeHelper.GetParent(option); p is not null; p = VisualTreeHelper.GetParent(p))
             {
                 if (p is Popup) break;
+                if (p is ScrollViewer scroll) popupScroll ??= scroll;
                 if (p is FrameworkElement parent && (p is ScrollViewer or ScrollContentPresenter || parent.Name == "PopupBorder") && Bounds(parent) is { } clip)
                 {
                     visible = Intersect(visible, clip);
@@ -133,6 +156,7 @@ public sealed partial class ReportDesignerControl
             return visible.Width > 4 && visible.Height > 4 ? visible : null;
         }
         var commandBounds = new Dictionary<string, ElementBounds>(StringComparer.Ordinal);
+        var popupScrolls = new Dictionary<string, PopupScrollSnapshot>(StringComparer.Ordinal);
         var inputs = new Dictionary<string, string>(StringComparer.Ordinal);
         void Input(string id, FrameworkElement element)
         {
@@ -151,9 +175,11 @@ public sealed partial class ReportDesignerControl
                     for (int n = 0; n < choice.Items.Count; n++)
                     {
                         if (choice.ContainerFromIndex(n) is not FrameworkElement option) continue;
-                        var optionBounds = PopupItemBounds(option, out var popupBounds);
+                        var optionBounds = PopupItemBounds(option, out var popupBounds, out var popupScroll);
                         if (popupBounds is not null) commandBounds[id + "-popup"] = popupBounds;
                         if (optionBounds is not null) commandBounds[id + "-option-" + n] = optionBounds;
+                        if (popupScroll is not null && !popupScrolls.ContainsKey(id))
+                            popupScrolls[id] = popupScrollObservers.GetValue(popupScroll, static scroll => new(scroll)).Read(popupScroll);
                     }
                     break;
             }
@@ -176,6 +202,8 @@ public sealed partial class ReportDesignerControl
         var objects = DesignView.Layout.Objects.Select(entry => new ObjectSnapshot(entry.Item.Id, entry.Item.Name, entry.Item.GetType().Name, entry.Item.Bounds, entry.Item is TextItem text ? text.Text : null, Session.SelectedIds.Contains(entry.Item.Id), origin is null ? null : new(origin.X + entry.Bounds.X * DesignView.PointScale, origin.Y + entry.Bounds.Y * DesignView.PointScale, entry.Bounds.Width * DesignView.PointScale, entry.Bounds.Height * DesignView.PointScale)) { Locked = entry.Item.Locked }).ToArray();
         return new(Session.Document.Name, Session.IsDirty, previewMode, Session.Document.Pages.Count, PreviewView.Report?.Pages.Count ?? 0, PreviewView.PageIndex + 1, DocumentTree.AllItems(Session.Document).Count(), Session.SelectedIds.Count, Session.CanUndo, Session.CanRedo, Session.HistoryCount, previewMode ? PreviewView.Zoom : DesignView.Zoom, previewMode ? PreviewView.RenderCount : DesignView.RenderCount, status.Text, diagnostics.ToArray(), commandBounds, propertyBounds, objects, inputs, ++snapshotSequence)
         {
+            PopupScrolls = popupScrolls,
+            DesignGpu = DesignView.GpuSnapshot, PreviewGpu = PreviewView.GpuSnapshot,
             DocumentId = Session.DocumentId, ContentRevision = Session.Revision, PreviewIndexBuilds = PreviewView.IndexBuildCount,
             PreviewCandidatesExamined = PreviewView.LastCandidatesExamined, PreviewViewport = PreviewView.ViewportSnapshot,
             PreviewOutlineVisible = PreviewView.OutlineVisible, PreviewOutlineEffectiveVisible = PreviewView.OutlineEffectivelyVisible,
@@ -184,7 +212,8 @@ public sealed partial class ReportDesignerControl
             PreviewOutlineFilter = PreviewView.OutlineFilter, PreviewOutlineProjectedCount = PreviewView.OutlineProjectedCount,
             PreviewSelectedBookmark = PreviewView.SelectedBookmarkKey, PreviewHighlight = PreviewView.HighlightBounds, PreviewRevealPending = PreviewView.RevealPending,
             SearchQueryScans = searchSession?.QueryScanCount ?? 0, SearchMatches = searchSession?.Matches.Count ?? 0, RecoveryPending = recovery.HasPending,
-            DesignLayoutBuilds = DesignView.LayoutBuildCount, DesignPaintViewport = DesignView.LastPaintViewport, DesignDrawnObjects = DesignView.LastDrawnObjectCount,
+            DesignLayoutBuilds = DesignView.LayoutBuildCount, DesignViewport = DesignView.ViewportSnapshot,
+            DesignPaintViewport = DesignView.LastPaintViewport, DesignDrawnObjects = DesignView.LastDrawnObjectCount,
             DesignRecordingClip = DesignView.LastRecordingClip, DesignRecordingMilliseconds = DesignView.LastRecordingMilliseconds,
             DesignDeferredRenders = DesignView.DeferredRenderCount,
             DesignGridPoints = DesignView.LastGridStatistics.Points, DesignGridSubmissions = DesignView.LastGridStatistics.Submissions,

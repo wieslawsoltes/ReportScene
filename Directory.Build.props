@@ -9,6 +9,9 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <Deterministic>true</Deterministic>
+    <!-- Keep CPU text/export and the Uno platform native assets ABI-compatible. -->
+    <SkiaSharpVersion>4.151.1</SkiaSharpVersion>
+    <HarfBuzzSharpVersion>14.4.0</HarfBuzzSharpVersion>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
   <ItemGroup>

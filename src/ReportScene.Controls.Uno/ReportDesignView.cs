@@ -7,11 +7,17 @@ using ReportScene.Designer;
 using ReportScene.Model;
 using ReportScene.Rendering.Skia;
 using SkiaSharp;
-using Uno.WinUI.Graphics2DSK;
 using Windows.Foundation;
 using Windows.System;
 
 namespace ReportScene.Controls.Uno;
+
+/// <summary>Native scroll geometry and the ScrollViewer animation state.</summary>
+public readonly record struct DesignViewportSnapshot(double Width, double Height, double ExtentWidth, double ExtentHeight,
+    double HorizontalOffset, double VerticalOffset, bool IsIntermediate)
+{
+    public long ViewChangeVersion { get; init; }
+}
 
 public sealed class ReportDesignView : UserControl, IDisposable
 {
@@ -25,7 +31,8 @@ public sealed class ReportDesignView : UserControl, IDisposable
     private string? clickSelection;
     private bool pointerMoved;
     private double zoom = .85;
-    private bool showFullPage;
+    private bool showFullPage, scrollIsIntermediate;
+    private long scrollViewChangeVersion;
     public bool ShowFullPage { get => showFullPage; set { if (showFullPage == value) return; showFullPage = value; Refresh(); } }
     public DesignerSession Session { get; }
     public DesignerFormatPainter FormatPainter { get; }
@@ -41,10 +48,14 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public double PointScale => Zoom * 96 / 72;
     public DesignLayout Layout => surface.Layout;
     public long RenderCount => surface.RenderCount;
+    public ReportGpuSurfaceSnapshot GpuSnapshot => surface.GpuSnapshot;
+    public string? RenderingError => surface.RenderingError;
     public TextLayoutCache TextLayouts => surface.TextLayouts;
     public long LayoutBuildCount { get; private set; } = 1;
     public FrameworkElement CanvasElement => surface;
     public FrameworkElement ViewportElement => scroll;
+    public DesignViewportSnapshot ViewportSnapshot => new(scroll.ViewportWidth, scroll.ViewportHeight, scroll.ExtentWidth, scroll.ExtentHeight,
+        scroll.HorizontalOffset, scroll.VerticalOffset, scrollIsIntermediate) { ViewChangeVersion = scrollViewChangeVersion };
     public RectD LastPaintViewport => surface.LastViewport;
     public int LastDrawnObjectCount => surface.LastDrawnObjectCount;
     public GridPaintStatistics LastGridStatistics => surface.LastGridStatistics;
@@ -54,6 +65,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
     public event Action<ReportItem>? EditRequested;
     public event Action<Exception>? Failed;
     public event Action? ViewChanged;
+    public event Action? RenderingStateChanged;
     public event Action? InteractionCompleted;
     public ReportDesignView(DesignerSession session, ReportRenderer renderer)
     {
@@ -72,8 +84,9 @@ public sealed class ReportDesignView : UserControl, IDisposable
         scroll.Loaded += (_, _) => surface.Invalidate();
         surface.SizeChanged += (_, _) => surface.Invalidate();
         scroll.SizeChanged += (_, _) => surface.Invalidate();
-        scroll.ViewChanged += (_, _) => surface.Invalidate();
-        surface.RenderFailed += e => Failed?.Invoke(e); KeyDown += OnKeyDown;
+        scroll.ViewChanged += (_, e) => { scrollViewChangeVersion++; scrollIsIntermediate = e.IsIntermediate; surface.Invalidate(); };
+        surface.RenderFailed += e => Failed?.Invoke(e);
+        surface.RendererStateChanged += () => { RenderingStateChanged?.Invoke(); ViewChanged?.Invoke(); }; KeyDown += OnKeyDown;
         Session.Changed += SessionChanged; Session.SelectionChanged += SelectionChanged; SizeSurface();
     }
     private RectD? VisibleViewport()
@@ -193,9 +206,9 @@ public sealed class ReportDesignView : UserControl, IDisposable
     {
         if (disposed) return; disposed = true;
         Session.Changed -= SessionChanged; Session.SelectionChanged -= SelectionChanged;
-        FormatPainter.Dispose(); surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); surface.GridPainter.Clear(); base.Dispose();
+        FormatPainter.Dispose(); surface.ReleasePointerCaptures(); surface.TextLayouts.Clear(); surface.GridPainter.Clear(); surface.Dispose(); base.Dispose();
     }
-    private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer, Func<RectD?> visibleViewport) : SKCanvasElement
+    private sealed class DesignerCanvas(DesignerSession session, ReportRenderer renderer, Func<RectD?> visibleViewport) : ReportCanvasElement
     {
         private static readonly ResizeHandle[] SelectionHandles = Enum.GetValues<ResizeHandle>();
         public DesignLayout Layout { get; set; } = DesignLayout.Create(session.Page, false);
@@ -213,22 +226,24 @@ public sealed class ReportDesignView : UserControl, IDisposable
         public long RenderCount { get; private set; }
         public RectD LastViewport { get; private set; }
         public int LastDrawnObjectCount { get; private set; }
-        public event Action<Exception>? RenderFailed;
-        private string? lastError;
-        protected override void RenderOverride(SKCanvas canvas, Size area)
+        protected override RectD? GetRenderViewport()
+        {
+            if (visibleViewport() is not { } visible) { DeferredRenderCount++; return null; }
+            return new(visible.X * PointScale, visible.Y * PointScale, visible.Width * PointScale, visible.Height * PointScale);
+        }
+        protected override void RenderOverride(ReportCanvas canvas, Size area)
         {
             long started = Stopwatch.GetTimestamp();
             canvas.Save(); canvas.Scale((float)PointScale); LastDrawnObjectCount = 0; LastGridStatistics = default;
             LastViewport = LastRecordingClip = default;
             using var paint = new SKPaint { IsAntialias = false };
-            using var dash = SKPathEffect.CreateDash([2, 2], 0);
             try
             {
                 var paper = Layout.Paper;
-                // Never record the entire document as a fallback while native
-                // geometry is unavailable. Loaded/SizeChanged/ViewChanged schedule
-                // the next recording; no idle retry timer is needed.
-                if (visibleViewport() is not { } visible) { DeferredRenderCount++; return; }
+                // The target and this recording use one viewport snapshot. The
+                // outer element still provides full-document pointer coordinates.
+                var visible = new RectD(RenderViewport.X / PointScale, RenderViewport.Y / PointScale,
+                    RenderViewport.Width / PointScale, RenderViewport.Height / PointScale);
                 LastViewport = visible;
                 var recordingClip = ReportViewportClip.Apply(canvas, visible);
                 LastRecordingClip = new(recordingClip.Left, recordingClip.Top,
@@ -272,7 +287,7 @@ public sealed class ReportDesignView : UserControl, IDisposable
                         renderer.DrawText(canvas, error.Message, entry.Bounds, new() { FontSize = 8, Foreground = "#A3372E" });
                     }
                     paint.Style = SKPaintStyle.Stroke; paint.StrokeWidth = (float)(1 / PointScale); paint.Color = ReportRenderer.Color("#B3B3B3");
-                    paint.PathEffect = dash; canvas.DrawRect(ReportRenderer.Rect(entry.Bounds), paint); paint.PathEffect = null; paint.Style = SKPaintStyle.Fill;
+                    canvas.DrawDashedRect(ReportRenderer.Rect(entry.Bounds), paint); paint.Style = SKPaintStyle.Fill;
                 }
                 if (session.SelectedIds.Count > 0) foreach (var entry in Layout.Objects)
                 {
@@ -289,12 +304,10 @@ public sealed class ReportDesignView : UserControl, IDisposable
                     paint.Style = SKPaintStyle.Fill;
                 }
                 if (Marquee is { } box) { paint.Color = ReportRenderer.Color("#303976B4"); canvas.DrawRect(ReportRenderer.Rect(box), paint); paint.Style = SKPaintStyle.Stroke; paint.Color = ReportRenderer.Color("#3976B4"); canvas.DrawRect(ReportRenderer.Rect(box), paint); }
-                lastError = null;
             }
-            catch (Exception e) { if (lastError != e.Message) { lastError = e.Message; RenderFailed?.Invoke(e); } }
             finally { canvas.Restore(); LastRecordingMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds; }
         }
-        private void DrawRulers(SKCanvas canvas, SKPaint paint, SKRect viewport)
+        private void DrawRulers(ReportCanvas canvas, SKPaint paint, SKRect viewport)
         {
             paint.Color = ReportRenderer.Color("#F0F0F0");
             canvas.DrawRect((float)Layout.Paper.X, 0, (float)Layout.Paper.Width, (float)DesignLayout.RulerSize, paint);

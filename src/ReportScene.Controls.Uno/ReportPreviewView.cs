@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml.Input;
 using ReportScene.Model;
 using ReportScene.Rendering.Skia;
 using SkiaSharp;
-using Uno.WinUI.Graphics2DSK;
 using Windows.Foundation;
 using Windows.System;
 
@@ -17,7 +16,11 @@ public readonly record struct PreviewPaintSnapshot(double AreaWidth, double Area
     public RectD Viewport { get; init; }
 }
 public readonly record struct PreviewViewportSnapshot(double Width, double Height, double ExtentWidth, double ExtentHeight,
-    double HorizontalOffset, double VerticalOffset, string FocusOwner, PreviewPaintSnapshot Paint);
+    double HorizontalOffset, double VerticalOffset, string FocusOwner, PreviewPaintSnapshot Paint)
+{
+    public bool IsIntermediate { get; init; }
+    public long ViewChangeVersion { get; init; }
+}
 
 /// <summary>The current-page spatial index is retained; optional bookmark metadata is materialized only when the outline is opened.</summary>
 public sealed partial class ReportPreviewView : UserControl
@@ -27,6 +30,8 @@ public sealed partial class ReportPreviewView : UserControl
     private PreparedReport? report;
     private int pageIndex;
     private double zoom = 1;
+    private bool scrollIsIntermediate;
+    private long scrollViewChangeVersion;
     public PreparedReport? Report
     {
         get => report;
@@ -55,19 +60,23 @@ public sealed partial class ReportPreviewView : UserControl
         set { if (!double.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value)); double next = Math.Clamp(value, ReportPreviewFit.MinimumZoom, ReportPreviewFit.MaximumZoom); if (next == zoom) return; zoom = next; Refresh(); }
     }
     public long RenderCount => surface.RenderCount;
+    public ReportGpuSurfaceSnapshot GpuSnapshot => surface.GpuSnapshot;
+    public string? RenderingError => surface.RenderingError;
     public long IndexBuildCount => surface.IndexBuildCount;
     public int LastCandidatesExamined => surface.LastCandidatesExamined;
     public FrameworkElement CanvasElement => surface;
     public FrameworkElement ViewportElement => scroll;
     public PreviewViewportSnapshot ViewportSnapshot => new(scroll.ViewportWidth, scroll.ViewportHeight, scroll.ExtentWidth, scroll.ExtentHeight,
-        scroll.HorizontalOffset, scroll.VerticalOffset, XamlRoot is null ? "" : FocusManager.GetFocusedElement(XamlRoot)?.GetType().Name ?? "", surface.LastPaint);
+        scroll.HorizontalOffset, scroll.VerticalOffset, XamlRoot is null ? "" : FocusManager.GetFocusedElement(XamlRoot)?.GetType().Name ?? "", surface.LastPaint) { IsIntermediate = scrollIsIntermediate, ViewChangeVersion = scrollViewChangeVersion };
     public event Action? ViewChanged;
+    public event Action? RenderingStateChanged;
     public event Action<Exception>? Failed;
     public ReportPreviewView(ReportRenderer renderer)
     {
         IsTabStop = true;
         surface = new(renderer, VisibleViewport) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new(16) };
-        surface.Failed += e => Failed?.Invoke(e);
+        surface.RenderFailed += e => Failed?.Invoke(e);
+        surface.RendererStateChanged += () => { RenderingStateChanged?.Invoke(); ViewChanged?.Invoke(); };
         scroll = new() { Content = surface, IsTabStop = true, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Enabled, Background = ControlTheme.Brush("#AAB2BA") };
         surface.PointerPressed += (_, e) =>
         {
@@ -76,7 +85,7 @@ public sealed partial class ReportPreviewView : UserControl
         };
         surface.SizeChanged += (_, _) => { surface.Invalidate(); QueueReveal(); };
         scroll.SizeChanged += (_, _) => { surface.Invalidate(); QueueReveal(); };
-        scroll.ViewChanged += (_, _) => surface.Invalidate();
+        scroll.ViewChanged += (_, e) => { scrollViewChangeVersion++; scrollIsIntermediate = e.IsIntermediate; surface.Invalidate(); };
         InitializeOutline();
         ControlTheme.Identify(this, "report-preview-view", "Prepared report preview; Page Up/Down changes pages, Ctrl+Home/End jumps to first/last");
         // Tunnelling runs before the ScrollViewer's class handler consumes paging keys.
@@ -137,7 +146,7 @@ public sealed partial class ReportPreviewView : UserControl
         if (index < 0) { surface.Highlight = null; surface.Invalidate(); return; }
         ShowTarget(index, hit.Bounds);
     }
-    private sealed class PreviewCanvas(ReportRenderer renderer, Func<RectD?> visibleViewport) : SKCanvasElement
+    private sealed class PreviewCanvas(ReportRenderer renderer, Func<RectD?> visibleViewport) : ReportCanvasElement
     {
         private PreparedPage? sourcePage;
         private PreparedPageIndex? index;
@@ -148,9 +157,7 @@ public sealed partial class ReportPreviewView : UserControl
         public long IndexBuildCount { get; private set; }
         public int LastCandidatesExamined { get; private set; }
         public PreviewPaintSnapshot LastPaint { get; private set; }
-        public event Action<Exception>? Failed;
-        private string? lastError;
-        public void ResetPage() { sourcePage = null; index = null; Highlight = null; LastCandidatesExamined = 0; lastError = null; LastPaint = default; }
+        public void ResetPage() { sourcePage = null; index = null; Highlight = null; LastCandidatesExamined = 0; LastPaint = default; }
         public void SetPage(PreparedPage? page)
         {
             if (ReferenceEquals(sourcePage, page)) return;
@@ -158,21 +165,25 @@ public sealed partial class ReportPreviewView : UserControl
             if (page is null) return;
             var created = new PreparedPageIndex(page); sourcePage = page; index = created; IndexBuildCount++;
         }
-        protected override void RenderOverride(SKCanvas canvas, Size area)
+        protected override RectD? GetRenderViewport()
+        {
+            if (visibleViewport() is not { } visible) return null;
+            return new(visible.X * PointScale, visible.Y * PointScale, visible.Width * PointScale, visible.Height * PointScale);
+        }
+        protected override void RenderOverride(ReportCanvas canvas, Size area)
         {
             if (index is null) return;
             canvas.Save(); canvas.Scale((float)PointScale); RenderCount++;
             try
             {
-                var viewport = visibleViewport() ?? new RectD(0, 0, index.Page.Width, index.Page.Height);
+                var viewport = new RectD(RenderViewport.X / PointScale, RenderViewport.Y / PointScale,
+                    RenderViewport.Width / PointScale, RenderViewport.Height / PointScale);
                 var clip = canvas.LocalClipBounds; var matrix = canvas.TotalMatrix;
                 LastPaint = new(area.Width, area.Height, PointScale, new(clip.Left, clip.Top, clip.Width, clip.Height),
                     new(0, 0, index.Page.Width, index.Page.Height), matrix.ScaleX, matrix.ScaleY, matrix.TransX, matrix.TransY) { Viewport = viewport };
                 LastCandidatesExamined = renderer.DrawIndexedPage(canvas, index, viewport);
                 if (Highlight is { } bounds) { using var paint = new SKPaint { Color = new(255, 211, 58, 115) }; canvas.DrawRect(ReportRenderer.Rect(bounds), paint); }
-                lastError = null;
             }
-            catch (Exception e) { if (lastError != e.Message) { lastError = e.Message; Failed?.Invoke(e); } }
             finally { canvas.Restore(); }
         }
     }

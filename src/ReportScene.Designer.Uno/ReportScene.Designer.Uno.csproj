@@ -3,7 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Library</OutputType>
     <IsPackable>true</IsPackable>
-    <UnoFeatures>Skia;</UnoFeatures>
+    <UnoFeatures>Skia;WebGpu;</UnoFeatures>
     <Description>Embeddable Uno report designer workspace, ribbon, data and report trees, property editing and preview/export UI.</Description>
   </PropertyGroup>
   <ItemGroup>
