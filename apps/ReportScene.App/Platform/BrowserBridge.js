@@ -1,6 +1,50 @@
 (() => {
   'use strict';
   if (window.reportSceneHost) return;
+
+  // Uno 7.0.32 allocates an integer backing store from document size * DPR,
+  // but its fixed-position root canvas keeps width/height: 100%. Fractional
+  // physical extents then stretch the whole UI (e.g. 1921 texels over 1921.25
+  // pixels). Keep Uno's allocation and logical document/input coordinates.
+  // Integer CSS dimensions plus an inverse-DPR transform also avoid fractional
+  // CSS layout quantization before the browser presents the existing texture.
+  let rootCanvas, rootContainer;
+  const alignRootCanvas = () => {
+    const density = window.devicePixelRatio;
+    if (!rootCanvas || !Number.isFinite(density) || density <= 0
+        || rootCanvas.width <= 0 || rootCanvas.height <= 0) return;
+    const style = rootCanvas.style;
+    const width = rootCanvas.width + 'px', height = rootCanvas.height + 'px';
+    const transform = `scale(${1 / density})`;
+    if (style.width !== width) style.width = width;
+    if (style.height !== height) style.height = height;
+    if (style.transformOrigin !== '0px 0px') style.transformOrigin = '0px 0px';
+    if (style.transform !== transform) style.transform = transform;
+  };
+  const canvasDimensions = new MutationObserver(alignRootCanvas);
+  const canvasChildren = new MutationObserver(() => bindRootCanvas());
+  const bindRootCanvas = () => {
+    const container = document.getElementById('uno-body') || document.getElementById('uno-root');
+    if (container !== rootContainer) {
+      canvasChildren.disconnect();
+      rootContainer = container;
+      if (rootContainer) canvasChildren.observe(rootContainer, { childList: true });
+    }
+    const next = document.getElementById('uno-canvas');
+    if (next === rootCanvas) return;
+    canvasDimensions.disconnect();
+    rootCanvas = next instanceof HTMLCanvasElement ? next : null;
+    if (rootCanvas) canvasDimensions.observe(rootCanvas, { attributes: true, attributeFilter: ['width', 'height'] });
+    alignRootCanvas();
+  };
+  // Uno attaches the canvas inside its root container. Observe only that child
+  // list and the body's container replacement, not the full accessibility tree.
+  // Style writes cannot retrigger the backing-dimension observer.
+  new MutationObserver(bindRootCanvas).observe(document.body, { childList: true });
+  window.addEventListener('resize', alignRootCanvas, { passive: true });
+  window.visualViewport?.addEventListener('resize', alignRootCanvas, { passive: true });
+  bindRootCanvas();
+
   const results = new Map();
   let clipboard = '';
   window.reportScene = { ready: false, state: null, tests: null, downloads: [] };

@@ -19,6 +19,10 @@ public readonly record struct ReportGpuSurfaceSnapshot(string State, bool? Initi
     int PixelWidth, int PixelHeight, RectD Viewport, double SubmissionMilliseconds, string? Error)
 {
     public WebGpuRenderStatistics Statistics { get; init; }
+    public double RasterizationScale { get; init; }
+    public RectD? RequestedViewport { get; init; }
+    /// <summary>The arranged GPU child's observed bounds in root DIPs, before ancestor clipping.</summary>
+    public RectD? PresentationBounds { get; init; }
 }
 
 /// <summary>
@@ -29,7 +33,9 @@ public readonly record struct ReportGpuSurfaceSnapshot(string State, bool? Initi
 public abstract class ReportCanvasElement : Grid, IDisposable
 {
     private readonly GpuView gpu;
-    private readonly TranslateTransform translation = new();
+    private readonly Canvas gpuHost = new() { IsHitTestVisible = false, UseLayoutRounding = false };
+    private readonly RectangleGeometry presentationClip = new();
+    private readonly MatrixTransform presentationTransform = new();
     private readonly TranslateTransform errorTranslation = new();
     private readonly TextBlock errorText = new()
     {
@@ -40,7 +46,12 @@ public abstract class ReportCanvasElement : Grid, IDisposable
     private readonly Border errorPresenter;
     private int invalidateQueued;
     private bool awaitingGeometry = true, disposed;
-    private RectD viewport;
+    private RectD viewport, submittedViewport;
+    private RectD? requestedViewport;
+    private ReportRasterViewport rasterViewport;
+    private XamlRoot? observedRoot;
+    private Point lastRootOrigin;
+    private double rasterizationScale = 1;
     private string? lastError;
     private string state = "Waiting";
     private long submittedFrames;
@@ -52,7 +63,13 @@ public abstract class ReportCanvasElement : Grid, IDisposable
     public event Action? RendererStateChanged;
     public string? RenderingError => lastError;
     public ReportGpuSurfaceSnapshot GpuSnapshot => new(state, gpu.IsWebGpuInitialized, submittedFrames,
-        pixelWidth, pixelHeight, viewport, submissionMilliseconds, lastError) { Statistics = statistics };
+        pixelWidth, pixelHeight, submittedFrames > 0 ? submittedViewport : viewport, submissionMilliseconds, lastError)
+    {
+        Statistics = statistics,
+        RasterizationScale = rasterizationScale,
+        RequestedViewport = requestedViewport,
+        PresentationBounds = GetPresentationBounds()
+    };
 
     protected RectD RenderViewport => viewport;
     protected virtual bool ShowRenderingErrors => true;
@@ -67,8 +84,9 @@ public abstract class ReportCanvasElement : Grid, IDisposable
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
             IsHitTestVisible = false,
+            UseLayoutRounding = false,
             Visibility = Visibility.Collapsed,
-            RenderTransform = translation
+            RenderTransform = presentationTransform
         };
         errorPresenter = new()
         {
@@ -83,14 +101,18 @@ public abstract class ReportCanvasElement : Grid, IDisposable
             Visibility = Visibility.Collapsed,
             RenderTransform = errorTranslation
         };
-        Children.Add(gpu);
+        gpuHost.Clip = presentationClip;
+        gpuHost.Children.Add(gpu);
+        Children.Add(gpuHost);
         Children.Add(errorPresenter);
-        Loaded += (_, _) => Invalidate();
+        Loaded += (_, _) => { ObserveRoot(); Invalidate(); };
         SizeChanged += (_, _) => Invalidate();
-        LayoutUpdated += (_, _) => { if (awaitingGeometry) Invalidate(); };
+        LayoutUpdated += OnLayoutUpdated;
         Unloaded += (_, _) =>
         {
+            ObserveRoot(null);
             awaitingGeometry = true;
+            requestedViewport = null;
             if (!disposed) state = "Waiting";
         };
         gpu.RegisterPropertyChangedCallback(WebGpuCanvasElement.IsWebGpuInitializedProperty, (_, _) =>
@@ -121,6 +143,7 @@ public abstract class ReportCanvasElement : Grid, IDisposable
                 if (next is null)
                 {
                     awaitingGeometry = true;
+                    requestedViewport = null;
                     gpu.Visibility = Visibility.Collapsed;
                     errorPresenter.Visibility = Visibility.Collapsed;
                     return;
@@ -132,18 +155,39 @@ public abstract class ReportCanvasElement : Grid, IDisposable
                     || !double.IsFinite(rect.Right) || !double.IsFinite(rect.Bottom)
                     || rect.Width < 0 || rect.Height < 0)
                     throw new InvalidOperationException("The WebGPU viewport must have finite nonnegative dimensions.");
+                if (!double.IsFinite(ActualWidth) || !double.IsFinite(ActualHeight))
+                    throw new InvalidOperationException("The logical report surface must have finite dimensions.");
                 rect = PreparedVisibility.Intersect(rect, new(0, 0, ActualWidth, ActualHeight));
-                viewport = rect;
+                requestedViewport = rect;
                 if (rect.Width <= 0 || rect.Height <= 0)
                 {
+                    viewport = rect;
                     gpu.Visibility = Visibility.Collapsed;
                     errorPresenter.Visibility = Visibility.Collapsed;
                     return;
                 }
-                if (gpu.Width != rect.Width) gpu.Width = rect.Width;
-                if (gpu.Height != rect.Height) gpu.Height = rect.Height;
-                translation.X = errorTranslation.X = rect.X;
-                translation.Y = errorTranslation.Y = rect.Y;
+                ObserveRoot();
+                rasterizationScale = XamlRoot?.RasterizationScale ?? 1;
+                lastRootOrigin = TransformToVisual(null).TransformPoint(new(0, 0));
+                rasterViewport = ReportRasterViewport.Calculate(rect, lastRootOrigin.X, lastRootOrigin.Y, rasterizationScale);
+                viewport = rasterViewport.Bounds;
+                // Uno 7.0.32 records this visual in its own logical coordinates:
+                // WebGpuCanvasElement sizes its texture from that identity recorder,
+                // while the root DPI transform is applied only when it is replayed.
+                // Use integer physical dimensions here, then cancel DPI in this
+                // private child's presentation transform. The outer document remains
+                // in DIPs. Canvas measures independently, so the larger child cannot
+                // change the document's desired size or be clipped to a small slot.
+                // Keep the expanded viewport: intersecting it again would stretch
+                // N texels over a nonintegral number of physical pixels.
+                if (gpu.Width != rasterViewport.PixelWidth) gpu.Width = rasterViewport.PixelWidth;
+                if (gpu.Height != rasterViewport.PixelHeight) gpu.Height = rasterViewport.PixelHeight;
+                var matrix = new Matrix(1 / rasterizationScale, 0, 0, 1 / rasterizationScale, viewport.X, viewport.Y);
+                if (!presentationTransform.Matrix.Equals(matrix)) presentationTransform.Matrix = matrix;
+                var clip = new Rect(0, 0, ActualWidth, ActualHeight);
+                if (presentationClip.Rect != clip) presentationClip.Rect = clip;
+                errorTranslation.X = rect.X;
+                errorTranslation.Y = rect.Y;
                 errorPresenter.Width = Math.Min(560, rect.Width);
                 errorPresenter.Visibility = ShowRenderingErrors && lastError is not null ? Visibility.Visible : Visibility.Collapsed;
                 gpu.Visibility = Visibility.Visible;
@@ -151,6 +195,49 @@ public abstract class ReportCanvasElement : Grid, IDisposable
             }
             catch (Exception error) { ReportFailure(error); }
         })) Interlocked.Exchange(ref invalidateQueued, 0);
+    }
+
+    private void ObserveRoot() => ObserveRoot(XamlRoot);
+
+    private void ObserveRoot(XamlRoot? root)
+    {
+        if (ReferenceEquals(observedRoot, root)) return;
+        if (observedRoot is not null) observedRoot.Changed -= OnRootChanged;
+        observedRoot = root;
+        if (root is not null) root.Changed += OnRootChanged;
+    }
+
+    private void OnRootChanged(XamlRoot root, XamlRootChangedEventArgs args)
+    {
+        if (!disposed && IsLoaded && root.RasterizationScale != rasterizationScale) Invalidate();
+    }
+
+    private void OnLayoutUpdated(object? sender, object args)
+    {
+        if (disposed || !IsLoaded) return;
+        ObserveRoot();
+        if (awaitingGeometry) { Invalidate(); return; }
+        if (requestedViewport is not { Width: > 0, Height: > 0 } requested || lastError is not null) return;
+        try
+        {
+            double scale = XamlRoot?.RasterizationScale ?? 1;
+            var origin = TransformToVisual(null).TransformPoint(new(0, 0));
+            if (scale == rasterizationScale && origin == lastRootOrigin) return;
+            var next = ReportRasterViewport.Calculate(requested, origin.X, origin.Y, scale);
+            lastRootOrigin = origin;
+            // Integer-pixel translations keep the same local raster phase and do
+            // not require new report commands. Observe only owner geometry, never
+            // the enlarged child's layout, so this cannot form a resize feedback loop.
+            if (scale != rasterizationScale || !next.HasSamePixelMapping(rasterViewport, scale)) Invalidate();
+        }
+        catch (Exception error) { ReportFailure(error); }
+    }
+
+    private RectD? GetPresentationBounds()
+    {
+        if (disposed || !gpu.IsLoaded || gpu.Visibility != Visibility.Visible || gpu.ActualWidth <= 0 || gpu.ActualHeight <= 0) return null;
+        var bounds = gpu.TransformToVisual(null).TransformBounds(new(0, 0, gpu.ActualWidth, gpu.ActualHeight));
+        return new(bounds.X, bounds.Y, bounds.Width, bounds.Height);
     }
 
     private void ReportFailure(Exception error, bool unavailable = false)
@@ -177,10 +264,13 @@ public abstract class ReportCanvasElement : Grid, IDisposable
     {
         if (disposed) return;
         disposed = true;
+        ObserveRoot(null);
         state = "Disposed";
         gpu.ReleaseRenderer();
+        gpuHost.Children.Clear();
         Children.Clear();
         gpu.Dispose();
+        gpuHost.Dispose();
         base.Dispose();
     }
 
@@ -202,7 +292,12 @@ public abstract class ReportCanvasElement : Grid, IDisposable
 
         protected override void RenderOverride(WebGpuCanvasContext context)
         {
-            if (owner.disposed || renderer is null) return;
+            if (owner.disposed || renderer is null || owner.requestedViewport is not { Width: > 0, Height: > 0 }) return;
+            // A queued paint can precede layout of a newly sized child. Wait for
+            // Uno's resize repaint instead of recording new content into an old
+            // density target or reporting that transitional frame as ready.
+            if (context.PixelWidth != owner.rasterViewport.PixelWidth
+                || context.PixelHeight != owner.rasterViewport.PixelHeight) return;
             long started = Stopwatch.GetTimestamp();
             try
             {
@@ -211,6 +306,7 @@ public abstract class ReportCanvasElement : Grid, IDisposable
                 owner.submissionMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 owner.pixelWidth = context.PixelWidth;
                 owner.pixelHeight = context.PixelHeight;
+                owner.submittedViewport = owner.viewport;
                 owner.statistics = renderer.LastStatistics;
                 owner.submittedFrames++;
                 bool changed = owner.state != "WebGPU" || owner.lastError is not null;
