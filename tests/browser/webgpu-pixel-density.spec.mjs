@@ -35,6 +35,23 @@ function surfaceObservation(snapshot, mode) {
     designLayoutBuilds: snapshot.DesignLayoutBuilds, previewIndexBuilds: snapshot.PreviewIndexBuilds };
 }
 
+async function rootCanvasObservation(page) {
+  return page.evaluate(() => {
+    const canvas = document.getElementById('uno-canvas');
+    if (!(canvas instanceof HTMLCanvasElement)) return null;
+    const bounds = canvas.getBoundingClientRect(), style = getComputedStyle(canvas);
+    return { devicePixelRatio, viewport: { width: innerWidth, height: innerHeight },
+      backingWidth: canvas.width, backingHeight: canvas.height,
+      bounds: { X: bounds.x, Y: bounds.y, Width: bounds.width, Height: bounds.height },
+      clientWidth: canvas.clientWidth, clientHeight: canvas.clientHeight,
+      inlineStyle: { width: canvas.style.width, height: canvas.style.height, transform: canvas.style.transform },
+      computedStyle: { width: style.width, height: style.height, transform: style.transform,
+        imageRendering: style.imageRendering },
+      document: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
+        scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight } };
+  });
+}
+
 async function submittedFrame(page, mode, zoom, after = 0) {
   const key = mode === 'design' ? 'Design' : 'Preview';
   await waitForScrollSettled(page, key + 'Viewport');
@@ -44,9 +61,26 @@ async function submittedFrame(page, mode, zoom, after = 0) {
     const gpu = snapshot?.[key + 'Gpu'], scroll = snapshot?.[key + 'Viewport'];
     const painted = mode === 'design' ? snapshot?.DesignPaintViewport : scroll?.Paint?.Viewport;
     const scale = zoom * 96 / 72;
+    const presentation = gpu?.PresentationBounds, requested = gpu?.RequestedViewport;
+    const paper = snapshot?.Commands?.[mode + '-paper'];
+    // Layout can arrange the resized child before its replacement frame has
+    // submitted. Require current arrangement and the recorded mapping to agree,
+    // including same-size phase changes. This is readiness, not a wait for the
+    // requested density, pixel alignment or screenshot sharpness to pass.
+    // The historical baseline predates these additive native diagnostics.
+    const coherent = !Object.hasOwn(gpu ?? {}, 'PresentationBounds') || (presentation && requested && paper
+      && Number.isFinite(gpu.RasterizationScale) && gpu.RasterizationScale > 0
+      && ['Width', 'Height'].every(axis => Math.abs(presentation[axis] * gpu.RasterizationScale - gpu['Pixel' + axis]) < .01)
+      && ['X', 'Y'].every(axis => Math.abs((paper[axis] + gpu.Viewport[axis] - presentation[axis]) * gpu.RasterizationScale) < .01)
+      && [['X', 'Width'], ['Y', 'Height']].every(([origin, size]) => {
+        const before = (requested[origin] - gpu.Viewport[origin]) * gpu.RasterizationScale;
+        const after = (gpu.Viewport[origin] + gpu.Viewport[size] - requested[origin] - requested[size]) * gpu.RasterizationScale;
+        return before >= -.01 && after >= -.01 && before < 1.01 && after < 1.01;
+      }));
     if (!gpu || !painted || snapshot.Zoom !== zoom || scroll.IsIntermediate
         || gpu.State !== 'WebGPU' || gpu.Initialized !== true || gpu.Error !== null
         || gpu.SubmittedFrames <= after || gpu.PixelWidth <= 0 || gpu.PixelHeight <= 0
+        || !coherent
         || !['X', 'Y', 'Width', 'Height'].every(axis => Math.abs(painted[axis] * scale - gpu.Viewport[axis]) < .01)
         || (mode === 'preview' && Math.abs(scroll.Paint.PointScale - scale) > .0001)) {
       previous = ''; stable = 0; return false;
@@ -54,7 +88,8 @@ async function submittedFrame(page, mode, zoom, after = 0) {
     if (snapshot.SnapshotSequence === previousSequence) return false;
     previousSequence = snapshot.SnapshotSequence;
     const current = JSON.stringify([gpu.SubmittedFrames, gpu.Viewport, gpu.PixelWidth, gpu.PixelHeight,
-      gpu.PresentationBounds, snapshot.Commands[mode + '-paper'], scroll.HorizontalOffset, scroll.VerticalOffset]);
+      gpu.RasterizationScale, gpu.RequestedViewport, gpu.PresentationBounds,
+      snapshot.Commands[mode + '-paper'], scroll.HorizontalOffset, scroll.VerticalOffset]);
     stable = current === previous ? stable + 1 : 1; previous = current;
     return stable >= 3;
   }, { message: 'The ' + mode + ' surface submits and settles at zoom ' + zoom }).toBe(true);
@@ -97,6 +132,19 @@ function assertPhysicalSurface(frame, density) {
       expect(after, 'Outward alignment needs less than one extra trailing pixel').toBeLessThan(1.01);
     }
   }
+  // The browser also presents Uno's root canvas. A fractional CSS viewport can
+  // resample that whole surface even when the native report child is correct.
+  const root = frame.rootCanvas;
+  expect(root, 'Observe the actual Uno root canvas backing and DOM presentation').toBeTruthy();
+  expect(root.devicePixelRatio).toBe(density);
+  for (const axis of ['Width', 'Height'])
+    expect(Math.abs(root.bounds[axis] * density - root['backing' + axis]),
+      frame.name + ': the browser must present each root canvas pixel at native size').toBeLessThan(.01);
+  for (const axis of ['X', 'Y'])
+    expect(Math.abs(root.bounds[axis] * density),
+      frame.name + ': the root canvas origin must remain at the physical viewport origin').toBeLessThan(.01);
+  expect(root.document.width, 'Root canvas sizing must preserve the application viewport width').toBe(root.viewport.width);
+  expect(root.document.height, 'Root canvas sizing must preserve the application viewport height').toBe(root.viewport.height);
 }
 
 function barcodeProfiles(pixels, frame, density) {
@@ -153,6 +201,7 @@ for (const density of [1.25, 2]) test.describe('Native physical density ' + dens
       const snapshot = await submittedFrame(page, mode, zoom, after);
       const frame = { name, ...surfaceObservation(snapshot, mode) };
       frames.push(frame);
+      frame.rootCanvas = await rootCanvasObservation(page);
       const pixels = screenshotPixels(await screenshot(page, info.outputPath(name + '.png')));
       frame.screenshot = { width: pixels.width, height: pixels.height };
       if (mode === 'preview') frame.barcode = barcodeProfiles(pixels, frame, density);
@@ -198,8 +247,6 @@ for (const density of [1.25, 2]) test.describe('Native physical density ' + dens
         if (Math.abs(offset - Math.round(offset)) > .01) break;
       }
       const offset = scrolled.PreviewViewport.VerticalOffset;
-      expect(Math.abs(offset - Math.round(offset)), 'Exercise an actual fractional-DIP native scroll offset').toBeGreaterThan(.01);
-      expect(scrolled.PreviewViewport.ViewChangeVersion).toBeGreaterThan(resized.PreviewViewport.ViewChangeVersion);
       await page.mouse.move(1, 1); await fresh(page);
       await observe('preview-scrolled-85', 'preview', .85, resized.PreviewGpu.SubmittedFrames);
 
@@ -217,6 +264,8 @@ for (const density of [1.25, 2]) test.describe('Native physical density ' + dens
         expect(frame.designLayoutBuilds).toBe(imported.DesignLayoutBuilds);
         if (frame.mode === 'preview') expect(frame.previewIndexBuilds).toBe(initialPreview.PreviewIndexBuilds);
       }
+      expect(Math.abs(offset - Math.round(offset)), 'Exercise an actual fractional-DIP native scroll offset').toBeGreaterThan(.01);
+      expect(scrolled.PreviewViewport.ViewChangeVersion).toBeGreaterThan(resized.PreviewViewport.ViewChangeVersion);
     } finally {
       await artifact(info, 'native-webgpu-pixel-density.json', { density, report, frames, wheelEvents,
         final: page.isClosed() ? null : await state(page) });
