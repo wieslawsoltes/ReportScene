@@ -90,7 +90,7 @@ A visible band's dot grid is one shader primitive, rather than one command per p
 
 ## Viewport sizing and lifecycle
 
-The outer `ReportCanvasElement` keeps the logical page extent and pointer coordinate system. Its translated GPU child covers only the visible DIP rectangle. Scrolling changes the child position and initial drawing translation; it does not allocate a full-document render target. This matters particularly for long reports and 400% zoom.
+The outer `ReportCanvasElement` keeps the logical page extent and pointer coordinate system. Its GPU child covers only the visible DIP rectangle, expanded to root physical-pixel boundaries. The child uses a physical-pixel layout with an inverse root-scale transform to account for Uno 7.0.32's custom-canvas allocation behavior. Scrolling changes the child position and initial drawing translation; it does not allocate a full-document render target. This matters particularly for long reports and 400% zoom. The [pixel-density guide](webgpu-pixel-density.md) explains the high-DPI sharpness correction, upstream compatibility dependency and presented-pixel regression checks.
 
 Content, scrolling and native layout changes coalesce through the dispatcher. Empty or unavailable layout defers rendering. There is no idle render loop. Existing prepared-page indexes and authoring layouts remain reusable through viewport changes.
 
@@ -129,7 +129,7 @@ The design and preview views expose `GpuSnapshot` and `RenderingError`. Designer
 
 - native initialization state and `Waiting`, `WebGPU`, `Unavailable`, `Failed` or `Disposed` state;
 - submitted frame count;
-- target pixel dimensions and visible DIP bounds;
+- target pixel dimensions, requested/expanded DIP bounds, root rasterization scale and observed child presentation bounds;
 - CPU record/upload/submission duration;
 - primitive count, draw-call count, texture uploads, uploaded bytes and atlas-page count;
 - device texture dimension limit, tile size, retained image/mask bytes and CPU image staging bytes.
@@ -149,7 +149,7 @@ The initial drawing-contract commit `31eeda45c3201a080f80bc8c7bcfe14c5016e401` p
 
 The full Uno 7 / Skia 4 commit `5f35f5fe41490fa9bfd42e9a11dc262ea683485a` passed core conformance, benchmarks, all 54 core package checks, the desktop build, all 14 reusable packages, browser publication and all 37 original production-shader pixel assertions in [run 43109136759](https://github.com/wieslawsoltes/ReportScene/actions/runs/43109136759). Skia 4 typeface identity and immutable path-builder changes and Uno 7 layout signatures are integrated. Subsequent actual-application evidence identified the Chromium software-presentation configuration and native 2D depth-slice sentinel issues described above; both have explicit fixes and stronger validation gates.
 
-The expanded core suite covers image staging, color and mip transitions, deterministic glyph coverage and exports, collapsed oval strokes, positive-area clipping and bounded text-cache ownership/exactness. Browser conformance executes the platform-applicable subset; its recorded count comes from the actual WebAssembly application. The complete application gate requires all 79 scenarios across eight shards. Existing browser pixel assertions, required scenario names and the zero-retry policy remain mandatory. See [validation and reproducibility](validation.md) for commands, package checks and artifact contents, and the [PR checks](https://github.com/wieslawsoltes/ReportScene/pull/26/checks) for current revision-specific results.
+The expanded core suite covers image staging, color and mip transitions, deterministic glyph coverage and exports, collapsed oval strokes, positive-area clipping, physical-pixel viewport alignment and bounded text-cache ownership/exactness. Browser conformance executes the platform-applicable subset; its recorded count comes from the actual WebAssembly application. The complete application gate requires all 81 scenarios across eight shards, including the later high-DPI sharpness correction. Existing browser pixel assertions, required scenario names and the zero-retry policy remain mandatory. See [validation and reproducibility](validation.md) for commands, package checks and artifact contents, and the [repository checks](https://github.com/wieslawsoltes/ReportScene/actions/workflows/validate.yml) for current revision-specific results.
 
 The migration runs the same gates against Uno 7 / Skia 4, plus:
 
