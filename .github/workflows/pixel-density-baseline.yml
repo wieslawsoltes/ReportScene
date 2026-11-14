@@ -1,0 +1,52 @@
+name: Qualify physical-pixel regression baseline
+on:
+  push:
+    branches: [qualification/webgpu-pixel-density-baseline]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Record the exact historical publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p artifacts/dpr-baseline
+          gh api repos/wieslawsoltes/ReportScene/actions/artifacts/14025329126 > artifacts/dpr-baseline/app-artifact.json
+          node -e "const a=require('./artifacts/dpr-baseline/app-artifact.json'); if(a.workflow_run.head_sha!=='b8911d6a79f3b0f494f8d39401b4d8cfd1d2bc3f'||a.digest!=='sha256:7122a2e3ecf85e541c64ba7f0347090e2d9d5f9161b404e7df7cd68151d9ae80'||a.expired)process.exit(1)"
+          git rev-parse HEAD HEAD^{tree} > artifacts/dpr-baseline/test-source-revision.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-app
+          run-id: 43403424896
+          github-token: ${{ github.token }}
+          path: artifacts/testsite/ReportScene
+      - name: Install pinned browser test dependencies
+        run: |
+          npm ci --prefix tests/browser
+          cd tests/browser
+          npx playwright install --with-deps chromium
+      - name: Require the unchanged tests to expose the historical density defect
+        shell: bash
+        run: |
+          python3 -m http.server 8000 --directory artifacts/testsite > artifacts/dpr-baseline/http.log 2>&1 &
+          cd tests/browser
+          set +e
+          npx playwright test webgpu-pixel-density.spec.mjs --reporter=json --output=../../artifacts/dpr-baseline/evidence > ../../artifacts/dpr-baseline/report.json
+          baseline_exit=$?
+          set -e
+          test "$baseline_exit" -eq 1
+          node verify-pixel-density-baseline.mjs ../../artifacts/dpr-baseline/evidence ../../artifacts/dpr-baseline/report.json > ../../artifacts/dpr-baseline/verified-summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webgpu-pixel-density-baseline
+          path: artifacts/dpr-baseline
+          if-no-files-found: error

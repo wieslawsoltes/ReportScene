@@ -198,8 +198,6 @@ for (const density of [1.25, 2]) test.describe('Native physical density ' + dens
         if (Math.abs(offset - Math.round(offset)) > .01) break;
       }
       const offset = scrolled.PreviewViewport.VerticalOffset;
-      expect(Math.abs(offset - Math.round(offset)), 'Exercise an actual fractional-DIP native scroll offset').toBeGreaterThan(.01);
-      expect(scrolled.PreviewViewport.ViewChangeVersion).toBeGreaterThan(resized.PreviewViewport.ViewChangeVersion);
       await page.mouse.move(1, 1); await fresh(page);
       await observe('preview-scrolled-85', 'preview', .85, resized.PreviewGpu.SubmittedFrames);
 
@@ -217,6 +215,8 @@ for (const density of [1.25, 2]) test.describe('Native physical density ' + dens
         expect(frame.designLayoutBuilds).toBe(imported.DesignLayoutBuilds);
         if (frame.mode === 'preview') expect(frame.previewIndexBuilds).toBe(initialPreview.PreviewIndexBuilds);
       }
+      expect(Math.abs(offset - Math.round(offset)), 'Exercise an actual fractional-DIP native scroll offset').toBeGreaterThan(.01);
+      expect(scrolled.PreviewViewport.ViewChangeVersion).toBeGreaterThan(resized.PreviewViewport.ViewChangeVersion);
     } finally {
       await artifact(info, 'native-webgpu-pixel-density.json', { density, report, frames, wheelEvents,
         final: page.isClosed() ? null : await state(page) });
